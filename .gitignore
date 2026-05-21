@@ -5,6 +5,9 @@ __pycache__/
 .venv/
 venv/
 artifacts/
+data/*.parquet
+.env
+.env.local
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal

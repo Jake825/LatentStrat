@@ -1,8 +1,14 @@
+# ruff: noqa: E402, I001
 """Command-line entry points for LatentStrat."""
 
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Annotated
+
+from latentstrat.secrets import load_environment
+
+load_environment()
 
 import pandas as pd
 import typer
@@ -21,6 +27,12 @@ from latentstrat.data import (
 )
 from latentstrat.evaluation import evaluate_model
 from latentstrat.experiments import build_evidence_packet
+from latentstrat.features import (
+    build_event_feature_table,
+    build_season_feature_table,
+    train_feature_file,
+    write_feature_table,
+)
 from latentstrat.inspection import inspect_embeddings
 from latentstrat.training import train_model
 
@@ -73,6 +85,62 @@ def smoke_test(event_key: str | None = None) -> None:
     typer.echo(
         f"Smoke test complete: rows={len(prepared)}, teams={len(team_map)}, "
         f"initial_loss={diagnostics.initial_loss:.4f}, final_loss={diagnostics.final_loss:.4f}"
+    )
+
+
+@app.command("build-features")
+def build_features(
+    event_key: Annotated[
+        str | None, typer.Option("--event-key", help="Build features for a single event key.")
+    ] = None,
+    season: Annotated[int, typer.Option("--season", help="Build features for this season.")] = 2026,
+    output: Annotated[
+        Path | None, typer.Option("--output", help="Output Parquet feature file.")
+    ] = None,
+    event_limit: Annotated[
+        int | None,
+        typer.Option("--event-limit", help="Limit season imports for quick validation runs."),
+    ] = None,
+) -> None:
+    """Build a reusable Parquet feature file from TBA data."""
+    opts = default_options().model_copy(update={"season": season})
+    provider = _provider()
+    if event_key is not None:
+        table = build_event_feature_table(event_key, opts, provider=provider)
+        output_path = output or Path(f"data/features_{event_key}.parquet")
+    else:
+        table = build_season_feature_table(
+            season, opts, provider=provider, event_limit=event_limit
+        )
+        output_path = output or Path(f"data/features_{season}.parquet")
+    path = write_feature_table(table, output_path)
+    typer.echo(f"Feature table written: {path} rows={len(table)} columns={len(table.columns)}")
+
+
+@app.command("train-features")
+def train_features(
+    input_path: Annotated[Path, typer.Argument(help="Input Parquet feature file.")],
+    output: Annotated[
+        Path, typer.Option("--output", help="Directory for training artifacts.")
+    ] = Path("artifacts/features_run"),
+    epochs: Annotated[
+        int | None, typer.Option("--epochs", help="Override training epochs.")
+    ] = None,
+    mini_batch_size: Annotated[
+        int | None, typer.Option("--mini-batch-size", help="Override training mini-batch size.")
+    ] = None,
+) -> None:
+    """Train LatentStrat from a local Parquet feature file."""
+    updates = {}
+    if epochs is not None:
+        updates["epochs"] = epochs
+    if mini_batch_size is not None:
+        updates["mini_batch_size"] = mini_batch_size
+    opts = default_options().model_copy(update=updates)
+    result = train_feature_file(input_path, opts, output_dir=output)
+    typer.echo(
+        f"Feature training complete: rows={len(result.prepared)}, "
+        f"teams={len(result.team_index_map)}, final_loss={result.diagnostics.final_loss:.4f}"
     )
 
 
