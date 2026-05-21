@@ -1,0 +1,7 @@
+interface:
+  display_name: "FRC Time-Aware Analysis"
+  short_description: "Prevent temporal leakage in FRC analytics"
+  default_prompt: "Use $frc-time-aware-analysis to set known_as_of boundaries for this FRC analysis."
+
+policy:
+  allow_implicit_invocation: true

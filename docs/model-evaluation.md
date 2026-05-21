@@ -1,0 +1,80 @@
+# Model Evaluation
+
+LatentStrat evaluation should answer whether the model produces useful,
+calibrated predictions and interpretable learned representations. Raw accuracy
+is not enough for FRC match modeling.
+
+## Binary Outcomes
+
+For win probabilities and other binary targets, prefer probability-aware
+metrics:
+
+- **Brier score**: mean squared probability error.
+- **Log loss**: confidence-sensitive probability quality.
+- **Calibration bins**: predicted probability compared with observed frequency.
+
+A model that predicts 75 percent win probability should win roughly 75 percent
+of those cases over a well-populated calibration bin. Check bin counts before
+trusting sparse regions of the curve.
+
+## Continuous Targets
+
+For score-like targets, inspect:
+
+- RMSE for large misses.
+- MAE for point-unit interpretation.
+- Availability slices when optional sources such as scouting are present.
+
+Continuous and binary targets should be interpreted separately. A model can
+improve score prediction while hurting win-probability calibration, or the
+reverse.
+
+## Baselines And Controls
+
+Current implemented baselines are:
+
+- Mean baselines.
+- Ridge match-OPR baselines.
+
+Do not describe Statbotics as an implemented baseline unless runtime code is
+added for that integration. Statbotics can still be used as an external
+comparison if the endpoint, field timing, and join keys are defined explicitly.
+
+Evidence packets also compare the model with controls such as shuffled team
+slots and null-label controls. Treat gains with suspicion if they disappear
+against controls, only appear in tiny slices, or rely on features that were not
+available at prediction time.
+
+## Attention And Zero-Out Diagnostics
+
+PMA attention tables and zero-out diagnostics are architecture-specific review
+tools. They can show which slots influenced pooled alliance representations and
+how predictions respond when a slot is masked.
+
+These artifacts are diagnostics, not causal proof. Use them alongside metrics,
+calibration, feature availability, and scouting context.
+
+## Embeddings
+
+Embedding inspection exports team vectors, PCA projections, cosine neighbors,
+archetype similarities, PMA attention, and zero-out diagnostics. Use these to
+form hypotheses about learned structure:
+
+- PCA can reveal broad clusters but compresses the full embedding space.
+- Cosine neighbors can suggest teams with similar learned profiles.
+- Archetypes depend on the chosen reference statistics.
+
+Embedding stories should be supported by model metrics and source data. Do not
+treat embedding coordinates as direct scouting measurements.
+
+## Review Checklist
+
+Before claiming a model or feature change improved LatentStrat:
+
+- Compare Brier score and log loss for binary targets.
+- Review calibration bins and bin counts.
+- Compare RMSE and MAE for continuous targets.
+- Compare against mean and ridge match-OPR baselines.
+- Review shuffled/null controls when available.
+- Check availability slices for optional scouting or enrichment features.
+- Confirm feature timing with the intended prediction point.

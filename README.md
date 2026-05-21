@@ -49,4 +49,19 @@ Optional scouting data lives in `data/scouting.db`. `build-features` merges it
 into Parquet when the database exists; training still reads only the Parquet
 feature file.
 
+## Docs
+
+- [Feature pipeline](docs/feature-pipeline.md): TBA match spine, scouting joins,
+  Parquet boundaries, team indexing, and tensor-ready data.
+- [Training and validation](docs/training-and-validation.md): splits,
+  normalization, baselines, controls, and training workflow.
+- [Model structure](docs/model-structure.md): Set Transformer architecture and
+  tensor contract.
+- [Model evaluation](docs/model-evaluation.md): calibration, baselines,
+  controls, evidence packets, and embeddings.
+- [Embedding inspection](docs/embedding-inspection.md): PCA, cosine neighbors,
+  archetypes, PMA attention, and zero-out diagnostics.
+- [Scouting data layer](docs/scouting-data-layer.md): SQLite scouting schema and
+  merge behavior.
+
 The current codebase treats the Python implementation as the source of truth.

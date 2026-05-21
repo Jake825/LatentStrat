@@ -1,0 +1,7 @@
+interface:
+  display_name: "FRC Scouting Data Types"
+  short_description: "Classify scouting data for LatentStrat"
+  default_prompt: "Use $frc-scouting-data-types to classify these scouting fields and map them to LatentStrat tables."
+
+policy:
+  allow_implicit_invocation: true

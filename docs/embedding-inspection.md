@@ -4,6 +4,10 @@ Embedding inspection is the post-training workflow for understanding the learned
 `team_embedding` weight matrix and the PMA attention tables. It does not retrain
 the model.
 
+Read embedding outputs alongside the broader guidance in
+[Model Evaluation](model-evaluation.md), especially calibration, baselines,
+controls, and feature availability.
+
 ## Entry Point
 
 Run the CLI command:

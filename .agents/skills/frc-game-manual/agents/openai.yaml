@@ -1,0 +1,7 @@
+interface:
+  display_name: "FRC Game Manual"
+  short_description: "Search and interpret FRC rules"
+  default_prompt: "Use $frc-game-manual to answer this FRC rules question with citations to the manual."
+
+policy:
+  allow_implicit_invocation: true

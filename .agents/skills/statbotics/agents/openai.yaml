@@ -1,0 +1,7 @@
+interface:
+  display_name: "Statbotics"
+  short_description: "Use FRC EPA and Statbotics analytics"
+  default_prompt: "Use $statbotics to query EPA, prevent data leakage, and build FRC prediction features."
+
+policy:
+  allow_implicit_invocation: true

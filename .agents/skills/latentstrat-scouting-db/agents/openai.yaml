@@ -1,0 +1,7 @@
+interface:
+  display_name: "LatentStrat Scouting DB"
+  short_description: "Understand scouting schema and merges"
+  default_prompt: "Use $latentstrat-scouting-db to explain how this scouting field maps into LatentStrat."
+
+policy:
+  allow_implicit_invocation: true

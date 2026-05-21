@@ -6,6 +6,9 @@ fast, and allows offline training from a local Parquet feature file.
 
 ## 1. Feature Building
 
+Detailed feature construction, scouting merge prefixes, Parquet dtype behavior,
+and team indexing are covered in [Feature Pipeline](feature-pipeline.md).
+
 Run:
 
 ```bash
@@ -21,7 +24,9 @@ latentstrat build-features --season 2026 --output data/features_2026.parquet
    explicit `pyarrow` engine.
 
 Parquet is used because CSV cannot reliably preserve nullable integer and
-timestamp dtypes across the feature boundary.
+timestamp dtypes across the feature boundary. Tensor-bound values are converted
+deliberately when `MatchTensorDataset` builds PyTorch tensors; Parquet columns
+are not blanket-cast to `float32`.
 
 Use `latentstrat init-scouting-db` to create the optional SQLite scouting
 database. Training never queries SQLite directly.
@@ -37,7 +42,8 @@ automatically receive `sigma = 1.0` to prevent division-by-zero failures.
 
 To map string FRC team keys to contiguous integer tensors, `make_team_index_map`
 runs in memory after loading the Parquet file. This ensures 0-based integer
-indices match the teams present in that specific training run.
+indices match the teams present in that specific training run. Unknown teams
+require rebuilding the mapping or a deliberate future inference policy.
 
 ## 3. PyTorch Training Loop
 
@@ -60,7 +66,7 @@ latentstrat train-features data/features_2026.parquet
 `fit_baselines` computes:
 
 - A `MeanBaseline`, using the mean of training targets.
-- A `RidgeMatchOPR` baseline, using a sparse match design matrix and
+- A ridge match-OPR-style baseline, using a sparse match design matrix and
   `sklearn.linear_model.Ridge(fit_intercept=False, solver="sparse_cg")`.
 
 `build_evidence_packet` compares the official model against:

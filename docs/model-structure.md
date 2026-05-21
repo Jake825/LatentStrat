@@ -6,6 +6,9 @@ blue teams. The model encodes both alliances as unordered sets, lets each
 alliance attend to the other, pools each side into a fixed-length vector, and
 predicts multi-task match targets.
 
+Agent-facing architecture guidance lives in
+[`$pytorch-set-transformer`](../.agents/skills/pytorch-set-transformer/SKILL.md).
+
 ## Symbols
 
 - `N`: total number of indexed teams.
@@ -78,6 +81,17 @@ The multi-task heads generate predictions:
 pred.cont_z = cont_head(z_match)
 pred.bin_logits = bin_head(z_match)
 ```
+
+## Tensor Contract
+
+The current model expects complete red and blue team index tensors shaped
+`[B, 3]`. Team indices are generated from `frc####` keys during training and are
+fed to `nn.Embedding` as `torch.long` tensors.
+
+There is no padding mask or ghost-team embedding in the current architecture.
+Training and evaluation require nonmissing team indices. The `zero_slot`
+mechanism is for diagnostics that intentionally mask one slot during analysis;
+it is not general missing-team handling.
 
 ## Loss And Active-Team Regularization
 

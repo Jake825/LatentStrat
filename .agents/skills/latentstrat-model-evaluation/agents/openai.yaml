@@ -1,0 +1,7 @@
+interface:
+  display_name: "LatentStrat Model Evaluation"
+  short_description: "Interpret LatentStrat metrics and embeddings"
+  default_prompt: "Use $latentstrat-model-evaluation to evaluate LatentStrat training runs and artifacts."
+
+policy:
+  allow_implicit_invocation: true

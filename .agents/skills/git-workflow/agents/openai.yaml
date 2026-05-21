@@ -1,0 +1,7 @@
+interface:
+  display_name: "Git Workflow"
+  short_description: "Work safely with Git state and releases"
+  default_prompt: "Use $git-workflow to inspect repo state, prepare commits, and plan release-safe Git operations."
+
+policy:
+  allow_implicit_invocation: true

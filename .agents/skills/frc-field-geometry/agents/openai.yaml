@@ -1,0 +1,7 @@
+interface:
+  display_name: "FRC Field Geometry"
+  short_description: "Use FRC field coordinates and geometry"
+  default_prompt: "Use $frc-field-geometry to reason about FRC field coordinates, paths, poses, and spatial analysis."
+
+policy:
+  allow_implicit_invocation: true

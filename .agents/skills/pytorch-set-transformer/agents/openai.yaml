@@ -1,0 +1,7 @@
+interface:
+  display_name: "PyTorch Set Transformer"
+  short_description: "Work with LatentStrat model architecture"
+  default_prompt: "Use $pytorch-set-transformer to reason about LatentStrat's Set Transformer model."
+
+policy:
+  allow_implicit_invocation: true
