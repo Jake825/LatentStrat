@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+artifacts/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+tba_cache*
+statbotics_offline_cache/

@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "latentstrat"
+version = "0.1.0"
+description = "Python port of LatentStrat V4 and FRC/TBA support utilities."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "LatentStrat contributors" }]
+dependencies = [
+  "tbapy==1.3.2",
+  "statbotics==3.0.0",
+  "requests-cache>=1.2",
+  "diskcache>=5.6",
+  "pydantic>=2",
+  "pandas>=2",
+  "numpy>=1.26",
+  "scipy>=1.11",
+  "torch>=2.2",
+  "typer>=0.12",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "vcrpy>=6",
+  "ruff>=0.6",
+]
+
+[project.scripts]
+latentstrat = "latentstrat.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/frc", "src/latentstrat"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
