@@ -16,6 +16,7 @@ import typer
 from frc.datastore import FRCDataStore
 from frc.importers import TBAImporter
 from frc.providers.tba_provider import TbaProvider
+from frc.scouting import create_db_and_tables
 from latentstrat.baselines import fit_baselines
 from latentstrat.config import LatentStratOptions, default_options
 from latentstrat.data import (
@@ -101,20 +102,50 @@ def build_features(
         int | None,
         typer.Option("--event-limit", help="Limit season imports for quick validation runs."),
     ] = None,
+    scouting_db: Annotated[
+        Path, typer.Option("--scouting-db", help="Optional SQLite scouting database.")
+    ] = Path("data/scouting.db"),
+    include_scouting: Annotated[
+        bool,
+        typer.Option(
+            "--include-scouting/--no-scouting",
+            help="Merge scouting rows into the Parquet feature table when available.",
+        ),
+    ] = True,
 ) -> None:
     """Build a reusable Parquet feature file from TBA data."""
     opts = default_options().model_copy(update={"season": season})
     provider = _provider()
+    scouting_path = scouting_db if include_scouting and scouting_db.exists() else None
+    if include_scouting and scouting_path is None:
+        typer.echo(f"Scouting DB not found at {scouting_db}; building TBA-only features.")
     if event_key is not None:
-        table = build_event_feature_table(event_key, opts, provider=provider)
+        table = build_event_feature_table(
+            event_key, opts, provider=provider, scouting_db_path=scouting_path
+        )
         output_path = output or Path(f"data/features_{event_key}.parquet")
     else:
         table = build_season_feature_table(
-            season, opts, provider=provider, event_limit=event_limit
+            season,
+            opts,
+            provider=provider,
+            event_limit=event_limit,
+            scouting_db_path=scouting_path,
         )
         output_path = output or Path(f"data/features_{season}.parquet")
     path = write_feature_table(table, output_path)
     typer.echo(f"Feature table written: {path} rows={len(table)} columns={len(table.columns)}")
+
+
+@app.command("init-scouting-db")
+def init_scouting_db(
+    path: Annotated[
+        Path, typer.Option("--path", help="SQLite scouting database path.")
+    ] = Path("data/scouting.db"),
+) -> None:
+    """Create the local SQLite scouting database schema."""
+    db_path = create_db_and_tables(path)
+    typer.echo(f"Scouting database initialized: {db_path}")
 
 
 @app.command("train-features")

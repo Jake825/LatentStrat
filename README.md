@@ -32,6 +32,7 @@ The CLI loads `.env` automatically. `.env` is ignored by Git.
 
 ```bash
 latentstrat api-smoke
+latentstrat init-scouting-db --path data/scouting.db
 latentstrat build-features --event-key 2026ilch --output data/features_2026ilch.parquet
 latentstrat train-features data/features_2026ilch.parquet --output artifacts/features_run
 latentstrat smoke-test
@@ -43,5 +44,9 @@ latentstrat build-evidence-packet
 The preferred ML loop is to run `build-features` after data changes, then run
 `train-features` repeatedly from the local Parquet file. Python also keeps
 SQLite/disk caches for raw provider calls.
+
+Optional scouting data lives in `data/scouting.db`. `build-features` merges it
+into Parquet when the database exists; training still reads only the Parquet
+feature file.
 
 The current codebase treats the Python implementation as the source of truth.

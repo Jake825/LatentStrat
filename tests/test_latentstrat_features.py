@@ -1,12 +1,29 @@
 import os
+import sqlite3
 
 import pandas as pd
 import pytest
+from sqlmodel import Session
 from typer.testing import CliRunner
 
+from frc.scouting import (
+    EventScouting,
+    MatchAllianceScouting,
+    MatchScouting,
+    TeamEventScouting,
+    TeamMatchScouting,
+    TeamScouting,
+    create_db_and_tables,
+    create_scouting_engine,
+)
 from latentstrat.cli import app
 from latentstrat.config import default_options
-from latentstrat.features import read_feature_table, train_feature_table, write_feature_table
+from latentstrat.features import (
+    merge_scouting_features,
+    read_feature_table,
+    train_feature_table,
+    write_feature_table,
+)
 from latentstrat.secrets import load_environment
 
 
@@ -65,6 +82,9 @@ def test_dotenv_loader_hydrates_tba_key_without_committed_secret(tmp_path, monke
 def test_feature_parquet_round_trip_preserves_source_table_shape(tmp_path):
     table = _feature_table()
     table["red_team_1_idx"] = pd.Series([0] * len(table), dtype="Int64")
+    table["red_team_1_match_scout_teleop_pieces_scored"] = pd.Series(
+        [7] * len(table), dtype="Int64"
+    )
     path = write_feature_table(table, tmp_path / "features.parquet")
 
     loaded = read_feature_table(path)
@@ -74,10 +94,15 @@ def test_feature_parquet_round_trip_preserves_source_table_shape(tmp_path):
     assert "red_team_1_idx" not in loaded.columns
     assert not any(column.endswith("_idx") for column in loaded.columns)
     assert loaded["red_team_1_key"].iloc[0] == "frc1"
+    assert "red_team_1_match_scout_teleop_pieces_scored" in loaded.columns
+    assert str(loaded["red_team_1_match_scout_teleop_pieces_scored"].dtype) == "Int64"
 
 
 def test_train_feature_table_adds_indices_and_writes_artifacts(tmp_path):
     table = _feature_table()
+    table["red_team_1_match_scout_teleop_pieces_scored"] = pd.Series(
+        [7] * len(table), dtype="Int64"
+    )
     output = tmp_path / "artifacts"
     opts = default_options().model_copy(
         update={"epochs": 1, "mini_batch_size": 4, "use_early_stopping": False}
@@ -99,6 +124,92 @@ def test_train_feature_table_adds_indices_and_writes_artifacts(tmp_path):
     assert (output / "feature_binary_metrics.csv").exists()
     assert (output / "feature_set_attention.csv").exists()
     assert (output / "feature_zero_out_diagnostics.csv").exists()
+
+
+def test_init_scouting_db_creates_expected_tables(tmp_path):
+    db_path = create_db_and_tables(tmp_path / "scouting.db")
+    with sqlite3.connect(db_path) as connection:
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "select name from sqlite_master where type='table'"
+            ).fetchall()
+        }
+
+    assert {
+        "team_scouting",
+        "event_scouting",
+        "match_scouting",
+        "team_event_scouting",
+        "match_alliance_scouting",
+        "team_match_scouting",
+    }.issubset(tables)
+
+
+def test_init_scouting_db_cli_creates_database(tmp_path):
+    db_path = tmp_path / "scouting.db"
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["init-scouting-db", "--path", str(db_path)])
+
+    assert result.exit_code == 0, result.output
+    assert db_path.exists()
+
+
+def test_merge_scouting_features_adds_prefixed_columns(tmp_path):
+    db_path = create_db_and_tables(tmp_path / "scouting.db")
+    engine = create_scouting_engine(db_path)
+    with Session(engine) as session:
+        session.add(EventScouting(event_key="2026features", carpet_condition="New"))
+        session.add(
+            MatchScouting(
+                match_key="2026features_qm1",
+                event_key="2026features",
+                field_fault_occurred=True,
+            )
+        )
+        session.add(TeamScouting(team_key="frc1", drive_base="Swerve", robot_weight_lbs=120.5))
+        session.add(
+            TeamEventScouting(
+                team_key="frc1", event_key="2026features", passed_inspection=True
+            )
+        )
+        session.add(
+            MatchAllianceScouting(
+                match_key="2026features_qm1",
+                alliance_color="red",
+                coordinated_auto_run=True,
+            )
+        )
+        session.add(
+            TeamMatchScouting(
+                team_key="frc1",
+                match_key="2026features_qm1",
+                alliance_color="red",
+                teleop_pieces_scored=7,
+                played_defense=True,
+            )
+        )
+        session.commit()
+
+    merged = merge_scouting_features(_feature_table(), db_path)
+    first = merged.iloc[0]
+
+    assert first["event_scout_carpet_condition"] == "New"
+    assert bool(first["match_scout_field_fault_occurred"])
+    assert bool(first["red_alliance_scout_coordinated_auto_run"])
+    assert first["red_team_1_pit_drive_base"] == "Swerve"
+    assert bool(first["red_team_1_event_scout_passed_inspection"])
+    assert int(first["red_team_1_match_scout_teleop_pieces_scored"]) == 7
+    assert bool(first["red_team_1_match_scout_played_defense"])
+
+
+def test_missing_scouting_db_leaves_feature_table_unchanged(tmp_path):
+    table = _feature_table()
+
+    merged = merge_scouting_features(table, tmp_path / "missing.db")
+
+    pd.testing.assert_frame_equal(merged, table)
 
 
 def test_train_features_cli_loads_parquet_and_writes_artifacts(tmp_path):

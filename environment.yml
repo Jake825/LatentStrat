@@ -19,6 +19,7 @@ dependencies:
       - diskcache
       - pydantic>=2
       - python-dotenv
+      - sqlmodel>=0.0.22
       - typer
       - pytest
       - vcrpy
