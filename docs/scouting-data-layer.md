@@ -5,6 +5,9 @@ is separate from PyTorch training: scouting applications write normalized rows t
 SQLite, then `build-features` merges those rows into a flat Parquet feature file.
 Training reads only Parquet.
 
+For importer examples and key-normalization rules, see
+[Scouting Data Ingestion Guide](scouting-data-ingestion.md).
+
 ## Schema
 
 The scouting schema mirrors TBA's key hierarchy:
