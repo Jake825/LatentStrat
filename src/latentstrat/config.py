@@ -29,8 +29,11 @@ class LatentStratOptions(BaseModel):
     epochs: int = 200
     mini_batch_size: int = 256
     smoke_mini_batch_size: int = 64
+    eval_batch_size: int = 1024
     dataloader_num_workers: int = 0
     device: str = "auto"
+    use_amp: bool | str = "auto"
+    compile_model: bool | str = "auto"
     use_early_stopping: bool = True
     early_stopping_patience: int = 15
     early_stopping_min_delta: float = 1e-4

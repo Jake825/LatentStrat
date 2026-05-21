@@ -6,6 +6,8 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+import torch
+from torch.utils.data import DataLoader, TensorDataset
 
 from latentstrat.baselines import Baselines
 from latentstrat.config import LatentStratOptions, default_options
@@ -209,32 +211,74 @@ def set_attention_table(
     return pd.DataFrame(rows)
 
 
+def _predict_batched(
+    model: SetTransformerModel,
+    red: np.ndarray,
+    blue: np.ndarray,
+    opts: LatentStratOptions | None = None,
+    **forward_kwargs,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    opts = opts or default_options()
+    device = next(model.parameters()).device
+    dataset = TensorDataset(
+        torch.as_tensor(red, dtype=torch.long),
+        torch.as_tensor(blue, dtype=torch.long),
+    )
+    loader = DataLoader(
+        dataset,
+        batch_size=max(int(opts.eval_batch_size), 1),
+        shuffle=False,
+        num_workers=opts.dataloader_num_workers,
+        pin_memory=device.type == "cuda",
+    )
+    was_training = model.training
+    model.eval()
+    cont_chunks = []
+    bin_chunks = []
+    red_pma_chunks = []
+    blue_pma_chunks = []
+    non_blocking = device.type == "cuda"
+    with torch.inference_mode():
+        for batch_red, batch_blue in loader:
+            pred = model(
+                batch_red.to(device, non_blocking=non_blocking),
+                batch_blue.to(device, non_blocking=non_blocking),
+                **forward_kwargs,
+            )
+            cont_chunks.append(pred.cont_z.detach().cpu().numpy())
+            bin_chunks.append(pred.bin_logits.detach().cpu().numpy())
+            red_pma_chunks.append(pred.red_pma_weights.detach().cpu().numpy())
+            blue_pma_chunks.append(pred.blue_pma_weights.detach().cpu().numpy())
+    if was_training:
+        model.train()
+    return (
+        np.concatenate(cont_chunks, axis=0),
+        np.concatenate(bin_chunks, axis=0),
+        np.concatenate(red_pma_chunks, axis=0),
+        np.concatenate(blue_pma_chunks, axis=0),
+    )
+
+
 def _predict_cont(
     model: SetTransformerModel,
     red: np.ndarray,
     blue: np.ndarray,
     target_stats: TargetStats,
+    opts: LatentStratOptions | None = None,
     *,
     pma_mode: str = "learned",
     red_zero_slot: int = 0,
     blue_zero_slot: int = 0,
 ) -> np.ndarray:
-    import torch
-
-    device = next(model.parameters()).device
-    was_training = model.training
-    model.eval()
-    with torch.inference_mode():
-        pred = model(
-            torch.as_tensor(red, dtype=torch.long, device=device),
-            torch.as_tensor(blue, dtype=torch.long, device=device),
-            pma_mode=pma_mode,
-            red_zero_slot=red_zero_slot,
-            blue_zero_slot=blue_zero_slot,
-        )
-    if was_training:
-        model.train()
-    pred_z = pred.cont_z.detach().cpu().numpy()
+    pred_z, _, _, _ = _predict_batched(
+        model,
+        red,
+        blue,
+        opts,
+        pma_mode=pma_mode,
+        red_zero_slot=red_zero_slot,
+        blue_zero_slot=blue_zero_slot,
+    )
     return pred_z * target_stats.sigma + target_stats.mu
 
 
@@ -250,7 +294,7 @@ def zero_out_diagnostics(
         return pd.DataFrame(columns=columns)
     red, blue = match_team_matrices(table)
     actual = target_matrix(table, [mapping.target_name for mapping in opts.target_map])
-    baseline = _predict_cont(model, red, blue, target_stats)
+    baseline = _predict_cont(model, red, blue, target_stats, opts)
     baseline_rmse = np.sqrt(
         np.nanmean((baseline[split.validation_mask] - actual[split.validation_mask]) ** 2, axis=0)
     )
@@ -266,6 +310,7 @@ def zero_out_diagnostics(
             red,
             blue,
             target_stats,
+            opts,
             pma_mode=pma_mode,
             red_zero_slot=red_slot,
             blue_zero_slot=blue_slot,
@@ -296,29 +341,17 @@ def evaluate_model(
     opts: LatentStratOptions | None = None,
     baselines: Baselines | None = None,
 ) -> EvaluationReport:
-    import torch
-
     opts = opts or default_options()
     red, blue = match_team_matrices(table)
-    device = next(model.parameters()).device
-    was_training = model.training
-    model.eval()
-    with torch.inference_mode():
-        raw = model(
-            torch.as_tensor(red, dtype=torch.long, device=device),
-            torch.as_tensor(blue, dtype=torch.long, device=device),
-        )
-    if was_training:
-        model.train()
-    pred_z = raw.cont_z.detach().cpu().numpy()
+    pred_z, bin_logits, red_pma_weights, blue_pma_weights = _predict_batched(model, red, blue, opts)
     pred_cont = pred_z * target_stats.sigma + target_stats.mu
-    pred_bin = sigmoid(raw.bin_logits.detach().cpu().numpy())
+    pred_bin = sigmoid(bin_logits)
     actual_cont = target_matrix(table, [mapping.target_name for mapping in opts.target_map])
     actual_bin = target_matrix(table, list(opts.binary_targets))
     parameter_count = model.parameter_count()
     rows_per_parameter = float(np.sum(split.train_mask) / parameter_count)
-    red_weights = raw.red_pma_weights.detach().cpu().numpy().reshape(len(table), 3)
-    blue_weights = raw.blue_pma_weights.detach().cpu().numpy().reshape(len(table), 3)
+    red_weights = red_pma_weights.reshape(len(table), 3)
+    blue_weights = blue_pma_weights.reshape(len(table), 3)
     return EvaluationReport(
         parameter_count=parameter_count,
         rows_per_parameter=rows_per_parameter,

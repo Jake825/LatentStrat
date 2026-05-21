@@ -1,3 +1,5 @@
+import sys
+
 import numpy as np
 import pandas as pd
 import torch
@@ -7,6 +9,8 @@ from latentstrat.data import Split, apply_target_stats, fit_target_stats
 from latentstrat.evaluation import evaluate_model
 from latentstrat.training import (
     MatchTensorDataset,
+    resolve_amp_enabled,
+    resolve_compile_enabled,
     resolve_device,
     resolve_positive_weights,
     train_model,
@@ -89,6 +93,8 @@ def test_train_model_uses_dataloader_and_returns_diagnostics():
     assert len(history) == 2
     assert diagnostics.iterations >= 4
     assert diagnostics.device == next(model.parameters()).device.type
+    assert diagnostics.amp_enabled is False
+    assert diagnostics.compiled is False
     assert diagnostics.final_loss >= 0
 
 
@@ -123,3 +129,15 @@ def test_positive_weights_handle_balanced_and_degenerate_labels():
 def test_resolve_device_returns_available_torch_device():
     device = resolve_device("auto")
     assert device.type in {"cpu", "cuda", "mps"}
+
+
+def test_acceleration_defaults_are_safe_by_device():
+    opts = default_options()
+
+    assert not resolve_amp_enabled(opts, torch.device("cpu"))
+    assert resolve_amp_enabled(opts, torch.device("cuda"))
+    assert not resolve_amp_enabled(opts, torch.device("mps"))
+
+    assert not resolve_compile_enabled(opts, torch.device("cpu"))
+    assert resolve_compile_enabled(opts, torch.device("cuda")) == (sys.platform != "win32")
+    assert not resolve_compile_enabled(opts, torch.device("mps"))

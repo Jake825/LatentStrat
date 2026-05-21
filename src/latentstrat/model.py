@@ -103,8 +103,9 @@ class SetTransformerModel(nn.Module):
     def team_set(self, team_idx: Tensor, zero_slot: int = 0) -> Tensor:
         x = self.team_embedding(team_idx.long())
         if 1 <= zero_slot <= x.shape[1]:
-            x = x.clone()
-            x[:, zero_slot - 1, :] = 0
+            slot_mask = torch.ones(team_idx.shape, dtype=x.dtype, device=x.device)
+            slot_mask[:, zero_slot - 1] = 0
+            x = x * slot_mask.unsqueeze(-1)
         return x
 
     def pma_pool(self, h: Tensor, pma_mode: str = "learned") -> tuple[Tensor, Tensor]:

@@ -39,6 +39,20 @@ def test_model_is_tolerant_to_alliance_slot_permutation():
     assert torch.allclose(baseline, permuted, atol=1e-5)
 
 
+def test_team_set_zero_slot_creates_true_zero_vector():
+    opts = default_options()
+    model = init_model(4, opts.latent_dim, 4, 1, opts)
+    with torch.no_grad():
+        model.team_embedding.weight[0].fill_(1.0)
+    team_idx = torch.tensor([[0, 1, 2]], dtype=torch.long)
+
+    zeroed = model.team_set(team_idx, zero_slot=1)
+    unzeroed = model.team_set(team_idx, zero_slot=0)
+
+    assert torch.allclose(zeroed[:, 0, :], torch.zeros_like(zeroed[:, 0, :]))
+    assert not torch.allclose(unzeroed[:, 0, :], torch.zeros_like(unzeroed[:, 0, :]))
+
+
 def test_optimizer_groups_do_not_decay_embeddings_biases_or_norms():
     opts = default_options()
     model = init_model(8, opts.latent_dim, 4, 1, opts)

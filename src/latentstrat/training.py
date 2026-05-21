@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+import warnings
 from copy import deepcopy
 from dataclasses import dataclass
 
@@ -40,6 +42,8 @@ class TrainingDiagnostics:
     best_validation_loss: float
     restored_best_validation_model: bool
     device: str
+    amp_enabled: bool
+    compiled: bool
 
 
 class MatchTensorDataset(Dataset):
@@ -97,6 +101,41 @@ def resolve_device(requested: str = "auto") -> torch.device:
     return torch.device("cpu")
 
 
+def resolve_amp_enabled(opts: LatentStratOptions, device: torch.device) -> bool:
+    if isinstance(opts.use_amp, bool):
+        return opts.use_amp and device.type == "cuda"
+    if opts.use_amp != "auto":
+        raise ValueError('use_amp must be a bool or "auto".')
+    return device.type == "cuda"
+
+
+def resolve_compile_enabled(opts: LatentStratOptions, device: torch.device) -> bool:
+    if isinstance(opts.compile_model, bool):
+        return opts.compile_model
+    if opts.compile_model != "auto":
+        raise ValueError('compile_model must be a bool or "auto".')
+    return device.type == "cuda" and sys.platform != "win32"
+
+
+def compile_forward_model(
+    model: SetTransformerModel, opts: LatentStratOptions, device: torch.device
+) -> tuple[torch.nn.Module, bool]:
+    enabled = resolve_compile_enabled(opts, device)
+    if not enabled:
+        return model, False
+    try:
+        return torch.compile(model), True
+    except Exception as exc:
+        if opts.compile_model is True:
+            raise
+        warnings.warn(
+            f"torch.compile failed in auto mode; continuing uncompiled: {exc}",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return model, False
+
+
 def match_team_matrices(table: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
     red_columns = ["red_team_1_idx", "red_team_2_idx", "red_team_3_idx"]
     blue_columns = ["blue_team_1_idx", "blue_team_2_idx", "blue_team_3_idx"]
@@ -123,8 +162,8 @@ def resolve_positive_weights(bin_targets: np.ndarray, opts: LatentStratOptions) 
 def batch_to_device(
     batch: tuple[Tensor, Tensor, Tensor, Tensor], device: torch.device
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-    red, blue, cont, binary = batch
-    return red.to(device), blue.to(device), cont.to(device), binary.to(device)
+    non_blocking = device.type == "cuda"
+    return tuple(tensor.to(device, non_blocking=non_blocking) for tensor in batch)
 
 
 def active_embedding_l2(
@@ -144,9 +183,10 @@ def model_loss(
     bin_targets: Tensor,
     opts: LatentStratOptions | None = None,
     positive_weights: Tensor | None = None,
+    forward_model: torch.nn.Module | None = None,
 ) -> tuple[Tensor, LossMetrics, object]:
     opts = opts or default_options()
-    pred = model(red_team_idx, blue_team_idx)
+    pred = (forward_model or model)(red_team_idx, blue_team_idx)
     if cont_targets.numel() == 0:
         cont_loss = torch.zeros((), dtype=pred.cont_z.dtype, device=pred.cont_z.device)
     else:
@@ -202,20 +242,36 @@ def evaluate_loss(
     opts: LatentStratOptions,
     positive_weights: Tensor,
     device: torch.device,
+    *,
+    forward_model: torch.nn.Module | None = None,
+    amp_enabled: bool = False,
 ) -> float:
     was_training = model.training
     model.eval()
+    active_model = forward_model or model
+    active_model.eval()
     total_loss = 0.0
     total_rows = 0
     with torch.inference_mode():
         for batch in data_loader:
             red, blue, cont, binary = batch_to_device(batch, device)
-            loss, _, _ = model_loss(model, red, blue, cont, binary, opts, positive_weights)
+            with torch.amp.autocast(device_type="cuda", enabled=amp_enabled):
+                loss, _, _ = model_loss(
+                    model,
+                    red,
+                    blue,
+                    cont,
+                    binary,
+                    opts,
+                    positive_weights,
+                    active_model,
+                )
             batch_size = int(red.shape[0])
             total_loss += float(loss.detach().cpu()) * batch_size
             total_rows += batch_size
     if was_training:
         model.train()
+        active_model.train()
     return total_loss / max(total_rows, 1)
 
 
@@ -246,7 +302,10 @@ def train_model(
         opts,
     )
     model.to(device)
+    amp_enabled = resolve_amp_enabled(opts, device)
+    forward_model, compiled = compile_forward_model(model, opts, device)
     optimizer = create_optimizer(model, opts)
+    scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
 
     generator = torch.Generator()
     generator.manual_seed(opts.random_seed)
@@ -256,7 +315,15 @@ def train_model(
     train_eval_loader = _make_loader(dataset, train_rows, opts, shuffle=False, device=device)
     validation_loader = _make_loader(dataset, validation_rows, opts, shuffle=False, device=device)
 
-    initial_loss = evaluate_loss(model, train_eval_loader, opts, positive_weights, device)
+    initial_loss = evaluate_loss(
+        model,
+        train_eval_loader,
+        opts,
+        positive_weights,
+        device,
+        forward_model=forward_model,
+        amp_enabled=amp_enabled,
+    )
     best_model = None
     best_epoch = None
     best_validation = float("inf")
@@ -267,19 +334,45 @@ def train_model(
 
     for epoch in range(1, opts.epochs + 1):
         model.train()
+        forward_model.train()
         for batch in train_loader:
             red, blue, cont, binary = batch_to_device(batch, device)
             optimizer.zero_grad(set_to_none=True)
-            loss, _, _ = model_loss(model, red, blue, cont, binary, opts, positive_weights)
-            loss.backward()
-            optimizer.step()
+            with torch.amp.autocast(device_type="cuda", enabled=amp_enabled):
+                loss, _, _ = model_loss(
+                    model,
+                    red,
+                    blue,
+                    cont,
+                    binary,
+                    opts,
+                    positive_weights,
+                    forward_model,
+                )
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
             iteration += 1
 
-        train_loss = evaluate_loss(model, train_eval_loader, opts, positive_weights, device)
+        train_loss = evaluate_loss(
+            model,
+            train_eval_loader,
+            opts,
+            positive_weights,
+            device,
+            forward_model=forward_model,
+            amp_enabled=amp_enabled,
+        )
         validation_loss = np.nan
         if len(validation_rows):
             validation_loss = evaluate_loss(
-                model, validation_loader, opts, positive_weights, device
+                model,
+                validation_loader,
+                opts,
+                positive_weights,
+                device,
+                forward_model=forward_model,
+                amp_enabled=amp_enabled,
             )
         rows.append({"epoch": epoch, "train_loss": train_loss, "validation_loss": validation_loss})
 
@@ -303,10 +396,26 @@ def train_model(
         model.load_state_dict(best_model)
         restored = True
 
-    final_loss = evaluate_loss(model, train_eval_loader, opts, positive_weights, device)
+    final_loss = evaluate_loss(
+        model,
+        train_eval_loader,
+        opts,
+        positive_weights,
+        device,
+        forward_model=forward_model,
+        amp_enabled=amp_enabled,
+    )
     final_validation = np.nan
     if len(validation_rows):
-        final_validation = evaluate_loss(model, validation_loader, opts, positive_weights, device)
+        final_validation = evaluate_loss(
+            model,
+            validation_loader,
+            opts,
+            positive_weights,
+            device,
+            forward_model=forward_model,
+            amp_enabled=amp_enabled,
+        )
     history = pd.DataFrame(rows)
     diagnostics = TrainingDiagnostics(
         initial_loss=initial_loss,
@@ -320,5 +429,7 @@ def train_model(
         best_validation_loss=float(best_validation if np.isfinite(best_validation) else np.nan),
         restored_best_validation_model=restored,
         device=device.type,
+        amp_enabled=amp_enabled,
+        compiled=compiled,
     )
     return model, history, diagnostics
