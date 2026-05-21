@@ -1,8 +1,8 @@
 """Score-breakdown helpers.
 
-The MATLAB project had year-specific classes. The Python parity layer keeps a
-raw-data-first representation and exposes common helpers used by LatentStrat and
-the analysis tests. Unknown fields are intentionally ignored.
+TBA score breakdowns are year-specific and often gain fields mid-season. The
+helpers keep a raw-data-first representation and expose common fields used by
+LatentStrat and the analysis tests. Unknown fields are intentionally ignored.
 """
 
 from __future__ import annotations
@@ -58,6 +58,8 @@ class BreakdownBase:
 
 class BreakdownFactory:
     @staticmethod
-    def create(year: int | str, data: dict[str, Any] | None, color: str, *args: Any) -> BreakdownBase:
+    def create(
+        year: int | str, data: dict[str, Any] | None, color: str, *args: Any
+    ) -> BreakdownBase:
         _ = year, args
         return BreakdownBase(data or {}, color)

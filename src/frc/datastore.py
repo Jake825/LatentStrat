@@ -1,4 +1,4 @@
-"""In-memory FRC datastore mirroring the MATLAB helper object."""
+"""In-memory FRC datastore used by importers and table builders."""
 
 from __future__ import annotations
 

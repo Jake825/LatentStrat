@@ -1,4 +1,4 @@
-"""LatentStrat V4 Python port."""
+"""LatentStrat FRC match modeling package."""
 
 from latentstrat.config import LatentStratOptions, default_options
 

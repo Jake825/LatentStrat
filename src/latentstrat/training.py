@@ -1,4 +1,4 @@
-"""Training loop and loss functions for LatentStrat V4."""
+"""Training utilities for LatentStrat's native PyTorch workflow."""
 
 from __future__ import annotations
 
@@ -7,10 +7,14 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+import torch
+import torch.nn.functional as F
+from torch import Tensor
+from torch.utils.data import DataLoader, Dataset, Subset
 
 from latentstrat.config import LatentStratOptions, default_options
 from latentstrat.data import Split, target_matrix
-from latentstrat.model import SetTransformerModel, init_model, require_torch
+from latentstrat.model import SetTransformerModel, init_model, optimizer_parameter_groups
 
 
 @dataclass
@@ -35,6 +39,62 @@ class TrainingDiagnostics:
     stop_epoch: int
     best_validation_loss: float
     restored_best_validation_model: bool
+    device: str
+
+
+class MatchTensorDataset(Dataset):
+    """Tensor-backed match dataset for DataLoader-based training."""
+
+    def __init__(
+        self,
+        red_team_idx: Tensor,
+        blue_team_idx: Tensor,
+        cont_targets: Tensor,
+        bin_targets: Tensor,
+    ) -> None:
+        self.red_team_idx = red_team_idx
+        self.blue_team_idx = blue_team_idx
+        self.cont_targets = cont_targets
+        self.bin_targets = bin_targets
+
+    @classmethod
+    def from_table(
+        cls, table: pd.DataFrame, opts: LatentStratOptions | None = None
+    ) -> MatchTensorDataset:
+        opts = opts or default_options()
+        red, blue = match_team_matrices(table)
+        cont_targets = target_matrix(
+            table, [f"{mapping.target_name}_z" for mapping in opts.target_map]
+        )
+        bin_targets = target_matrix(table, list(opts.binary_targets))
+        return cls(
+            red_team_idx=torch.as_tensor(red, dtype=torch.long),
+            blue_team_idx=torch.as_tensor(blue, dtype=torch.long),
+            cont_targets=torch.as_tensor(cont_targets, dtype=torch.float32),
+            bin_targets=torch.as_tensor(bin_targets, dtype=torch.float32),
+        )
+
+    def __len__(self) -> int:
+        return int(self.red_team_idx.shape[0])
+
+    def __getitem__(self, index: int) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        return (
+            self.red_team_idx[index],
+            self.blue_team_idx[index],
+            self.cont_targets[index],
+            self.bin_targets[index],
+        )
+
+
+def resolve_device(requested: str = "auto") -> torch.device:
+    if requested != "auto":
+        return torch.device(requested)
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    mps_backend = getattr(torch.backends, "mps", None)
+    if mps_backend is not None and mps_backend.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
 
 
 def match_team_matrices(table: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
@@ -43,97 +103,120 @@ def match_team_matrices(table: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
     values = table[red_columns + blue_columns].to_numpy(dtype=object)
     if pd.isna(values).any():
         raise ValueError("Training/evaluation requires nonmissing team indices.")
-    red = table[red_columns].to_numpy(dtype=np.int64)
-    blue = table[blue_columns].to_numpy(dtype=np.int64)
-    return red, blue
+    return table[red_columns].to_numpy(dtype=np.int64), table[blue_columns].to_numpy(dtype=np.int64)
 
 
 def resolve_positive_weights(bin_targets: np.ndarray, opts: LatentStratOptions) -> np.ndarray:
     if bin_targets.size == 0:
-        return np.zeros((0,), dtype=float)
+        return np.zeros((0,), dtype=np.float32)
     if isinstance(opts.bin_positive_weights, list):
-        return np.asarray(opts.bin_positive_weights, dtype=float)
+        return np.asarray(opts.bin_positive_weights, dtype=np.float32)
     if opts.bin_positive_weights != "auto":
         raise ValueError('bin_positive_weights must be numeric or "auto".')
     positives = np.sum(bin_targets == 1, axis=0)
     negatives = np.sum(bin_targets == 0, axis=0)
     weights = negatives / np.maximum(positives, 1)
     weights[(positives == 0) | (negatives == 0)] = 1
-    return weights.astype(float)
+    return weights.astype(np.float32)
+
+
+def batch_to_device(
+    batch: tuple[Tensor, Tensor, Tensor, Tensor], device: torch.device
+) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+    red, blue, cont, binary = batch
+    return red.to(device), blue.to(device), cont.to(device), binary.to(device)
+
+
+def active_embedding_l2(
+    model: SetTransformerModel, red_team_idx: Tensor, blue_team_idx: Tensor, coefficient: float
+) -> Tensor:
+    if coefficient == 0:
+        return torch.zeros((), dtype=model.team_embedding.weight.dtype, device=red_team_idx.device)
+    active_teams = torch.unique(torch.cat([red_team_idx.flatten(), blue_team_idx.flatten()]))
+    return coefficient * model.team_embedding(active_teams).pow(2).sum()
 
 
 def model_loss(
     model: SetTransformerModel,
-    red_team_idx,
-    blue_team_idx,
-    cont_targets,
-    bin_targets,
+    red_team_idx: Tensor,
+    blue_team_idx: Tensor,
+    cont_targets: Tensor,
+    bin_targets: Tensor,
     opts: LatentStratOptions | None = None,
-    positive_weights=None,
-) -> tuple[object, LossMetrics, object]:
-    torch = require_torch()
+    positive_weights: Tensor | None = None,
+) -> tuple[Tensor, LossMetrics, object]:
     opts = opts or default_options()
     pred = model(red_team_idx, blue_team_idx)
     if cont_targets.numel() == 0:
         cont_loss = torch.zeros((), dtype=pred.cont_z.dtype, device=pred.cont_z.device)
     else:
-        cont_error = pred.cont_z - cont_targets
-        cont_loss = torch.mean(torch.sum(cont_error**2, dim=1))
+        cont_loss = F.mse_loss(pred.cont_z, cont_targets)
     if bin_targets.numel() == 0:
         bin_loss = torch.zeros((), dtype=pred.cont_z.dtype, device=pred.cont_z.device)
     else:
-        weights = positive_weights
-        if weights is None:
-            weights = torch.ones((bin_targets.shape[1],), dtype=bin_targets.dtype, device=bin_targets.device)
-        logits = pred.bin_logits
-        bce = torch.clamp(logits, min=0) - logits * bin_targets + torch.log1p(torch.exp(-torch.abs(logits)))
-        target_weights = 1 + (weights.view(1, -1) - 1) * bin_targets
-        bin_loss = torch.mean(bce * target_weights)
-    active_teams = torch.unique(torch.cat([red_team_idx.reshape(-1), blue_team_idx.reshape(-1)]))
-    embedding_l2 = opts.l2_embedding * torch.sum(model.team_embedding(active_teams) ** 2)
-    head_l2 = opts.l2_heads * (torch.sum(model.w_cont**2) + torch.sum(model.w_bin**2))
-    set_l2 = torch.zeros((), dtype=pred.cont_z.dtype, device=pred.cont_z.device)
-    for parameter in model.set_l2_parameters():
-        set_l2 = set_l2 + opts.l2_set * torch.sum(parameter**2)
-    l2_loss = embedding_l2 + head_l2 + set_l2
-    total = cont_loss + bin_loss + l2_loss
+        bin_loss = F.binary_cross_entropy_with_logits(
+            pred.bin_logits,
+            bin_targets,
+            pos_weight=positive_weights,
+        )
+    emb_l2 = active_embedding_l2(model, red_team_idx, blue_team_idx, opts.l2_embedding)
+    total = cont_loss + bin_loss + emb_l2
     metrics = LossMetrics(
         continuous_loss=float(cont_loss.detach().cpu()),
         binary_loss=float(bin_loss.detach().cpu()),
-        l2_loss=float(l2_loss.detach().cpu()),
-        embedding_l2_loss=float(embedding_l2.detach().cpu()),
-        head_l2_loss=float(head_l2.detach().cpu()),
-        set_l2_loss=float(set_l2.detach().cpu()),
+        l2_loss=float(emb_l2.detach().cpu()),
+        embedding_l2_loss=float(emb_l2.detach().cpu()),
+        head_l2_loss=0.0,
+        set_l2_loss=0.0,
     )
     return total, metrics, pred
 
 
-def _tensor(data, dtype=None):
-    torch = require_torch()
-    return torch.as_tensor(data, dtype=dtype)
+def create_optimizer(model: SetTransformerModel, opts: LatentStratOptions) -> torch.optim.AdamW:
+    return torch.optim.AdamW(optimizer_parameter_groups(model, opts), lr=opts.learning_rate)
+
+
+def _make_loader(
+    dataset: MatchTensorDataset,
+    indices: np.ndarray,
+    opts: LatentStratOptions,
+    *,
+    shuffle: bool,
+    generator: torch.Generator | None = None,
+    device: torch.device | None = None,
+) -> DataLoader:
+    pin_memory = bool(device is not None and device.type == "cuda")
+    return DataLoader(
+        Subset(dataset, indices.tolist()),
+        batch_size=opts.mini_batch_size,
+        shuffle=shuffle,
+        generator=generator,
+        num_workers=opts.dataloader_num_workers,
+        pin_memory=pin_memory,
+    )
 
 
 def evaluate_loss(
     model: SetTransformerModel,
-    red: np.ndarray,
-    blue: np.ndarray,
-    cont: np.ndarray,
-    binary: np.ndarray,
+    data_loader: DataLoader,
     opts: LatentStratOptions,
-    positive_weights,
+    positive_weights: Tensor,
+    device: torch.device,
 ) -> float:
-    torch = require_torch()
-    with torch.no_grad():
-        loss, _, _ = model_loss(
-            model,
-            _tensor(red, torch.long),
-            _tensor(blue, torch.long),
-            _tensor(cont),
-            _tensor(binary),
-            opts,
-            positive_weights,
-        )
-    return float(loss.detach().cpu())
+    was_training = model.training
+    model.eval()
+    total_loss = 0.0
+    total_rows = 0
+    with torch.inference_mode():
+        for batch in data_loader:
+            red, blue, cont, binary = batch_to_device(batch, device)
+            loss, _, _ = model_loss(model, red, blue, cont, binary, opts, positive_weights)
+            batch_size = int(red.shape[0])
+            total_loss += float(loss.detach().cpu()) * batch_size
+            total_rows += batch_size
+    if was_training:
+        model.train()
+    return total_loss / max(total_rows, 1)
 
 
 def train_model(
@@ -143,32 +226,37 @@ def train_model(
     *,
     initial_model: SetTransformerModel | None = None,
     verbose: bool = True,
-    batch_order: list[np.ndarray] | None = None,
 ) -> tuple[SetTransformerModel, pd.DataFrame, TrainingDiagnostics]:
-    torch = require_torch()
     opts = opts or default_options()
-    red, blue = match_team_matrices(table)
-    cont_targets = target_matrix(table, [f"{mapping.target_name}_z" for mapping in opts.target_map])
-    bin_targets = target_matrix(table, list(opts.binary_targets))
+    device = resolve_device(opts.device)
+    dataset = MatchTensorDataset.from_table(table, opts)
     train_rows = np.flatnonzero(split.train_mask)
     validation_rows = np.flatnonzero(split.validation_mask)
-    positive_weights_np = resolve_positive_weights(bin_targets[train_rows], opts)
-    positive_weights = _tensor(positive_weights_np)
-    num_teams = int(max(red.max(), blue.max())) + 1
+    if len(train_rows) == 0:
+        raise ValueError("At least one training row is required.")
+
+    positive_weights_np = resolve_positive_weights(dataset.bin_targets[train_rows].numpy(), opts)
+    positive_weights = torch.as_tensor(positive_weights_np, dtype=torch.float32, device=device)
+    num_teams = int(max(dataset.red_team_idx.max(), dataset.blue_team_idx.max()).item()) + 1
     model = initial_model or init_model(
-        num_teams, opts.latent_dim, cont_targets.shape[1], bin_targets.shape[1], opts
-    )
-    optimizer = torch.optim.Adam(model.parameters(), lr=opts.learning_rate, weight_decay=0.0)
-    initial_loss = evaluate_loss(
-        model,
-        red[train_rows],
-        blue[train_rows],
-        cont_targets[train_rows],
-        bin_targets[train_rows],
+        num_teams,
+        opts.latent_dim,
+        dataset.cont_targets.shape[1],
+        dataset.bin_targets.shape[1],
         opts,
-        positive_weights,
     )
-    rng = np.random.default_rng(opts.random_seed)
+    model.to(device)
+    optimizer = create_optimizer(model, opts)
+
+    generator = torch.Generator()
+    generator.manual_seed(opts.random_seed)
+    train_loader = _make_loader(
+        dataset, train_rows, opts, shuffle=True, generator=generator, device=device
+    )
+    train_eval_loader = _make_loader(dataset, train_rows, opts, shuffle=False, device=device)
+    validation_loader = _make_loader(dataset, validation_rows, opts, shuffle=False, device=device)
+
+    initial_loss = evaluate_loss(model, train_eval_loader, opts, positive_weights, device)
     best_model = None
     best_epoch = None
     best_validation = float("inf")
@@ -176,49 +264,28 @@ def train_model(
     stopped = False
     iteration = 0
     rows = []
+
     for epoch in range(1, opts.epochs + 1):
-        if batch_order is not None and epoch <= len(batch_order):
-            shuffled = np.asarray(batch_order[epoch - 1], dtype=int)
-        else:
-            shuffled = rng.permutation(train_rows)
-        for start in range(0, len(shuffled), opts.mini_batch_size):
-            batch = shuffled[start : start + opts.mini_batch_size]
-            iteration += 1
+        model.train()
+        for batch in train_loader:
+            red, blue, cont, binary = batch_to_device(batch, device)
             optimizer.zero_grad(set_to_none=True)
-            loss, _, _ = model_loss(
-                model,
-                _tensor(red[batch], torch.long),
-                _tensor(blue[batch], torch.long),
-                _tensor(cont_targets[batch]),
-                _tensor(bin_targets[batch]),
-                opts,
-                positive_weights,
-            )
+            loss, _, _ = model_loss(model, red, blue, cont, binary, opts, positive_weights)
             loss.backward()
             optimizer.step()
-        train_loss = evaluate_loss(
-            model,
-            red[train_rows],
-            blue[train_rows],
-            cont_targets[train_rows],
-            bin_targets[train_rows],
-            opts,
-            positive_weights,
-        )
+            iteration += 1
+
+        train_loss = evaluate_loss(model, train_eval_loader, opts, positive_weights, device)
         validation_loss = np.nan
         if len(validation_rows):
             validation_loss = evaluate_loss(
-                model,
-                red[validation_rows],
-                blue[validation_rows],
-                cont_targets[validation_rows],
-                bin_targets[validation_rows],
-                opts,
-                positive_weights,
+                model, validation_loader, opts, positive_weights, device
             )
         rows.append({"epoch": epoch, "train_loss": train_loss, "validation_loss": validation_loss})
+
         if verbose and (epoch == 1 or epoch == opts.epochs or epoch % 25 == 0):
             print(f"Epoch {epoch}/{opts.epochs}: train loss {train_loss:.4f}")
+
         if opts.use_early_stopping and len(validation_rows):
             if validation_loss < best_validation - opts.early_stopping_min_delta:
                 best_validation = float(validation_loss)
@@ -230,30 +297,16 @@ def train_model(
                 stopped = patience_counter >= opts.early_stopping_patience
                 if stopped:
                     break
+
     restored = False
     if opts.restore_best_validation_model and best_model is not None:
         model.load_state_dict(best_model)
         restored = True
-    final_loss = evaluate_loss(
-        model,
-        red[train_rows],
-        blue[train_rows],
-        cont_targets[train_rows],
-        bin_targets[train_rows],
-        opts,
-        positive_weights,
-    )
+
+    final_loss = evaluate_loss(model, train_eval_loader, opts, positive_weights, device)
     final_validation = np.nan
     if len(validation_rows):
-        final_validation = evaluate_loss(
-            model,
-            red[validation_rows],
-            blue[validation_rows],
-            cont_targets[validation_rows],
-            bin_targets[validation_rows],
-            opts,
-            positive_weights,
-        )
+        final_validation = evaluate_loss(model, validation_loader, opts, positive_weights, device)
     history = pd.DataFrame(rows)
     diagnostics = TrainingDiagnostics(
         initial_loss=initial_loss,
@@ -266,5 +319,6 @@ def train_model(
         stop_epoch=int(history["epoch"].iloc[-1]),
         best_validation_loss=float(best_validation if np.isfinite(best_validation) else np.nan),
         restored_best_validation_model=restored,
+        device=device.type,
     )
     return model, history, diagnostics

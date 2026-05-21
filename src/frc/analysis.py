@@ -10,7 +10,9 @@ import scipy.sparse.linalg as spla
 
 class OPRCalculator:
     @staticmethod
-    def calculate(design_matrix: sp.spmatrix, scores: np.ndarray, ridge_lambda: float = 0.0) -> np.ndarray:
+    def calculate(
+        design_matrix: sp.spmatrix, scores: np.ndarray, ridge_lambda: float = 0.0
+    ) -> np.ndarray:
         design = design_matrix.tocsc()
         scores = np.asarray(scores, dtype=float)
         n_cols = design.shape[1]

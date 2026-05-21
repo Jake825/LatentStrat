@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
-import scipy.sparse.linalg as spla
+from sklearn.linear_model import Ridge
 
 from latentstrat.config import LatentStratOptions, default_options
 from latentstrat.data import Split, target_matrix
@@ -97,12 +97,12 @@ def regression_metrics(
 def fit_ridge_baseline(
     design_matrix: sp.spmatrix, targets: np.ndarray, l2_lambda: float
 ) -> np.ndarray:
-    design = design_matrix.tocsc()
-    n_cols = design.shape[1]
-    lhs = design.T @ design + l2_lambda * sp.eye(n_cols, format="csc")
-    rhs = design.T @ np.asarray(targets, dtype=float)
-    coefficients = spla.spsolve(lhs, rhs)
-    return np.asarray(coefficients)
+    model = Ridge(alpha=l2_lambda, fit_intercept=False, solver="sparse_cg")
+    model.fit(design_matrix, np.asarray(targets, dtype=float))
+    coefficients = np.asarray(model.coef_, dtype=float)
+    if coefficients.ndim == 1:
+        coefficients = coefficients[None, :]
+    return coefficients.T
 
 
 def fit_baselines(
@@ -136,7 +136,9 @@ def fit_baselines(
         ridge=RidgeBaseline(
             lambda_=ridge_lambda,
             coefficients=coefficients,
-            num_teams=(design.shape[1] // 2 if "red_team_1_idx" in table.columns else design.shape[1]),
+            num_teams=(
+                design.shape[1] // 2 if "red_team_1_idx" in table.columns else design.shape[1]
+            ),
             predictions=ridge_predictions,
             metrics=regression_metrics(
                 targets, ridge_predictions, split.train_mask, split.validation_mask, target_names

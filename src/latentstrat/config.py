@@ -16,6 +16,9 @@ class LatentStratOptions(BaseModel):
     season: int = 2026
     smoke_event_key: str = "2026ilch"
     latent_dim: int = 4
+    attention_heads: int = 1
+    attention_dropout: float = 0.0
+    ffn_dropout: float = 0.0
     learning_rate: float = 1e-3
     l2: float = 1e-4
     set_ffn_dim: int = 16
@@ -26,6 +29,8 @@ class LatentStratOptions(BaseModel):
     epochs: int = 200
     mini_batch_size: int = 256
     smoke_mini_batch_size: int = 64
+    dataloader_num_workers: int = 0
+    device: str = "auto"
     use_early_stopping: bool = True
     early_stopping_patience: int = 15
     early_stopping_min_delta: float = 1e-4

@@ -41,7 +41,9 @@ def _split_masks(split: Split) -> list[np.ndarray]:
     return [split.train_mask, split.validation_mask, split.test_mask]
 
 
-def shuffle_teams_within_split(table: pd.DataFrame, split: Split, *, seed: int = 2026) -> pd.DataFrame:
+def shuffle_teams_within_split(
+    table: pd.DataFrame, split: Split, *, seed: int = 2026
+) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
     out = table.copy()
     slot_prefixes = [
@@ -139,7 +141,9 @@ def neighbor_coherence(
     rows = []
     for metric in [name for name in metric_names if name in team_table.columns]:
         values = team_table[metric].to_numpy(dtype=float)
-        eligible = np.flatnonzero((~np.isnan(values)) & (team_table["match_count"].to_numpy() >= min_match_count))
+        eligible = np.flatnonzero(
+            (~np.isnan(values)) & (team_table["match_count"].to_numpy() >= min_match_count)
+        )
         neighbor_diffs = []
         random_diffs = []
         for query in eligible:
@@ -148,10 +152,17 @@ def neighbor_coherence(
             neighbors = np.argsort(-similarities)[: min(top_k, len(team_table) - 1)]
             query_matches = team_table["match_count"].iloc[query]
             tolerance = max(match_count_tolerance, 0.25 * query_matches)
-            candidates = eligible[np.abs(team_table["match_count"].iloc[eligible].to_numpy() - query_matches) <= tolerance]
-            candidates = np.setdiff1d(candidates, np.concatenate([[query], neighbors]), assume_unique=False)
+            candidates = eligible[
+                np.abs(team_table["match_count"].iloc[eligible].to_numpy() - query_matches)
+                <= tolerance
+            ]
+            candidates = np.setdiff1d(
+                candidates, np.concatenate([[query], neighbors]), assume_unique=False
+            )
             if len(candidates) < top_k:
-                candidates = np.setdiff1d(eligible, np.concatenate([[query], neighbors]), assume_unique=False)
+                candidates = np.setdiff1d(
+                    eligible, np.concatenate([[query], neighbors]), assume_unique=False
+                )
             if len(candidates) == 0 or len(neighbors) == 0:
                 continue
             random_rows = rng.choice(candidates, size=min(top_k, len(candidates)), replace=False)
@@ -200,7 +211,15 @@ def _scoreboard_variables() -> list[str]:
     ]
 
 
-def _metric_rows(name: str, metrics: pd.DataFrame, seed: int, split: Split, opts: LatentStratOptions, report: EvaluationReport | None, target_type: str) -> pd.DataFrame:
+def _metric_rows(
+    name: str,
+    metrics: pd.DataFrame,
+    seed: int,
+    split: Split,
+    opts: LatentStratOptions,
+    report: EvaluationReport | None,
+    target_type: str,
+) -> pd.DataFrame:
     rows = []
     for _, row in metrics.iterrows():
         rows.append(
@@ -244,26 +263,39 @@ def _seed_stability(scoreboard: pd.DataFrame) -> pd.DataFrame:
 
 def _write_markdown(packet: EvidencePacket, path: Path) -> None:
     validation = packet.scoreboard[
-        (packet.scoreboard["split"] == "validation") & (packet.scoreboard["target_type"] == "continuous")
+        (packet.scoreboard["split"] == "validation")
+        & (packet.scoreboard["target_type"] == "continuous")
     ].head(20)
     lines = [
-        "# LatentStrat V4 Evidence Packet",
+        "# LatentStrat Evidence Packet",
         "",
-        "This packet compares the official V4 cross-alliance Set Transformer against mean/ridge baselines and data-level controls.",
+        (
+            "This packet compares the cross-alliance Set Transformer against "
+            "mean/ridge baselines and data-level controls."
+        ),
         "",
-        "PMA attention and zero-out deltas are diagnostics only. Validation metrics decide whether the model generalizes.",
+        (
+            "PMA attention and zero-out deltas are diagnostics only. "
+            "Validation metrics decide whether the model generalizes."
+        ),
         "",
         "## Validation Scoreboard",
         "",
-        validation[["variant", "seed", "target", "rmse", "mae"]].to_markdown(index=False) if not validation.empty else "_No validation rows._",
+        validation[["variant", "seed", "target", "rmse", "mae"]].to_markdown(index=False)
+        if not validation.empty
+        else "_No validation rows._",
         "",
         "## Seed Stability",
         "",
-        packet.seed_stability.head(20).to_markdown(index=False) if not packet.seed_stability.empty else "_No seed stability rows._",
+        packet.seed_stability.head(20).to_markdown(index=False)
+        if not packet.seed_stability.empty
+        else "_No seed stability rows._",
         "",
         "## Zero-Out Diagnostics",
         "",
-        packet.zero_out_diagnostics.head(20).to_markdown(index=False) if not packet.zero_out_diagnostics.empty else "_No zero-out rows._",
+        packet.zero_out_diagnostics.head(20).to_markdown(index=False)
+        if not packet.zero_out_diagnostics.empty
+        else "_No zero-out rows._",
     ]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -293,16 +325,64 @@ def build_evidence_packet(
         baselines = fit_baselines(prepared, split, run_opts)
 
         if verbose:
-            print(f"Evidence seed {seed}: training official V4 model.")
-        official = _train_and_evaluate("official_v4", prepared, split, target_stats, run_opts, baselines, team_index_map)
+            print(f"Evidence seed {seed}: training LatentStrat model.")
+        official = _train_and_evaluate(
+            "latentstrat",
+            prepared,
+            split,
+            target_stats,
+            run_opts,
+            baselines,
+            team_index_map,
+        )
         records.append(official)
-        scoreboard.append(_metric_rows("official_v4", official.report.continuous_metrics, seed, split, run_opts, official.report, "continuous"))
-        scoreboard.append(_metric_rows("official_v4", official.report.binary_metrics, seed, split, run_opts, official.report, "binary"))
-        scoreboard.append(_metric_rows("mean_baseline", baselines.mean.metrics, seed, split, run_opts, None, "continuous"))
-        scoreboard.append(_metric_rows("ridge_match_opr", baselines.ridge.metrics, seed, split, run_opts, None, "continuous"))
-        set_attention.append(official.report.set_attention.assign(variant="official_v4", seed=seed))
-        zero_out.append(official.report.zero_out_diagnostics.assign(variant="official_v4", seed=seed))
-        coherence.append(neighbor_coherence(official.inspection.team_embedding_table, seed=seed).assign(variant="official_v4", seed=seed))
+        scoreboard.append(
+            _metric_rows(
+                "latentstrat",
+                official.report.continuous_metrics,
+                seed,
+                split,
+                run_opts,
+                official.report,
+                "continuous",
+            )
+        )
+        scoreboard.append(
+            _metric_rows(
+                "latentstrat",
+                official.report.binary_metrics,
+                seed,
+                split,
+                run_opts,
+                official.report,
+                "binary",
+            )
+        )
+        scoreboard.append(
+            _metric_rows(
+                "mean_baseline", baselines.mean.metrics, seed, split, run_opts, None, "continuous"
+            )
+        )
+        scoreboard.append(
+            _metric_rows(
+                "ridge_match_opr",
+                baselines.ridge.metrics,
+                seed,
+                split,
+                run_opts,
+                None,
+                "continuous",
+            )
+        )
+        set_attention.append(official.report.set_attention.assign(variant="latentstrat", seed=seed))
+        zero_out.append(
+            official.report.zero_out_diagnostics.assign(variant="latentstrat", seed=seed)
+        )
+        coherence.append(
+            neighbor_coherence(official.inspection.team_embedding_table, seed=seed).assign(
+                variant="latentstrat", seed=seed
+            )
+        )
 
         for name, variant_table in (
             ("shuffled_set_control", shuffle_teams_within_split(table, split, seed=seed)),
@@ -311,16 +391,40 @@ def build_evidence_packet(
             stats = fit_target_stats(variant_table, split.train_mask, run_opts)
             prepared_variant = apply_target_stats(variant_table, stats)
             variant_baselines = fit_baselines(prepared_variant, split, run_opts)
-            run = _train_and_evaluate(name, prepared_variant, split, stats, run_opts, variant_baselines, team_index_map)
+            run = _train_and_evaluate(
+                name, prepared_variant, split, stats, run_opts, variant_baselines, team_index_map
+            )
             records.append(run)
-            scoreboard.append(_metric_rows(name, run.report.continuous_metrics, seed, split, run_opts, run.report, "continuous"))
-            scoreboard.append(_metric_rows(name, run.report.binary_metrics, seed, split, run_opts, run.report, "binary"))
+            scoreboard.append(
+                _metric_rows(
+                    name,
+                    run.report.continuous_metrics,
+                    seed,
+                    split,
+                    run_opts,
+                    run.report,
+                    "continuous",
+                )
+            )
+            scoreboard.append(
+                _metric_rows(
+                    name, run.report.binary_metrics, seed, split, run_opts, run.report, "binary"
+                )
+            )
             set_attention.append(run.report.set_attention.assign(variant=name, seed=seed))
             zero_out.append(run.report.zero_out_diagnostics.assign(variant=name, seed=seed))
-            coherence.append(neighbor_coherence(run.inspection.team_embedding_table, seed=seed).assign(variant=name, seed=seed))
+            coherence.append(
+                neighbor_coherence(run.inspection.team_embedding_table, seed=seed).assign(
+                    variant=name, seed=seed
+                )
+            )
     packet = EvidencePacket(
-        scoreboard=pd.concat(scoreboard, ignore_index=True) if scoreboard else pd.DataFrame(columns=_scoreboard_variables()),
-        set_attention=pd.concat(set_attention, ignore_index=True) if set_attention else pd.DataFrame(),
+        scoreboard=pd.concat(scoreboard, ignore_index=True)
+        if scoreboard
+        else pd.DataFrame(columns=_scoreboard_variables()),
+        set_attention=pd.concat(set_attention, ignore_index=True)
+        if set_attention
+        else pd.DataFrame(),
         zero_out_diagnostics=pd.concat(zero_out, ignore_index=True) if zero_out else pd.DataFrame(),
         neighbor_coherence=pd.concat(coherence, ignore_index=True) if coherence else pd.DataFrame(),
         seed_stability=pd.DataFrame(),

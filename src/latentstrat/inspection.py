@@ -9,7 +9,7 @@ import pandas as pd
 
 from latentstrat.baselines import Baselines
 from latentstrat.config import LatentStratOptions, default_options
-from latentstrat.model import SetTransformerModel, require_torch
+from latentstrat.model import SetTransformerModel
 
 
 @dataclass
@@ -57,7 +57,10 @@ def _team_slots(table: pd.DataFrame) -> np.ndarray:
 def _role_average(red_slots, blue_slots, red_values, blue_values, num_teams):
     slots = np.concatenate([red_slots, blue_slots], axis=1).reshape(-1)
     values = np.concatenate(
-        [np.repeat(np.asarray(red_values)[:, None], 3, axis=1), np.repeat(np.asarray(blue_values)[:, None], 3, axis=1)],
+        [
+            np.repeat(np.asarray(red_values)[:, None], 3, axis=1),
+            np.repeat(np.asarray(blue_values)[:, None], 3, axis=1),
+        ],
         axis=1,
     ).reshape(-1)
     sums = np.bincount(slots, weights=values, minlength=num_teams)
@@ -93,19 +96,36 @@ def build_team_embedding_table(
     num_teams = len(result)
     result["match_count"] = np.bincount(team_slots.reshape(-1), minlength=num_teams)[indices]
     result["event_count"] = [
-        table.loc[np.any(team_slots == idx, axis=1), "event_key"].astype(str).nunique() for idx in indices
+        table.loc[np.any(team_slots == idx, axis=1), "event_key"].astype(str).nunique()
+        for idx in indices
     ]
     red_slots = table[["red_team_1_idx", "red_team_2_idx", "red_team_3_idx"]].to_numpy(dtype=int)
-    blue_slots = table[["blue_team_1_idx", "blue_team_2_idx", "blue_team_3_idx"]].to_numpy(dtype=int)
-    result["avg_alliance_score"] = _role_average(red_slots, blue_slots, table["red_total_score"], table["blue_total_score"], num_teams)[indices]
-    result["avg_point_differential"] = _role_average(red_slots, blue_slots, table["win_margin"], -table["win_margin"], num_teams)[indices]
-    result["avg_fouls_drawn"] = _role_average(red_slots, blue_slots, table["fouls_drawn"], -table["fouls_drawn"], num_teams)[indices]
-    result["rate_win"] = _role_average(red_slots, blue_slots, table["red_win"].astype(float), (~table["red_win"].astype(bool)).astype(float), num_teams)[indices]
+    blue_slots = table[["blue_team_1_idx", "blue_team_2_idx", "blue_team_3_idx"]].to_numpy(
+        dtype=int
+    )
+    result["avg_alliance_score"] = _role_average(
+        red_slots, blue_slots, table["red_total_score"], table["blue_total_score"], num_teams
+    )[indices]
+    result["avg_point_differential"] = _role_average(
+        red_slots, blue_slots, table["win_margin"], -table["win_margin"], num_teams
+    )[indices]
+    result["avg_fouls_drawn"] = _role_average(
+        red_slots, blue_slots, table["fouls_drawn"], -table["fouls_drawn"], num_teams
+    )[indices]
+    result["rate_win"] = _role_average(
+        red_slots,
+        blue_slots,
+        table["red_win"].astype(float),
+        (~table["red_win"].astype(bool)).astype(float),
+        num_teams,
+    )[indices]
     if baselines is not None:
         coeff = np.asarray(baselines.ridge.coefficients)
         for target_idx, target in enumerate(baselines.target_names):
             if coeff.shape[0] >= 2 * num_teams:
-                result[f"ridge_{target}"] = 0.5 * (coeff[indices, target_idx] + coeff[indices + num_teams, target_idx])
+                result[f"ridge_{target}"] = 0.5 * (
+                    coeff[indices, target_idx] + coeff[indices + num_teams, target_idx]
+                )
             else:
                 result[f"ridge_{target}"] = coeff[indices, target_idx]
     return result
@@ -115,21 +135,41 @@ def sanity_checks(embeddings: np.ndarray, team_table: pd.DataFrame) -> pd.DataFr
     norms = team_table["embedding_norm"].to_numpy()
     variances = np.nanvar(embeddings, axis=0, ddof=1)
     dominant_share = np.max(variances) / max(np.sum(variances), np.finfo(float).eps)
-    if np.nanstd(norms) <= np.finfo(float).eps or np.nanstd(np.log1p(team_table["match_count"])) <= np.finfo(float).eps:
+    if (
+        np.nanstd(norms) <= np.finfo(float).eps
+        or np.nanstd(np.log1p(team_table["match_count"])) <= np.finfo(float).eps
+    ):
         norm_corr = 0
     else:
         norm_corr = np.corrcoef(norms, np.log1p(team_table["match_count"]))[0, 1]
     rows = [
-        ("all_finite", bool(np.isfinite(embeddings).all()), float(np.isfinite(embeddings).all()), 1),
-        ("no_zero_norms", bool(np.all(norms > np.finfo(float).eps)), float(np.nanmin(norms)), np.finfo(float).eps),
-        ("no_collapsed_norm_distribution", bool(np.nanstd(norms) > np.finfo(float).eps), float(np.nanstd(norms)), np.finfo(float).eps),
+        (
+            "all_finite",
+            bool(np.isfinite(embeddings).all()),
+            float(np.isfinite(embeddings).all()),
+            1,
+        ),
+        (
+            "no_zero_norms",
+            bool(np.all(norms > np.finfo(float).eps)),
+            float(np.nanmin(norms)),
+            np.finfo(float).eps,
+        ),
+        (
+            "no_collapsed_norm_distribution",
+            bool(np.nanstd(norms) > np.finfo(float).eps),
+            float(np.nanstd(norms)),
+            np.finfo(float).eps,
+        ),
         ("no_single_dominant_dimension", bool(dominant_share < 0.90), float(dominant_share), 0.90),
         ("norm_not_only_match_count", bool(abs(norm_corr) < 0.95), float(norm_corr), 0.95),
     ]
     return pd.DataFrame(rows, columns=["check", "passed", "value", "threshold"])
 
 
-def nearest_neighbors(team_table: pd.DataFrame, normalized: np.ndarray, top_k: int = 10) -> pd.DataFrame:
+def nearest_neighbors(
+    team_table: pd.DataFrame, normalized: np.ndarray, top_k: int = 10
+) -> pd.DataFrame:
     rows = []
     top_k = min(top_k, len(team_table) - 1)
     for query_row in range(len(team_table)):
@@ -150,7 +190,9 @@ def nearest_neighbors(team_table: pd.DataFrame, normalized: np.ndarray, top_k: i
     return pd.DataFrame(rows)
 
 
-def archetype_similarity(team_table: pd.DataFrame, normalized: np.ndarray, top_n: int = 10) -> pd.DataFrame:
+def archetype_similarity(
+    team_table: pd.DataFrame, normalized: np.ndarray, top_n: int = 10
+) -> pd.DataFrame:
     candidates = {
         "high_alliance_score": "avg_alliance_score",
         "high_point_differential": "avg_point_differential",
@@ -167,7 +209,9 @@ def archetype_similarity(team_table: pd.DataFrame, normalized: np.ndarray, top_n
         prototype = np.nanmean(normalized[selected], axis=0)
         prototype = prototype / max(np.linalg.norm(prototype), np.finfo(float).eps)
         similarities = normalized @ prototype
-        for rank, row in enumerate(np.argsort(-similarities)[: min(top_n, len(team_table))], start=1):
+        for rank, row in enumerate(
+            np.argsort(-similarities)[: min(top_n, len(team_table))], start=1
+        ):
             rows.append(
                 {
                     "archetype": archetype,
@@ -191,7 +235,6 @@ def inspect_embeddings(
     *,
     top_k: int = 10,
 ) -> Inspection:
-    _ = require_torch()
     opts = opts or default_options()
     embeddings = model.team_embedding.weight.detach().cpu().numpy()
     pca_score, pca_model = compute_pca(embeddings)
@@ -201,11 +244,23 @@ def inspect_embeddings(
     from latentstrat.data import Split
     from latentstrat.evaluation import evaluate_model
 
-    dummy_split = Split(np.ones(len(table), dtype=bool), np.zeros(len(table), dtype=bool), np.zeros(len(table), dtype=bool), "inspection")
+    dummy_split = Split(
+        np.ones(len(table), dtype=bool),
+        np.zeros(len(table), dtype=bool),
+        np.zeros(len(table), dtype=bool),
+        "inspection",
+    )
     from latentstrat.data import TargetStats
 
-    dummy_stats = TargetStats([mapping.target_name for mapping in opts.target_map], np.zeros(len(opts.target_map)), np.ones(len(opts.target_map)), np.zeros(len(opts.target_map), dtype=bool))
-    attention = evaluate_model(model, table, dummy_split, dummy_stats, opts, baselines).set_attention
+    dummy_stats = TargetStats(
+        [mapping.target_name for mapping in opts.target_map],
+        np.zeros(len(opts.target_map)),
+        np.ones(len(opts.target_map)),
+        np.zeros(len(opts.target_map), dtype=bool),
+    )
+    attention = evaluate_model(
+        model, table, dummy_split, dummy_stats, opts, baselines
+    ).set_attention
     return Inspection(
         team_embedding_table=team_table,
         sanity_checks=sanity_checks(embeddings, team_table),

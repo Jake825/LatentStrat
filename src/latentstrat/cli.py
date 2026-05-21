@@ -1,4 +1,4 @@
-"""Command-line entry points for the Python LatentStrat port."""
+"""Command-line entry points for LatentStrat."""
 
 from __future__ import annotations
 
@@ -31,7 +31,9 @@ def _provider(cache_name: str = "tba_cache") -> TbaProvider:
     return TbaProvider(cache_name=cache_name)
 
 
-def _load_event_table(event_key: str, opts: LatentStratOptions) -> tuple[pd.DataFrame, dict[str, int]]:
+def _load_event_table(
+    event_key: str, opts: LatentStratOptions
+) -> tuple[pd.DataFrame, dict[str, int]]:
     provider = _provider()
     store = FRCDataStore()
     TBAImporter.import_event(provider, store, event_key)
@@ -55,7 +57,9 @@ def smoke_test(event_key: str | None = None) -> None:
         event_key = opts.smoke_event_key
     opts = opts.model_copy(update={"mini_batch_size": opts.smoke_mini_batch_size})
     table, team_map = _load_event_table(event_key, opts)
-    split = make_split(table, opts, policy=opts.split_policy, validation_fraction=opts.validation_fraction)
+    split = make_split(
+        table, opts, policy=opts.split_policy, validation_fraction=opts.validation_fraction
+    )
     stats = fit_target_stats(table, split.train_mask, opts)
     prepared = apply_target_stats(table, stats)
     baselines = fit_baselines(prepared, split, opts)
@@ -74,7 +78,7 @@ def smoke_test(event_key: str | None = None) -> None:
 
 @app.command("full-season-offline")
 def full_season_offline(season: int = 2026, event_limit: int | None = None) -> None:
-    """Import a season, train V4, and write core artifacts."""
+    """Import a season, train the model, and write core artifacts."""
     opts = default_options().model_copy(update={"season": season})
     provider = _provider()
     store = FRCDataStore()

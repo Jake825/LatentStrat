@@ -17,9 +17,7 @@ def _as_plain_data(value: Any) -> Any:
         return [_as_plain_data(v) for v in value]
     if hasattr(value, "__dict__"):
         return {
-            str(k): _as_plain_data(v)
-            for k, v in vars(value).items()
-            if not str(k).startswith("_")
+            str(k): _as_plain_data(v) for k, v in vars(value).items() if not str(k).startswith("_")
         }
     return value
 
@@ -161,7 +159,7 @@ class Match(PayloadModel):
     event_key: str = ""
 
     @classmethod
-    def from_tba(cls, match: TbaMatch) -> "Match":
+    def from_tba(cls, match: TbaMatch) -> Match:
         return cls(
             match_key=match.key,
             red_alliance=match.alliance("red"),

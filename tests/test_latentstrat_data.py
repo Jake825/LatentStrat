@@ -30,8 +30,18 @@ def _breakdown(score):
 
 
 def _match(match_key, red_score=120, blue_score=100, breakdown=True):
-    red = {"team_keys": ["frc1", "frc2", "frc3"], "score": red_score, "surrogate_team_keys": ["frc3"], "dq_team_keys": ["frc2"]}
-    blue = {"team_keys": ["frc4", "frc5", "frc6"], "score": blue_score, "surrogate_team_keys": [], "dq_team_keys": []}
+    red = {
+        "team_keys": ["frc1", "frc2", "frc3"],
+        "score": red_score,
+        "surrogate_team_keys": ["frc3"],
+        "dq_team_keys": ["frc2"],
+    }
+    blue = {
+        "team_keys": ["frc4", "frc5", "frc6"],
+        "score": blue_score,
+        "surrogate_team_keys": [],
+        "dq_team_keys": [],
+    }
     data = {
         "key": match_key,
         "event_key": "2026test",
@@ -59,7 +69,13 @@ def _match(match_key, red_score=120, blue_score=100, breakdown=True):
 def test_build_tables_filters_and_maps_zero_based_indices():
     opts = default_options()
     store = FRCDataStore()
-    store.add_match([_match("2026test_qm1"), _match("2026test_qm2", -1, -1), _match("2026test_qm3", breakdown=False)])
+    store.add_match(
+        [
+            _match("2026test_qm1"),
+            _match("2026test_qm2", -1, -1),
+            _match("2026test_qm3", breakdown=False),
+        ]
+    )
     metadata = pd.DataFrame([{"key": "2026test", "week": 1}])
 
     alliance = build_season_alliance_table(store, opts, event_metadata=metadata)

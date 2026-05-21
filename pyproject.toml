@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "latentstrat"
 version = "0.1.0"
-description = "Python port of LatentStrat V4 and FRC/TBA support utilities."
+description = "Python-first FRC match modeling and team representation toolkit."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -19,6 +19,8 @@ dependencies = [
   "pandas>=2",
   "numpy>=1.26",
   "scipy>=1.11",
+  "scikit-learn>=1.4",
+  "tabulate>=0.9",
   "torch>=2.2",
   "typer>=0.12",
 ]

@@ -36,7 +36,11 @@ class TBAImporter:
         *,
         event_limit: int | None = None,
     ) -> pd.DataFrame:
-        events = [event for event in provider.get_events_by_year(season, simple=True) if event.event_type != 99]
+        events = [
+            event
+            for event in provider.get_events_by_year(season, simple=True)
+            if event.event_type != 99
+        ]
         if event_limit is not None:
             events = events[:event_limit]
         for event in events:

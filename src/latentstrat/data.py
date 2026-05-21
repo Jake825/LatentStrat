@@ -179,7 +179,9 @@ def _make_alliance_row(
         "team_3_key": team_keys[2],
         "score_raw": raw_score,
         "has_breakdown": True,
-        "has_surrogate": bool(raw_alliance.get("surrogate_team_keys") or alliance.surrogate_team_keys),
+        "has_surrogate": bool(
+            raw_alliance.get("surrogate_team_keys") or alliance.surrogate_team_keys
+        ),
         "has_dq": bool(raw_alliance.get("dq_team_keys") or alliance.dq_team_keys),
         "scheduled_time": scheduled,
         "actual_time": actual,
@@ -355,7 +357,10 @@ def make_team_index_map(table: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, in
     out = table.copy()
     for column in key_columns:
         idx_column = column.replace("_key", "_idx")
-        values = [index_map.get(str(value), pd.NA) if pd.notna(value) and str(value) else pd.NA for value in out[column]]
+        values = [
+            index_map.get(str(value), pd.NA) if pd.notna(value) and str(value) else pd.NA
+            for value in out[column]
+        ]
         out[idx_column] = pd.Series(values, dtype="Int64")
     return out, index_map
 
@@ -375,7 +380,9 @@ def make_split(
 ) -> Split:
     opts = opts or default_options()
     policy = policy or opts.split_policy
-    validation_fraction = opts.validation_fraction if validation_fraction is None else validation_fraction
+    validation_fraction = (
+        opts.validation_fraction if validation_fraction is None else validation_fraction
+    )
     random_seed = opts.random_seed if random_seed is None else random_seed
     if validation_fraction < 0 or validation_fraction >= 1:
         raise ValueError("validation_fraction must be >= 0 and < 1")

@@ -8,6 +8,8 @@ dependencies:
   - pandas
   - numpy
   - scipy
+  - scikit-learn
+  - tabulate
   - pytorch
   - pip:
       - tbapy==1.3.2

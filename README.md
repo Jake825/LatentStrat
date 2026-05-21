@@ -1,9 +1,9 @@
 # LatentStrat
 
-LatentStrat is a Python port of the original MATLAB LatentStrat V4 project and
-its FRC/TBA support library. The port keeps the MATLAB model math as the parity
-target while moving ingestion, training, evaluation, diagnostics, and evidence
-packet generation into a Python package.
+LatentStrat is a Python-first FRC machine learning project for learning team and
+alliance representations from The Blue Alliance and Statbotics data. It uses a
+Set Transformer-style PyTorch model to encode unordered alliances, model
+cross-alliance interactions, and produce match predictions plus diagnostics.
 
 ## Install
 
@@ -11,9 +11,9 @@ packet generation into a Python package.
 pip install -e ".[dev]"
 ```
 
-The intended runtime stack is Python 3.11+, `tbapy` for The Blue Alliance API
-v3, `statbotics==3.0.0` for EPA/Statbotics data, Pandas/NumPy/SciPy for tables
-and baselines, and PyTorch for the V4 Set Transformer.
+The runtime stack is Python 3.11+, `tbapy` for The Blue Alliance API v3,
+`statbotics==3.0.0` for EPA/Statbotics data, Pandas/NumPy/SciPy for tables,
+scikit-learn for linear baselines, and PyTorch for the Set Transformer model.
 
 ## Commands
 
@@ -25,7 +25,6 @@ latentstrat build-evidence-packet
 ```
 
 Set `TBA_API_KEY` before running live TBA ingestion. Python builds fresh
-SQLite/disk caches and does not migrate the legacy MATLAB `.mat` cache files.
+SQLite/disk caches for provider calls.
 
-The `LatentStrat MATLAB/` and `The Blue Alliance API Library MATLAB/` folders
-remain as reference sources and golden-fixture generators during the migration.
+The current codebase treats the Python implementation as the source of truth.

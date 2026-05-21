@@ -1,4 +1,4 @@
-"""Evaluation metrics and diagnostics for LatentStrat V4."""
+"""Evaluation metrics and diagnostics for LatentStrat models."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import pandas as pd
 from latentstrat.baselines import Baselines
 from latentstrat.config import LatentStratOptions, default_options
 from latentstrat.data import Split, TargetStats, target_matrix
-from latentstrat.model import SetTransformerModel, require_torch
+from latentstrat.model import SetTransformerModel
 from latentstrat.training import match_team_matrices
 
 
@@ -44,7 +44,9 @@ def continuous_metrics(
             rmse = np.sqrt(np.nanmean(err**2, axis=0))
             mae = np.nanmean(np.abs(err), axis=0)
         for target, rmse_value, mae_value in zip(target_names, rmse, mae, strict=True):
-            rows.append({"split": split_name, "target": target, "rmse": rmse_value, "mae": mae_value})
+            rows.append(
+                {"split": split_name, "target": target, "rmse": rmse_value, "mae": mae_value}
+            )
     return pd.DataFrame(rows)
 
 
@@ -72,10 +74,14 @@ def binary_metrics(
     return pd.DataFrame(rows)
 
 
-def calibration_table(actual: np.ndarray, predicted: np.ndarray, mask: np.ndarray, names: list[str]) -> pd.DataFrame:
+def calibration_table(
+    actual: np.ndarray, predicted: np.ndarray, mask: np.ndarray, names: list[str]
+) -> pd.DataFrame:
     rows = []
     if not names or not np.any(mask):
-        return pd.DataFrame(columns=["target", "bin_low", "bin_high", "count", "mean_probability", "observed_rate"])
+        return pd.DataFrame(
+            columns=["target", "bin_low", "bin_high", "count", "mean_probability", "observed_rate"]
+        )
     edges = np.linspace(0, 1, 6)
     for target_idx, name in enumerate(names):
         probs = predicted[mask, target_idx]
@@ -90,8 +96,12 @@ def calibration_table(actual: np.ndarray, predicted: np.ndarray, mask: np.ndarra
                     "bin_low": edges[idx - 1],
                     "bin_high": edges[idx],
                     "count": int(np.sum(bin_mask)),
-                    "mean_probability": float(np.nanmean(probs[bin_mask])) if np.any(bin_mask) else np.nan,
-                    "observed_rate": float(np.nanmean(outcomes[bin_mask])) if np.any(bin_mask) else np.nan,
+                    "mean_probability": float(np.nanmean(probs[bin_mask]))
+                    if np.any(bin_mask)
+                    else np.nan,
+                    "observed_rate": float(np.nanmean(outcomes[bin_mask]))
+                    if np.any(bin_mask)
+                    else np.nan,
                 }
             )
     return pd.DataFrame(rows)
@@ -124,11 +134,17 @@ def _row_has_first_event_team(table: pd.DataFrame) -> np.ndarray:
         for team in team_idx[row]:
             if first_event[team] == "":
                 first_event[team] = events[row]
-    return np.array([np.any(first_event[team_idx[row]] == events[row]) for row in range(len(table))])
+    return np.array(
+        [np.any(first_event[team_idx[row]] == events[row]) for row in range(len(table))]
+    )
 
 
 def slice_metrics(
-    table: pd.DataFrame, actual: np.ndarray, predicted: np.ndarray, split: Split, target_names: list[str]
+    table: pd.DataFrame,
+    actual: np.ndarray,
+    predicted: np.ndarray,
+    split: Split,
+    target_names: list[str],
 ) -> dict[str, pd.DataFrame]:
     train_counts = _row_training_match_counts(table, split.train_mask)
     unseen_counts = np.sum(train_counts == 0, axis=1)
@@ -157,7 +173,9 @@ def slice_metrics(
     return {"availability": pd.DataFrame(rows)}
 
 
-def set_attention_table(table: pd.DataFrame, split: Split, red_weights: np.ndarray, blue_weights: np.ndarray) -> pd.DataFrame:
+def set_attention_table(
+    table: pd.DataFrame, split: Split, red_weights: np.ndarray, blue_weights: np.ndarray
+) -> pd.DataFrame:
     rows = []
     split_names = np.array(["other"] * len(table), dtype=object)
     split_names[split.train_mask] = "train"
@@ -201,15 +219,21 @@ def _predict_cont(
     red_zero_slot: int = 0,
     blue_zero_slot: int = 0,
 ) -> np.ndarray:
-    torch = require_torch()
-    with torch.no_grad():
+    import torch
+
+    device = next(model.parameters()).device
+    was_training = model.training
+    model.eval()
+    with torch.inference_mode():
         pred = model(
-            torch.as_tensor(red, dtype=torch.long),
-            torch.as_tensor(blue, dtype=torch.long),
+            torch.as_tensor(red, dtype=torch.long, device=device),
+            torch.as_tensor(blue, dtype=torch.long, device=device),
             pma_mode=pma_mode,
             red_zero_slot=red_zero_slot,
             blue_zero_slot=blue_zero_slot,
         )
+    if was_training:
+        model.train()
     pred_z = pred.cont_z.detach().cpu().numpy()
     return pred_z * target_stats.sigma + target_stats.mu
 
@@ -227,16 +251,30 @@ def zero_out_diagnostics(
     red, blue = match_team_matrices(table)
     actual = target_matrix(table, [mapping.target_name for mapping in opts.target_map])
     baseline = _predict_cont(model, red, blue, target_stats)
-    baseline_rmse = np.sqrt(np.nanmean((baseline[split.validation_mask] - actual[split.validation_mask]) ** 2, axis=0))
-    scenarios = [("uniform_pma", "uniform", 0, 0)] + [
-        (f"zero_red_slot_{slot}", "learned", slot, 0) for slot in (1, 2, 3)
-    ] + [(f"zero_blue_slot_{slot}", "learned", 0, slot) for slot in (1, 2, 3)]
+    baseline_rmse = np.sqrt(
+        np.nanmean((baseline[split.validation_mask] - actual[split.validation_mask]) ** 2, axis=0)
+    )
+    scenarios = (
+        [("uniform_pma", "uniform", 0, 0)]
+        + [(f"zero_red_slot_{slot}", "learned", slot, 0) for slot in (1, 2, 3)]
+        + [(f"zero_blue_slot_{slot}", "learned", 0, slot) for slot in (1, 2, 3)]
+    )
     rows = []
     for scenario, pma_mode, red_slot, blue_slot in scenarios:
         predicted = _predict_cont(
-            model, red, blue, target_stats, pma_mode=pma_mode, red_zero_slot=red_slot, blue_zero_slot=blue_slot
+            model,
+            red,
+            blue,
+            target_stats,
+            pma_mode=pma_mode,
+            red_zero_slot=red_slot,
+            blue_zero_slot=blue_slot,
         )
-        rmse = np.sqrt(np.nanmean((predicted[split.validation_mask] - actual[split.validation_mask]) ** 2, axis=0))
+        rmse = np.sqrt(
+            np.nanmean(
+                (predicted[split.validation_mask] - actual[split.validation_mask]) ** 2, axis=0
+            )
+        )
         for target, base, scen in zip(target_stats.target_names, baseline_rmse, rmse, strict=True):
             rows.append(
                 {
@@ -258,11 +296,20 @@ def evaluate_model(
     opts: LatentStratOptions | None = None,
     baselines: Baselines | None = None,
 ) -> EvaluationReport:
-    torch = require_torch()
+    import torch
+
     opts = opts or default_options()
     red, blue = match_team_matrices(table)
-    with torch.no_grad():
-        raw = model(torch.as_tensor(red, dtype=torch.long), torch.as_tensor(blue, dtype=torch.long))
+    device = next(model.parameters()).device
+    was_training = model.training
+    model.eval()
+    with torch.inference_mode():
+        raw = model(
+            torch.as_tensor(red, dtype=torch.long, device=device),
+            torch.as_tensor(blue, dtype=torch.long, device=device),
+        )
+    if was_training:
+        model.train()
     pred_z = raw.cont_z.detach().cpu().numpy()
     pred_cont = pred_z * target_stats.sigma + target_stats.mu
     pred_bin = sigmoid(raw.bin_logits.detach().cpu().numpy())
@@ -275,9 +322,13 @@ def evaluate_model(
     return EvaluationReport(
         parameter_count=parameter_count,
         rows_per_parameter=rows_per_parameter,
-        continuous_metrics=continuous_metrics(actual_cont, pred_cont, split, target_stats.target_names),
+        continuous_metrics=continuous_metrics(
+            actual_cont, pred_cont, split, target_stats.target_names
+        ),
         binary_metrics=binary_metrics(actual_bin, pred_bin, split, list(opts.binary_targets)),
-        calibration=calibration_table(actual_bin, pred_bin, split.validation_mask, list(opts.binary_targets)),
+        calibration=calibration_table(
+            actual_bin, pred_bin, split.validation_mask, list(opts.binary_targets)
+        ),
         slices=slice_metrics(table, actual_cont, pred_cont, split, target_stats.target_names),
         set_attention=set_attention_table(table, split, red_weights, blue_weights),
         zero_out_diagnostics=zero_out_diagnostics(model, table, split, target_stats, opts),

@@ -10,3 +10,5 @@ artifacts/
 *.sqlite-wal
 tba_cache*
 statbotics_offline_cache/
+LatentStrat MATLAB/
+The Blue Alliance API Library MATLAB/
