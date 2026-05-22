@@ -32,6 +32,19 @@ def _breakdown(score):
         "foulPoints": 3,
         "majorFoulCount": 0,
         "minorFoulCount": 1,
+        "energizedAchieved": True,
+        "superchargedAchieved": False,
+        "traversalAchieved": True,
+        "g206Penalty": False,
+        "hubScore": {
+            "autoCount": 2,
+            "transitionCount": 3,
+            "shift1Count": 4,
+            "shift2Count": 5,
+            "shift3Count": 6,
+            "shift4Count": 7,
+            "endgameCount": 8,
+        },
     }
 
 
@@ -88,8 +101,8 @@ def test_build_tables_filters_and_maps_zero_based_indices():
     match_table = build_season_match_table(store, opts, event_metadata=metadata)
     match_table, team_map = make_team_index_map(match_table)
 
-    assert len(alliance) == 2
-    assert len(match_table) == 1
+    assert len(alliance) == 4
+    assert len(match_table) == 2
     assert match_table["red_total_score"].iloc[0] == 120
     assert match_table["blue_total_score"].iloc[0] == 100
     assert match_table["win_margin"].iloc[0] == 20
@@ -97,11 +110,55 @@ def test_build_tables_filters_and_maps_zero_based_indices():
     assert match_table["red_auto_pts"].iloc[0] == 20
     assert match_table["blue_teleop_pts"].iloc[0] == 80
     assert match_table["red_team_3_endgame_status"].iloc[0] == "Level3"
+    assert match_table["red_atomic_auto_count"].iloc[0] == 2
+    assert match_table["blue_atomic_shift4_count"].iloc[0] == 7
+    assert match_table["red_bonus_energized"].iloc[0] == 1.0
+    assert match_table["red_bonus_supercharged"].iloc[0] == 0.0
+    assert match_table["red_committed_foul_pts"].iloc[0] == 3
+    assert np.isnan(match_table["red_atomic_auto_count"].iloc[1])
     assert team_map["frc1"] == 1
     assert int(match_table["red_team_1_base_idx"].iloc[0]) == 1
     assert int(match_table["red_team_1_event_idx"].iloc[0]) == 1
     assert not bool(match_table["red_team_1_missing_team_mask"].iloc[0])
     assert str(match_table["red_team_1_idx"].dtype) == "Int64"
+
+
+def test_v56_team_indexing_uses_numeric_team_number():
+    table = pd.DataFrame(
+        {
+            "event_key": ["2026test"],
+            "red_team_1_key": ["frc2290"],
+            "red_team_2_key": [""],
+            "red_team_3_key": ["frc6"],
+            "blue_team_1_key": ["frc4"],
+            "blue_team_2_key": ["frc5"],
+            "blue_team_3_key": ["frc1"],
+        }
+    )
+
+    indexed, team_map = make_team_index_map(table)
+
+    assert team_map["frc2290"] == 2290
+    assert int(indexed["red_team_1_base_idx"].iloc[0]) == 2290
+    assert int(indexed["red_team_2_base_idx"].iloc[0]) == 0
+    assert bool(indexed["red_team_2_missing_team_mask"].iloc[0])
+
+
+def test_v56_team_indexing_errors_above_prior_bounds():
+    table = pd.DataFrame(
+        {
+            "event_key": ["2026test"],
+            "red_team_1_key": ["frc12501"],
+            "red_team_2_key": ["frc2"],
+            "red_team_3_key": ["frc3"],
+            "blue_team_1_key": ["frc4"],
+            "blue_team_2_key": ["frc5"],
+            "blue_team_3_key": ["frc6"],
+        }
+    )
+
+    with pytest.raises(ValueError, match="Rebuild the V5.6 prior"):
+        make_team_index_map(table)
 
 
 def test_missing_required_breakdown_field_errors():

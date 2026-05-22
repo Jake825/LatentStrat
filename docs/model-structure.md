@@ -1,36 +1,39 @@
 # Model Structure
 
-LatentStrat V5 is a masked cross-alliance Set Transformer written in PyTorch.
+LatentStrat V5 is a cross-alliance Set Transformer written in PyTorch.
 Each match row contains three red slots and three blue slots. Each slot carries a
-durable team base index, an event-team delta index, and a missing-team mask.
+durable team base index, an event-team delta index, and a missing-team
+diagnostic mask.
 
 Agent-facing architecture guidance lives in
 [`$pytorch-set-transformer`](../.agents/skills/pytorch-set-transformer/SKILL.md).
 
 ## Latent Trunk
 
-- `Z_base`: durable team embedding table. Index `0` is reserved for null; real
-  teams start at `1`.
+- `Z_base`: durable team embedding table. Index `0` is a learned live ghost
+  robot; V5.6 maps `frc####` directly to row `####` for supported team numbers.
 - `Z_event`: zero-initialized event-team delta table. Index `0` is reserved for
   null; real `(event_key, team_key)` pairs start at `1`.
-- `null_team_token`: learned ghost slot used for explicit missing teams and
-  training-time random team dropout.
 
 For a normal slot, the model uses `Z_base[team_base_idx] + Z_event[team_event_idx]`.
-For a missing or randomly dropped slot, it uses `null_team_token` and passes the
-slot through the attention mask.
+For a missing or randomly dropped slot, it routes the slot to `Z_base[0]` and
+`Z_event[0]`. The transformer still attends to all three slots; missing/dropout
+masks are retained as diagnostics and for auxiliary target masking.
 
 ## Day Zero Prior
 
-V5.5 can initialize `Z_base` from an offline text-only prior checkpoint. The
-pretraining artifact stores `team_vectors` keyed by stable TBA team keys such as
-`frc254`. During `train-features --prior-checkpoint`, the current feature table
-first regenerates its per-run `team_base_idx` map, then matching prior vectors
-are copied into `Z_base.weight[team_base_idx]`.
+V5.6.1 can initialize `Z_base` from an offline text-plus-EPA transductive prior
+checkpoint. The pretraining artifact stores `embedding_table`, normally shaped
+`[12501, 16]`, where row `0` is the learned ghost robot and row `254` is the
+learned prior vector for `frc254`. During `train-features --prior-checkpoint`,
+the table is copied directly into `Z_base.weight`.
 
-Prior vectors must match `opts.latent_dim` exactly. Row `0`, `null_team_token`,
-and teams missing from the prior checkpoint retain the normal model
-initialization.
+The checkpoint width must match `opts.latent_dim` exactly. Team numbers above
+the prior table bound are unsupported until the prior is rebuilt with a larger
+`max_team_number`. `Z_event` remains event-local and is not part of the prior
+distillation artifact. The sacrificial pretraining decoder predicts both the
+OpenAI narrative vector and normalized prior-season Statbotics EPA, then is
+discarded before checkpoint export.
 
 ## Attention Topology
 
@@ -46,29 +49,44 @@ The forward pass is:
 ```python
 red_slots = Z_base[red_base_idx] + Z_event[red_event_idx]
 blue_slots = Z_base[blue_base_idx] + Z_event[blue_event_idx]
-red_context = SAB(red_slots, red_missing_mask)
-blue_context = SAB(blue_slots, blue_missing_mask)
-red_cross = CROSS(red_context, blue_context, blue_missing_mask)
-blue_cross = CROSS(blue_context, red_context, red_missing_mask)
-z_red = PMA(red_cross, red_missing_mask)
-z_blue = PMA(blue_cross, blue_missing_mask)
+red_context = SAB(red_slots, all_slots_unmasked)
+blue_context = SAB(blue_slots, all_slots_unmasked)
+red_cross = CROSS(red_context, blue_context, all_slots_unmasked)
+blue_cross = CROSS(blue_context, red_context, all_slots_unmasked)
+z_red = PMA(red_cross, all_slots_unmasked)
+z_blue = PMA(blue_cross, all_slots_unmasked)
 ```
 
 During `model.train()`, healthy non-missing slots are randomly dropped at
-`opts.team_dropout_rate` (default `0.03`) so the model learns 2v3 and 1v3
-behavior. Dropout is disabled in evaluation and inference.
+`opts.team_dropout_rate` (default `0.03`) by routing them to the learned ghost
+row. Dropout is disabled in evaluation and inference.
 
 ## Task Heads
 
 - Continuous alliance heads predict red/blue auto and teleop points.
+- Atomic alliance heads predict generic score-breakdown count arrays such as
+  auto count, shift counts, transition count, and endgame count.
+- Foul heads predict committed foul points and committed foul counts after TBA's
+  awarded foul columns are inverted.
+- Bonus and special binary heads output raw logits for capability thresholds and
+  special penalty flags. Training uses `BCEWithLogitsLoss`; the model does not
+  apply sigmoid internally.
 - `SiameseWinHead` predicts `red_win` with an anti-symmetric, bias-free logit.
 - `OrdinalEndgameHead` predicts cumulative logits for
   `None < Level1 < Level2 < Level3` per robot slot.
 - `JudgesRoomHead` predicts post-event judged-award auxiliary logits per slot.
+- `TeamValueHead` predicts a scalar team value from one `Z_base + Z_event`
+  vector for qualification rank pair losses.
+- `AllianceValueHead` predicts a scalar alliance value from a pooled alliance
+  representation for playoff ordering losses.
 
 Judged awards use NaN-masked targets. Impact and EI share cultural gradients,
 while machine awards are masked single-hot targets so an Autonomous win does not
 create false negative labels for Quality, Design, Control, or Excellence.
+
+All task losses are routed through a task-name keyed homoscedastic balancer. If a
+target group is unavailable or all entries in a batch are `NaN`, that task is
+inactive for the step and does not update its log variance.
 
 ## Consolidation
 

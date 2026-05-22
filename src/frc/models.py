@@ -89,6 +89,9 @@ class TbaTeam(PayloadModel):
     nickname: str = ""
     rookie_year: int | None = None
     name: str = ""
+    city: str | None = None
+    state_prov: str | None = None
+    country: str | None = None
 
     @model_validator(mode="before")
     @classmethod

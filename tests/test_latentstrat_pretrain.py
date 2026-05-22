@@ -11,22 +11,33 @@ from latentstrat.cli import app
 from latentstrat.config import PriorOpts, default_options
 from latentstrat.model import init_model
 from latentstrat.pretrain_features import (
+    GHOST_TEAM_NARRATIVE,
+    KnownTeamRecord,
     OpenAIEmbeddingCache,
+    add_epa_targets,
+    build_future_rookie_narrative,
+    build_gap_team_narrative,
     build_prior_feature_table,
-    build_team_narrative,
+    build_prior_narratives,
+    build_rich_team_narrative,
     clean_narrative_text,
+    compress_years,
     embed_narratives,
+    projected_future_rookie_year,
     write_prior_feature_table,
 )
 from latentstrat.pretrain_loop import (
     apply_prior_checkpoint_to_model,
+    default_tensorboard_run_name,
+    load_prior_embedding_table,
     train_prior_file,
+    train_prior_model,
 )
 from latentstrat.prior_inspection import (
     inspect_prior_checkpoint,
     write_prior_inspection_artifacts,
 )
-from latentstrat.prior_model import UnifiedPriorAutoencoder, reconstruction_loss
+from latentstrat.prior_model import TeamPriorDistiller, distillation_loss
 
 
 class FakeEmbeddings:
@@ -58,39 +69,69 @@ class FakeRateLimitError(Exception):
 
 
 class FakeProvider:
+    teams = [
+        {"key": "frc1", "team_number": 1},
+        {"key": "frc2", "team_number": 2},
+        {"key": "frc11", "team_number": 11},
+    ]
+
+    def get_teams_page(self, page: int, simple: bool = True) -> list[dict]:
+        return self.teams if page == 0 else []
+
     def get_team(self, team_key: str) -> dict:
+        number = int(team_key.removeprefix("frc"))
         return {
             "key": team_key,
-            "nickname": "Orbit",
+            "team_number": number,
+            "nickname": f"Orbit {number}",
+            "name": "NASA / Motorola / Example High School",
             "city": "Chicago",
             "state_prov": "IL",
             "country": "USA",
-            "rookie_year": 2010,
+            "rookie_year": 2010 + number,
         }
+
+    def get_team_years(self, team_key: str) -> list[int]:
+        return {
+            "frc1": [2024, 2025, 2026],
+            "frc2": [2023, 2024],
+            "frc11": [2026],
+        }[team_key]
 
     def get_team_events(self, team_key: str) -> list[dict]:
         return [
-            {"key": "2025mrcmp", "name": "Midwest Regional", "year": 2025},
-            {"key": "2026ilch", "name": "Current Regional", "year": 2026},
-            {"key": "2027ilch", "name": "Future Regional", "year": 2027},
+            {"key": "2024cmpmi", "name": "Championship Division", "year": 2024, "event_type": 3},
+            {"key": "2025mrcmp", "name": "Midwest Regional", "year": 2025, "event_type": 0},
+            {"key": "2026ilch", "name": "Current Regional", "year": 2026, "event_type": 0},
+            {"key": "2027ilch", "name": "Future Regional", "year": 2027, "event_type": 0},
         ]
 
     def get_team_awards(self, team_key: str) -> list[dict]:
         return [
             {
+                "name": "Regional Winner",
+                "award_type": 1,
+                "event_key": "2024cmpmi",
+                "year": 2024,
+                "recipient_list": [{"team_key": team_key}],
+            },
+            {
                 "name": "Autonomous Award",
+                "award_type": 74,
                 "event_key": "2025mrcmp",
                 "year": 2025,
                 "recipient_list": [{"team_key": team_key}],
             },
             {
                 "name": "FIRST Impact Award",
+                "award_type": 0,
                 "event_key": "2026ilch",
                 "year": 2026,
                 "recipient_list": [{"team_key": team_key}],
             },
             {
                 "name": "Quality Award",
+                "award_type": 18,
                 "event_key": "2027ilch",
                 "year": 2027,
                 "recipient_list": [{"team_key": team_key}],
@@ -98,19 +139,80 @@ class FakeProvider:
         ]
 
 
+class FakeStatboticsProvider:
+    rows = [
+        {"team": 1, "year": 2025, "epa": {"total_points": {"mean": 10.0}}},
+        {"team": 2, "year": 2025, "epa": {"breakdown": {"total_points": 30.0}}},
+        {"team": 99, "year": 2026, "epa": {"total_points": {"mean": 99.0}}},
+    ]
+
+    def get_team_years(self, **filters) -> list[dict]:
+        year = int(filters.get("year", 0))
+        offset = int(filters.get("offset", 0))
+        if offset:
+            return []
+        return [row for row in self.rows if int(row["year"]) == year]
+
+
+class FakeTensorBoardWriter:
+    instances: list[FakeTensorBoardWriter] = []
+
+    def __init__(self, log_dir) -> None:
+        self.log_dir = log_dir
+        self.scalars: list[tuple[str, float, int]] = []
+        self.texts: list[tuple[str, str, int]] = []
+        self.closed = False
+        self.instances.append(self)
+
+    def add_scalar(self, tag: str, value: float, step: int) -> None:
+        self.scalars.append((tag, float(value), int(step)))
+
+    def add_text(self, tag: str, text: str, step: int) -> None:
+        self.texts.append((tag, str(text), int(step)))
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _prior_opts(tmp_path=None, **updates) -> PriorOpts:
+    defaults = {
+        "max_team_number": 4,
+        "future_start_number": 10,
+        "future_baseline_team": 9,
+        "future_growth_per_year": 2,
+        "epochs": 3,
+        "batch_size": 2,
+        "cache_path": ":memory:" if tmp_path is None else str(tmp_path / "cache.sqlite"),
+    }
+    defaults.update(updates)
+    return PriorOpts(**defaults)
+
+
 def _prior_table(row_count: int = 3) -> pd.DataFrame:
+    team_numbers = list(range(row_count + 1))
     return pd.DataFrame(
         {
-            "team_key": [f"frc{idx + 1}" for idx in range(row_count)],
-            "target_season": [2026] * row_count,
-            "narrative": [f"Team frc{idx + 1} history." for idx in range(row_count)],
-            "narrative_hash": [f"hash-{idx}" for idx in range(row_count)],
-            "embedding_model": ["text-embedding-3-small"] * row_count,
-            "llm_dim": [256] * row_count,
+            "team_number": team_numbers,
+            "team_key": [f"frc{idx}" for idx in team_numbers],
+            "target_season": [2026] * len(team_numbers),
+            "archetype": ["ghost_token", *(["anchor"] * row_count)],
+            "narrative": [
+                GHOST_TEAM_NARRATIVE,
+                *[f"Team frc{idx} history." for idx in range(1, row_count + 1)],
+            ],
+            "narrative_hash": [f"hash-{idx}" for idx in team_numbers],
+            "embedding_model": ["text-embedding-3-small"] * len(team_numbers),
+            "llm_dim": [256] * len(team_numbers),
             "openai_narrative_vector": [
                 [float((idx + offset) % 11) / 11.0 for offset in range(256)]
-                for idx in range(row_count)
+                for idx in team_numbers
             ],
+            "raw_epa": [0.0, *[20.0 + idx for idx in range(1, row_count + 1)]],
+            "target_epa": [-2.0, *[float(idx) / 10.0 for idx in range(1, row_count + 1)]],
+            "epa_source_year": [2025] * len(team_numbers),
+            "epa_is_imputed": [False, *([False] * row_count)],
+            "epa_mean": [20.0] * len(team_numbers),
+            "epa_std": [10.0] * len(team_numbers),
         }
     )
 
@@ -154,23 +256,29 @@ def _feature_table(row_count: int = 6) -> pd.DataFrame:
     return table
 
 
-def test_temporal_quarantine_excludes_target_and_future_records_from_narrative():
-    provider = FakeProvider()
+def test_compress_years_groups_contiguous_ranges():
+    assert compress_years([2001, 2002, 2003, 2005]) == "2001-2003, 2005"
 
-    narrative = build_team_narrative(
-        "frc111",
-        provider.get_team("frc111"),
-        provider.get_team_events("frc111"),
-        provider.get_team_awards("frc111"),
+
+def test_rich_narrative_preserves_signal_and_quarantines_target_season():
+    provider = FakeProvider()
+    narrative = build_rich_team_narrative(
+        provider.get_team("frc1"),
+        provider.get_team_years("frc1"),
+        provider.get_team_awards("frc1"),
+        provider.get_team_events("frc1"),
         target_season=2026,
+        active_in_target=True,
     )
 
-    assert "2025 Midwest Regional" in narrative
-    assert "Autonomous Award" in narrative
-    assert "2026" not in narrative
+    assert "NASA / Motorola / Example High School" in narrative
+    assert "2024-2025" in narrative
+    assert "won official events" in narrative
+    assert "FIRST World Championship" in narrative
+    assert "Autonomous Award: 2025" in narrative
     assert "FIRST Impact Award" not in narrative
-    assert "2027" not in narrative
     assert "Quality Award" not in narrative
+    assert "2027" not in narrative
 
 
 def test_narrative_cleaning_removes_json_artifacts_and_null_literals():
@@ -183,24 +291,109 @@ def test_narrative_cleaning_removes_json_artifacts_and_null_literals():
     assert "None" not in narrative
 
 
-def test_historical_awards_are_injected_next_to_event_text():
+def test_gap_and_future_narratives_encode_dark_matter_context():
+    gap = build_gap_team_narrative(
+        4000,
+        2012,
+        [{"number": 3999, "name": "Shaker Robotics", "location": "Latham, NY"}],
+    )
+    opts = _prior_opts(future_baseline_team=10_900, future_growth_per_year=800)
+    future = build_future_rookie_narrative(12_500, opts)
+
+    assert "Team 3999 (Shaker Robotics from Latham, NY)" in gap
+    assert projected_future_rookie_year(12_500, opts) == 2028
+    assert "2031" not in future
+    assert "2028 season" in future
+    assert "WPILib" in future
+
+
+def test_build_prior_narratives_assigns_all_v56_archetypes():
+    known = {
+        1: KnownTeamRecord(
+            1,
+            "frc1",
+            FakeProvider().get_team("frc1"),
+            [2025, 2026],
+            [],
+            [],
+        ),
+        2: KnownTeamRecord(
+            2,
+            "frc2",
+            FakeProvider().get_team("frc2"),
+            [2024],
+            [],
+            [],
+        ),
+    }
+    opts = _prior_opts(max_team_number=12, future_start_number=10)
+
+    table = build_prior_narratives(known, 2026, opts)
+
+    assert len(table) == 13
+    assert table["team_number"].iloc[0] == 0
+    assert table["team_key"].iloc[0] == "frc0"
+    assert table["archetype"].iloc[0] == "ghost_token"
+    assert table["narrative"].iloc[0] == GHOST_TEAM_NARRATIVE
+    assert set(table["archetype"]) == {
+        "ghost_token",
+        "anchor",
+        "ghost",
+        "sibling",
+        "future",
+    }
+
+
+def test_build_prior_feature_table_emits_exact_requested_universe():
+    opts = _prior_opts(max_team_number=12, future_start_number=10)
     table = build_prior_feature_table(
-        ["frc111"],
         FakeProvider(),
         target_season=2026,
-        opts=PriorOpts(cache_path=":memory:"),
+        opts=opts,
         client=FakeOpenAIClient(),
+        statbotics_provider=FakeStatboticsProvider(),
     )
 
-    narrative = table.loc[0, "narrative"]
-    assert "Played 2025 Midwest Regional. Won Autonomous Award." in narrative
+    assert len(table) == 13
+    assert table["team_number"].tolist() == list(range(13))
+    assert set(table["archetype"]) == {
+        "ghost_token",
+        "anchor",
+        "ghost",
+        "sibling",
+        "future",
+    }
+    assert table["openai_narrative_vector"].map(len).eq(256).all()
+    assert table.loc[0, "narrative"] == GHOST_TEAM_NARRATIVE
+    assert table["target_epa"].notna().all()
+
+
+def test_epa_targets_use_prior_season_and_rookie_baseline():
+    opts = _prior_opts(max_team_number=4)
+    narratives = build_prior_narratives({}, target_season=2026, opts=opts)
+
+    table = add_epa_targets(
+        narratives,
+        FakeStatboticsProvider(),
+        target_season=2026,
+        opts=opts,
+    )
+
+    assert table.loc[0, "raw_epa"] == 0.0
+    assert table.loc[0, "target_epa"] == pytest.approx(-2.0)
+    assert table.loc[1, "target_epa"] == pytest.approx(-1.0)
+    assert table.loc[2, "target_epa"] == pytest.approx(1.0)
+    assert table.loc[3, "raw_epa"] == pytest.approx(18.0)
+    assert table.loc[3, "target_epa"] == pytest.approx(-0.2)
+    assert bool(table.loc[3, "epa_is_imputed"])
+    assert table["epa_source_year"].eq(2025).all()
 
 
 def test_openai_embedding_cache_uses_stable_request_hash(tmp_path):
     cache = OpenAIEmbeddingCache(tmp_path / "cache.sqlite")
-    opts = PriorOpts(cache_path=str(tmp_path / "cache.sqlite"))
+    opts = _prior_opts(tmp_path)
     client = FakeOpenAIClient()
-    narratives = {"frc1": "Same text prior."}
+    narratives = {1: "Same text prior."}
 
     first = embed_narratives(narratives, opts, client=client, cache=cache)
     second = embed_narratives(narratives, opts, client=client, cache=cache)
@@ -211,16 +404,13 @@ def test_openai_embedding_cache_uses_stable_request_hash(tmp_path):
 
 def test_embedding_batching_preserves_outputs_and_deduplicates_narratives(tmp_path):
     cache = OpenAIEmbeddingCache(tmp_path / "cache.sqlite")
-    opts = PriorOpts(
-        cache_path=str(tmp_path / "cache.sqlite"),
-        embedding_batch_size=2,
-    )
+    opts = _prior_opts(tmp_path, embedding_batch_size=2)
     client = FakeOpenAIClient()
     narratives = {
-        "frc1": "Shared text.",
-        "frc2": "Shared text.",
-        "frc3": "Unique text A.",
-        "frc4": "Unique text B.",
+        1: "Shared text.",
+        2: "Shared text.",
+        3: "Unique text A.",
+        4: "Unique text B.",
     }
 
     embeddings = embed_narratives(narratives, opts, client=client, cache=cache)
@@ -228,13 +418,13 @@ def test_embedding_batching_preserves_outputs_and_deduplicates_narratives(tmp_pa
     assert set(embeddings) == set(narratives)
     assert client.embeddings.calls == 2
     assert [len(batch) for batch in client.embeddings.inputs] == [2, 1]
-    assert embeddings["frc1"] == embeddings["frc2"]
+    assert embeddings[1] == embeddings[2]
 
 
 def test_embedding_retry_recovers_from_fake_429_and_caches_result(tmp_path):
     cache = OpenAIEmbeddingCache(tmp_path / "cache.sqlite")
-    opts = PriorOpts(
-        cache_path=str(tmp_path / "cache.sqlite"),
+    opts = _prior_opts(
+        tmp_path,
         max_embedding_retries=2,
         embedding_retry_initial_delay=0.0,
         embedding_retry_max_delay=0.0,
@@ -242,18 +432,18 @@ def test_embedding_retry_recovers_from_fake_429_and_caches_result(tmp_path):
     )
     client = FakeOpenAIClient(failures=1)
 
-    embeddings = embed_narratives({"frc1": "Retry text."}, opts, client=client, cache=cache)
-    cached = embed_narratives({"frc1": "Retry text."}, opts, client=client, cache=cache)
+    embeddings = embed_narratives({1: "Retry text."}, opts, client=client, cache=cache)
+    cached = embed_narratives({1: "Retry text."}, opts, client=client, cache=cache)
 
-    assert set(embeddings) == {"frc1"}
+    assert set(embeddings) == {1}
     assert cached == embeddings
     assert client.embeddings.calls == 2
 
 
 def test_embedding_retry_raises_after_exhausting_retries(tmp_path):
     cache = OpenAIEmbeddingCache(tmp_path / "cache.sqlite")
-    opts = PriorOpts(
-        cache_path=str(tmp_path / "cache.sqlite"),
+    opts = _prior_opts(
+        tmp_path,
         max_embedding_retries=1,
         embedding_retry_initial_delay=0.0,
         embedding_retry_max_delay=0.0,
@@ -262,54 +452,176 @@ def test_embedding_retry_raises_after_exhausting_retries(tmp_path):
     client = FakeOpenAIClient(failures=3)
 
     with pytest.raises(FakeRateLimitError):
-        embed_narratives({"frc1": "Retry text."}, opts, client=client, cache=cache)
+        embed_narratives({1: "Retry text."}, opts, client=client, cache=cache)
 
 
-def _calibrated_identity_prior_model(dropout_rate: float) -> UnifiedPriorAutoencoder:
-    model = UnifiedPriorAutoencoder(PriorOpts(dropout_rate=dropout_rate))
-    gain = torch.nn.functional.gelu(torch.tensor(5.0)).item()
-    with torch.no_grad():
-        for parameter in model.parameters():
-            parameter.zero_()
-        eye = torch.eye(16)
-        model.encoder[0].weight[:16, :16].copy_(5.0 * eye)
-        model.encoder[2].weight[:16, :16].copy_(eye / gain)
-        model.decoder[0].weight[:16, :16].copy_(5.0 * eye)
-        model.decoder[2].weight[:16, :16].copy_(eye / gain)
-    return model
+def test_prior_distiller_forward_shape_and_ghost_row():
+    opts = _prior_opts(max_team_number=4)
+    model = TeamPriorDistiller(opts)
+
+    prediction, pred_epa, latent = model(torch.tensor([0, 1, 2]))
+
+    assert prediction.shape == (3, opts.llm_dim)
+    assert pred_epa.shape == (3, 1)
+    assert latent.shape == (3, opts.latent_dim)
+    assert model.team_embedding.padding_idx is None
+    assert not torch.allclose(model.team_embedding.weight[0], torch.zeros(opts.latent_dim))
 
 
-def test_autoencoder_input_dropout_makes_reconstruction_task_harder():
-    x = torch.zeros((8, 256), dtype=torch.float32)
-    x[:, :16] = 1.0
-    no_dropout = _calibrated_identity_prior_model(0.0)
-    with_dropout = _calibrated_identity_prior_model(0.3)
-    no_dropout.train()
-    with_dropout.train()
+def test_prior_distiller_has_only_coordinate_map_and_decoder():
+    model = TeamPriorDistiller(_prior_opts(max_team_number=4))
 
-    torch.manual_seed(123)
-    easy_loss = reconstruction_loss(no_dropout, x)
-    torch.manual_seed(123)
-    corrupted_loss = reconstruction_loss(with_dropout, x)
+    assert set(dict(model.named_children())) == {
+        "team_embedding",
+        "decoder",
+        "openai_head",
+        "epa_head",
+    }
+    assert isinstance(model.team_embedding, torch.nn.Embedding)
+    assert isinstance(model.decoder, torch.nn.Sequential)
+    assert isinstance(model.log_var_openai, torch.nn.Parameter)
+    assert isinstance(model.log_var_epa, torch.nn.Parameter)
 
-    assert easy_loss < corrupted_loss
+
+def test_prior_distiller_ghost_row_receives_gradients():
+    opts = _prior_opts(max_team_number=4)
+    model = TeamPriorDistiller(opts)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-2)
+    before = model.team_embedding.weight[0].detach().clone()
+    team_numbers = torch.tensor([0])
+    target = torch.ones((1, opts.llm_dim))
+    target_epa = torch.ones((1, 1))
+
+    prediction, pred_epa, _ = model(team_numbers)
+    loss = torch.nn.functional.mse_loss(prediction, target)
+    loss = loss + torch.nn.functional.mse_loss(pred_epa, target_epa)
+    loss.backward()
+    assert model.team_embedding.weight.grad is not None
+    assert not torch.allclose(
+        model.team_embedding.weight.grad[0],
+        torch.zeros_like(model.team_embedding.weight.grad[0]),
+    )
+    optimizer.step()
+
+    assert not torch.allclose(model.team_embedding.weight[0], before)
 
 
-def test_prior_autoencoder_checkpoint_contract(tmp_path):
+def test_distiller_loss_includes_row_zero():
+    opts = _prior_opts(max_team_number=4)
+    model = TeamPriorDistiller(opts)
+    target = torch.ones((1, opts.llm_dim))
+    target_epa = torch.ones((1, 1))
+
+    loss = distillation_loss(model, torch.tensor([0]), target, target_epa)
+
+    assert float(loss.detach()) > 0.0
+
+
+def test_distiller_training_reduces_reconstruction_loss():
+    table = _prior_table(4)
+    opts = _prior_opts(max_team_number=4, epochs=20, batch_size=4, learning_rate=1e-2)
+
+    _, history, _ = train_prior_model(table, opts, verbose=False)
+
+    assert history["train_loss"].iloc[-1] < history["train_loss"].iloc[0]
+
+
+def test_prior_distiller_checkpoint_contract(tmp_path):
     features = tmp_path / "prior_features.parquet"
     output = tmp_path / "pretrained_prior_2026.pt"
-    write_prior_feature_table(_prior_table(2), features)
-    opts = PriorOpts(epochs=2, batch_size=2, cache_path=str(tmp_path / "cache.sqlite"))
+    write_prior_feature_table(_prior_table(4), features)
+    opts = _prior_opts(tmp_path, max_team_number=4, epochs=2, batch_size=2)
 
     result = train_prior_file(features, output, opts, verbose=False)
     checkpoint = torch.load(output, map_location="cpu", weights_only=False)
 
     assert output.exists()
     assert checkpoint["target_season"] == 2026
-    assert set(checkpoint["team_vectors"]) == {"frc1", "frc2"}
-    assert checkpoint["team_vectors"]["frc1"].shape == (16,)
+    assert checkpoint["embedding_table"].shape == (5, 16)
+    assert not torch.allclose(checkpoint["embedding_table"][0], torch.zeros(16))
+    assert checkpoint["max_team_number"] == 4
+    assert checkpoint["feature_metadata"]["has_ghost_token"]
+    assert checkpoint["feature_metadata"]["has_epa_target"]
+    assert checkpoint["feature_metadata"]["epa_source_year"] == 2025
     assert checkpoint["prior_opts"]["llm_dim"] == 256
-    assert set(result.team_vectors) == {"frc1", "frc2"}
+    assert "model_state_dict" not in checkpoint
+    assert "decoder_state_dict" not in checkpoint
+    assert result.embedding_table.shape == (5, 16)
+
+    full_model_path = tmp_path / "full_model.pt"
+    torch.save(
+        {
+            "embedding_table": result.embedding_table,
+            "model_state_dict": result.model.state_dict(),
+            "history": result.history.to_dict(orient="records"),
+        },
+        full_model_path,
+    )
+    assert output.stat().st_size < full_model_path.stat().st_size
+
+
+def test_train_prior_file_writes_tensorboard_scalars_and_closes(tmp_path, monkeypatch):
+    FakeTensorBoardWriter.instances.clear()
+    features = tmp_path / "prior_features.parquet"
+    output = tmp_path / "pretrained_prior_2026.pt"
+    write_prior_feature_table(_prior_table(2), features)
+    monkeypatch.setattr(
+        "latentstrat.pretrain_loop.create_tensorboard_writer",
+        lambda log_dir: FakeTensorBoardWriter(log_dir),
+    )
+
+    result = train_prior_file(
+        features,
+        output,
+        _prior_opts(tmp_path, max_team_number=2, epochs=1, batch_size=2),
+        verbose=False,
+        tensorboard_logdir=tmp_path / "runs",
+        tensorboard_run_name="test_run",
+    )
+
+    writer = FakeTensorBoardWriter.instances[-1]
+    tags = {tag for tag, _, _ in writer.scalars}
+    assert result.tensorboard_logdir == tmp_path / "runs" / "test_run"
+    assert writer.closed
+    assert writer.texts[0][0] == "Run/Context"
+    assert {
+        "Loss/Total",
+        "Loss/OpenAI_MSE",
+        "Loss/EPA_MSE",
+        "LogVar/OpenAI",
+        "LogVar/EPA",
+        "Weights/OpenAI_Precision",
+        "Weights/EPA_Precision",
+    }.issubset(tags)
+    assert "model_state_dict" not in result.checkpoint
+
+
+def test_tensorboard_writer_closes_when_training_raises(tmp_path, monkeypatch):
+    FakeTensorBoardWriter.instances.clear()
+    features = tmp_path / "prior_features_v56.parquet"
+    output = tmp_path / "pretrained_prior_2026.pt"
+    write_prior_feature_table(_prior_table(2).drop(columns=["target_epa"]), features)
+    monkeypatch.setattr(
+        "latentstrat.pretrain_loop.create_tensorboard_writer",
+        lambda log_dir: FakeTensorBoardWriter(log_dir),
+    )
+
+    with pytest.raises(KeyError, match="missing target_epa"):
+        train_prior_file(
+            features,
+            output,
+            _prior_opts(tmp_path, max_team_number=2, epochs=1, batch_size=2),
+            verbose=False,
+            tensorboard_logdir=tmp_path / "runs",
+        )
+
+    assert FakeTensorBoardWriter.instances[-1].closed
+
+
+def test_default_tensorboard_run_name_uses_target_season():
+    run_name = default_tensorboard_run_name(_prior_table(2), timestamp=123)
+
+    assert run_name == "v561_prior_2026_123"
 
 
 def test_prior_inspection_exports_tables_and_pngs(tmp_path):
@@ -317,17 +629,18 @@ def test_prior_inspection_exports_tables_and_pngs(tmp_path):
     checkpoint_path = tmp_path / "pretrained_prior_2026.pt"
     output = tmp_path / "inspection"
     write_prior_feature_table(_prior_table(3), features)
-    opts = PriorOpts(epochs=2, batch_size=3, cache_path=str(tmp_path / "cache.sqlite"))
+    opts = _prior_opts(tmp_path, max_team_number=3, epochs=2, batch_size=3)
     train_prior_file(features, checkpoint_path, opts, verbose=False)
 
     inspection = inspect_prior_checkpoint(checkpoint_path, features, top_k=2)
     artifact_dir = write_prior_inspection_artifacts(inspection, output)
 
-    assert len(inspection.latent_table) == 3
+    assert len(inspection.latent_table) == 4
     assert {"pc1", "pc2", "pc3", "reconstruction_mse"}.issubset(
         inspection.latent_table.columns
     )
-    assert len(inspection.nearest_neighbors) == 6
+    assert inspection.latent_table["reconstruction_mse"].isna().all()
+    assert len(inspection.nearest_neighbors) == 8
     assert inspection.sanity_checks["passed"].notna().all()
     for name in (
         "prior_latent_table.csv",
@@ -344,33 +657,59 @@ def test_prior_inspection_exports_tables_and_pngs(tmp_path):
         assert path.stat().st_size > 0
 
 
-def test_day_zero_prior_handoff_overwrites_matching_base_rows_only(tmp_path):
-    opts = default_options()
-    model = init_model(4, opts.latent_dim, 4, 1, opts)
-    null_before = model.Z_base.weight[0].detach().clone()
-    rookie_before = model.Z_base.weight[2].detach().clone()
-    checkpoint = tmp_path / "prior.pt"
-    torch.save({"team_vectors": {"frc1": torch.ones(opts.latent_dim)}}, checkpoint)
-
-    applied = apply_prior_checkpoint_to_model(
-        model,
-        checkpoint,
-        {"frc1": 1, "frc2": 2},
-        latent_dim=opts.latent_dim,
+def test_prior_inspection_accepts_stripped_checkpoint_without_features(tmp_path):
+    features = tmp_path / "prior_features.parquet"
+    checkpoint_path = tmp_path / "pretrained_prior_2026.pt"
+    write_prior_feature_table(_prior_table(3), features)
+    train_prior_file(
+        features,
+        checkpoint_path,
+        _prior_opts(tmp_path, max_team_number=3, epochs=1, batch_size=3),
+        verbose=False,
     )
 
-    assert applied == 1
+    inspection = inspect_prior_checkpoint(checkpoint_path, top_k=1)
+
+    assert len(inspection.latent_table) == 4
+    assert inspection.latent_table["team_key"].tolist() == ["frc0", "frc1", "frc2", "frc3"]
+    assert inspection.latent_table["reconstruction_mse"].isna().all()
+
+
+def test_day_zero_prior_handoff_copies_embedding_table(tmp_path):
+    opts = default_options()
+    model = init_model(5, opts.latent_dim, 4, 1, opts)
+    checkpoint = tmp_path / "prior.pt"
+    embedding_table = torch.zeros((5, opts.latent_dim))
+    embedding_table[0] = 3.0
+    embedding_table[1] = 1.0
+    embedding_table[2] = 2.0
+    torch.save({"embedding_table": embedding_table}, checkpoint)
+
+    applied = apply_prior_checkpoint_to_model(model, checkpoint, latent_dim=opts.latent_dim)
+
+    assert applied == 4
     assert torch.allclose(model.Z_base.weight[1], torch.ones(opts.latent_dim))
-    assert torch.allclose(model.Z_base.weight[0], null_before)
-    assert torch.allclose(model.Z_base.weight[2], rookie_before)
+    assert torch.allclose(model.Z_base.weight[2], torch.full((opts.latent_dim,), 2.0))
+    assert torch.allclose(model.Z_base.weight[0], torch.full((opts.latent_dim,), 3.0))
+
+
+def test_load_prior_embedding_table_reads_stripped_checkpoint(tmp_path):
+    checkpoint = tmp_path / "prior.pt"
+    embedding_table = torch.zeros((3, 16))
+    embedding_table[0] = 2.0
+    embedding_table[1] = 1.0
+    torch.save({"embedding_table": embedding_table}, checkpoint)
+
+    loaded = load_prior_embedding_table(checkpoint)
+
+    assert torch.allclose(loaded, embedding_table)
 
 
 def test_build_prior_features_cli_uses_mocked_provider_and_openai(tmp_path, monkeypatch):
-    teams_from = tmp_path / "features.parquet"
     output = tmp_path / "prior.parquet"
-    _feature_table(2).to_parquet(teams_from, engine="pyarrow", index=False)
     fake_client = FakeOpenAIClient()
     monkeypatch.setattr("latentstrat.cli._provider", lambda: FakeProvider())
+    monkeypatch.setattr("latentstrat.cli._statbotics_provider", lambda: FakeStatboticsProvider())
     monkeypatch.setattr("latentstrat.pretrain_features._openai_client", lambda: fake_client)
 
     result = CliRunner().invoke(
@@ -379,25 +718,66 @@ def test_build_prior_features_cli_uses_mocked_provider_and_openai(tmp_path, monk
             "build-prior-features",
             "--target-season",
             "2026",
-            "--teams-from",
-            str(teams_from),
             "--output",
             str(output),
             "--cache-path",
             str(tmp_path / "cache.sqlite"),
+            "--max-team-number",
+            "12",
         ],
     )
 
     assert result.exit_code == 0, result.output
     assert output.exists()
     table = pd.read_parquet(output, engine="pyarrow")
-    assert set(table["team_key"]) == {"frc1", "frc2", "frc3", "frc4", "frc5", "frc6"}
+    assert len(table) == 13
+    assert table["team_number"].tolist() == list(range(13))
+    assert table["archetype"].iloc[0] == "ghost_token"
+    assert table["target_epa"].notna().all()
 
 
 def test_train_prior_cli_writes_checkpoint(tmp_path):
     features = tmp_path / "prior_features.parquet"
-    output = tmp_path / "pretrained_prior.pt"
+    output = tmp_path / "prior_dir"
     write_prior_feature_table(_prior_table(2), features)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "train-prior",
+            "--features",
+            str(features),
+            "--output",
+            str(output),
+            "--epochs",
+            "1",
+            "--latent-dim",
+            "8",
+            "--batch-size",
+            "2",
+            "--max-team-number",
+            "2",
+            "--no-tensorboard",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    checkpoint_path = output / "checkpoint.pt"
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    assert checkpoint["embedding_table"].shape == (3, 8)
+    assert not torch.allclose(checkpoint["embedding_table"][0], torch.zeros(8))
+    assert "model_state_dict" not in checkpoint
+
+
+def test_train_prior_cli_enables_tensorboard_by_default(tmp_path, monkeypatch):
+    FakeTensorBoardWriter.instances.clear()
+    features = tmp_path / "prior_features.parquet"
+    output = tmp_path / "prior_dir"
+    write_prior_feature_table(_prior_table(2), features)
+    monkeypatch.setattr(
+        "latentstrat.pretrain_loop.create_tensorboard_writer",
+        lambda log_dir: FakeTensorBoardWriter(log_dir),
+    )
 
     result = CliRunner().invoke(
         app,
@@ -411,12 +791,73 @@ def test_train_prior_cli_writes_checkpoint(tmp_path):
             "1",
             "--batch-size",
             "2",
+            "--max-team-number",
+            "2",
         ],
     )
 
     assert result.exit_code == 0, result.output
-    checkpoint = torch.load(output, map_location="cpu", weights_only=False)
-    assert set(checkpoint["team_vectors"]) == {"frc1", "frc2"}
+    assert "TensorBoard active: tensorboard --logdir=runs" in result.output
+    assert FakeTensorBoardWriter.instances
+    assert FakeTensorBoardWriter.instances[-1].closed
+    assert str(FakeTensorBoardWriter.instances[-1].log_dir).startswith("runs")
+
+
+def test_train_prior_cli_no_tensorboard_does_not_create_writer(tmp_path, monkeypatch):
+    features = tmp_path / "prior_features.parquet"
+    output = tmp_path / "prior_dir"
+    write_prior_feature_table(_prior_table(2), features)
+
+    def fail_create_writer(log_dir):
+        raise AssertionError(f"Unexpected TensorBoard writer: {log_dir}")
+
+    monkeypatch.setattr("latentstrat.pretrain_loop.create_tensorboard_writer", fail_create_writer)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "train-prior",
+            "--features",
+            str(features),
+            "--output",
+            str(output),
+            "--epochs",
+            "1",
+            "--batch-size",
+            "2",
+            "--max-team-number",
+            "2",
+            "--no-tensorboard",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "TensorBoard active" not in result.output
+
+
+def test_train_prior_requires_v561_epa_targets(tmp_path):
+    features = tmp_path / "prior_features_v56.parquet"
+    table = _prior_table(2).drop(columns=["target_epa"])
+    write_prior_feature_table(table, features)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "train-prior",
+            "--features",
+            str(features),
+            "--output",
+            str(tmp_path / "prior.pt"),
+            "--epochs",
+            "1",
+            "--max-team-number",
+            "2",
+            "--no-tensorboard",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "missing target_epa" in str(result.exception)
 
 
 def test_inspect_prior_cli_writes_artifacts(tmp_path):
@@ -427,7 +868,7 @@ def test_inspect_prior_cli_writes_artifacts(tmp_path):
     train_prior_file(
         features,
         checkpoint_path,
-        PriorOpts(epochs=1, batch_size=3, cache_path=str(tmp_path / "cache.sqlite")),
+        _prior_opts(tmp_path, max_team_number=3, epochs=1, batch_size=3),
         verbose=False,
     )
 
@@ -449,12 +890,45 @@ def test_inspect_prior_cli_writes_artifacts(tmp_path):
     assert (output / "prior_pca_pc1_pc2.png").stat().st_size > 0
 
 
+def test_inspect_prior_cli_accepts_checkpoint_without_features(tmp_path):
+    features = tmp_path / "prior_features.parquet"
+    checkpoint_path = tmp_path / "pretrained_prior.pt"
+    output = tmp_path / "prior_inspection"
+    write_prior_feature_table(_prior_table(3), features)
+    train_prior_file(
+        features,
+        checkpoint_path,
+        _prior_opts(tmp_path, max_team_number=3, epochs=1, batch_size=3),
+        verbose=False,
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "inspect-prior",
+            "--checkpoint",
+            str(checkpoint_path),
+            "--output",
+            str(output),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (output / "prior_latent_table.csv").exists()
+    table = pd.read_csv(output / "prior_latent_table.csv")
+    assert table["team_key"].iloc[0] == "frc0"
+    assert table["reconstruction_mse"].isna().all()
+
+
 def test_train_features_cli_accepts_prior_checkpoint(tmp_path):
     features = tmp_path / "features.parquet"
     output = tmp_path / "artifacts"
     prior = tmp_path / "prior.pt"
     _feature_table().to_parquet(features, engine="pyarrow", index=False)
-    torch.save({"team_vectors": {"frc1": torch.ones(default_options().latent_dim)}}, prior)
+    embedding_table = torch.zeros((7, default_options().latent_dim))
+    embedding_table[0] = 2.0
+    embedding_table[1:] = 1.0
+    torch.save({"embedding_table": embedding_table}, prior)
 
     result = CliRunner().invoke(
         app,
@@ -472,4 +946,4 @@ def test_train_features_cli_accepts_prior_checkpoint(tmp_path):
 
     assert result.exit_code == 0, result.output
     checkpoint = torch.load(output / "v5_checkpoint.pt", map_location="cpu", weights_only=False)
-    assert checkpoint["prior_vectors_applied"] == 1
+    assert checkpoint["prior_vectors_applied"] == 6

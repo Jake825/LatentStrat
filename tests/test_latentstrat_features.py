@@ -21,6 +21,7 @@ from latentstrat.cli import app
 from latentstrat.config import default_options
 from latentstrat.features import (
     add_award_features,
+    build_event_sidecars,
     merge_scouting_features,
     read_feature_table,
     train_feature_table,
@@ -186,6 +187,43 @@ def test_award_ontology_masks_machine_award_non_axes_and_tracks_ei_eligibility()
     assert out.loc[1, "red_team_1_award_ei"] == 1.0
     assert out.loc[1, "red_team_2_award_impact"] == 0.0
     assert out.loc[1, "red_team_2_award_ei"] == 1.0
+
+
+class _FakeSidecarProvider:
+    def get_event_rankings(self, event_key):
+        return {
+            "rankings": [
+                {"team_key": "frc1", "rank": 1, "matches_played": 10},
+                {"team_key": "frc2", "rank": 2, "matches_played": 10},
+                {"team_key": "frc3", "rank": 3, "matches_played": 10},
+                {"team_key": "frc4", "rank": 4, "matches_played": 10},
+            ]
+        }
+
+    def get_event_alliances(self, event_key):
+        return [
+            {"picks": ["frc1", "frc3", "frc4"], "status": {"status": "won", "level": "f"}},
+            {"picks": ["frc2"], "status": {"status": "eliminated", "level": "sf"}},
+        ]
+
+
+def test_sidecar_generation_preserves_schemas_and_passed_over_team():
+    sidecars = build_event_sidecars(["2026features"], _FakeSidecarProvider())
+
+    rankings = sidecars["rankings"]
+    selections = sidecars["selections"]
+    playoffs = sidecars["playoffs"]
+
+    assert list(rankings[["event_key", "team_key", "qual_rank"]].iloc[0]) == [
+        "2026features",
+        "frc1",
+        1,
+    ]
+    assert selections.loc[0, "captain_team_key"] == "frc1"
+    assert selections.loc[0, "pick_team_key"] == "frc3"
+    assert selections.loc[0, "passed_over_team_key"] == "frc2"
+    assert "declining_team_key" not in selections.columns
+    assert int(playoffs.loc[0, "playoff_finish_order"]) == 1
 
 
 def test_init_scouting_db_creates_expected_tables(tmp_path):

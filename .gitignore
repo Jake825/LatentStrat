@@ -5,6 +5,7 @@ __pycache__/
 .venv/
 venv/
 artifacts/
+runs/
 data/*.parquet
 data/*.db
 data/*.sqlite

@@ -1,4 +1,4 @@
-"""Inspection and visualization utilities for V5.5 prior checkpoints."""
+"""Inspection and visualization utilities for V5.6 prior checkpoints."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from latentstrat.config import PriorOpts
 from latentstrat.inspection import compute_pca, normalize_rows
 from latentstrat.pretrain_features import read_prior_feature_table
 from latentstrat.pretrain_loop import PriorTensorDataset
-from latentstrat.prior_model import UnifiedPriorAutoencoder
+from latentstrat.prior_model import TeamPriorDistiller
 
 
 @dataclass
@@ -29,45 +29,46 @@ class PriorInspection:
 
 def _checkpoint(path: str | Path) -> dict[str, Any]:
     checkpoint = torch.load(path, map_location="cpu", weights_only=False)
-    if "team_vectors" not in checkpoint:
-        raise KeyError("Prior checkpoint is missing team_vectors.")
-    if "model_state_dict" not in checkpoint:
-        raise KeyError("Prior checkpoint is missing model_state_dict.")
+    if "embedding_table" not in checkpoint:
+        raise KeyError("Prior checkpoint is missing embedding_table.")
     return checkpoint
 
 
 def _prior_opts(checkpoint: dict[str, Any]) -> PriorOpts:
-    return PriorOpts.model_validate(checkpoint.get("prior_opts", {}))
+    if checkpoint.get("prior_opts"):
+        return PriorOpts.model_validate(checkpoint["prior_opts"])
+    table = torch.as_tensor(checkpoint["embedding_table"], dtype=torch.float32)
+    return PriorOpts(max_team_number=int(table.shape[0]) - 1, latent_dim=int(table.shape[1]))
 
 
-def _team_vectors(checkpoint: dict[str, Any], opts: PriorOpts) -> dict[str, torch.Tensor]:
-    vectors = {}
-    for team_key, value in checkpoint["team_vectors"].items():
-        vector = torch.as_tensor(value, dtype=torch.float32).detach().cpu()
-        if int(vector.numel()) != opts.latent_dim:
-            raise ValueError(
-                f"Prior vector for {team_key} has width {vector.numel()}, "
-                f"expected {opts.latent_dim}."
-            )
-        vectors[str(team_key)] = vector
-    return vectors
+def _embedding_table(checkpoint: dict[str, Any], opts: PriorOpts) -> torch.Tensor:
+    table = torch.as_tensor(checkpoint["embedding_table"], dtype=torch.float32).detach().cpu()
+    expected_shape = (opts.max_team_number + 1, opts.latent_dim)
+    if tuple(table.shape) != expected_shape:
+        raise ValueError(
+            f"Prior embedding_table has shape {tuple(table.shape)}, "
+            f"expected {expected_shape}."
+        )
+    return table
 
 
 def _reconstruction_mse(
     checkpoint: dict[str, Any],
-    features: pd.DataFrame,
+    features: pd.DataFrame | None,
     opts: PriorOpts,
-) -> dict[str, float]:
+) -> dict[int, float]:
+    if features is None or "model_state_dict" not in checkpoint:
+        return {}
     dataset = PriorTensorDataset(features, opts)
-    model = UnifiedPriorAutoencoder(opts)
+    model = TeamPriorDistiller(opts)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
     with torch.inference_mode():
-        reconstruction = model.decoder(model.encoder(dataset.vectors))
+        reconstruction, _, _ = model(dataset.team_numbers)
         mse = F.mse_loss(reconstruction, dataset.vectors, reduction="none").mean(dim=1)
     return {
-        team_key: float(mse[idx].detach().cpu())
-        for idx, team_key in enumerate(dataset.team_keys)
+        int(team_number): float(mse[idx].detach().cpu())
+        for idx, team_number in enumerate(dataset.team_numbers.tolist())
     }
 
 
@@ -103,6 +104,14 @@ def _nearest_neighbors(
 
 def _sanity_checks(vectors: np.ndarray, latent_table: pd.DataFrame) -> pd.DataFrame:
     norms = latent_table["embedding_norm"].to_numpy(dtype=float)
+    reconstruction = latent_table["reconstruction_mse"]
+    known_reconstruction = reconstruction[reconstruction.notna()]
+    reconstruction_ok = (
+        True if known_reconstruction.empty else bool(np.isfinite(known_reconstruction).all())
+    )
+    reconstruction_value = (
+        np.nan if known_reconstruction.empty else float(np.nanmax(known_reconstruction))
+    )
     variances = (
         np.nanvar(vectors, axis=0, ddof=1)
         if len(vectors) > 1
@@ -131,34 +140,61 @@ def _sanity_checks(vectors: np.ndarray, latent_table: pd.DataFrame) -> pd.DataFr
         ),
         (
             "finite_reconstruction_mse",
-            bool(np.isfinite(latent_table["reconstruction_mse"]).all()),
-            float(np.nanmax(latent_table["reconstruction_mse"])),
+            reconstruction_ok,
+            reconstruction_value,
             np.inf,
         ),
     ]
     return pd.DataFrame(rows, columns=["check", "passed", "value", "threshold"])
 
 
+def _feature_lookup(features: pd.DataFrame | None) -> dict[int, dict[str, Any]]:
+    lookup: dict[int, dict[str, Any]] = {}
+    if features is None:
+        return lookup
+    for _, row in features.iterrows():
+        number = int(row["team_number"])
+        lookup[number] = {
+            "team_key": str(row.get("team_key", f"frc{number}")),
+            "archetype": str(row.get("archetype", "")),
+            "narrative_hash": str(row.get("narrative_hash", "")),
+            "raw_epa": row.get("raw_epa", np.nan),
+            "target_epa": row.get("target_epa", np.nan),
+            "epa_source_year": row.get("epa_source_year", np.nan),
+            "epa_is_imputed": row.get("epa_is_imputed", np.nan),
+        }
+    return lookup
+
+
 def inspect_prior_checkpoint(
     checkpoint_path: str | Path,
-    features_path: str | Path,
+    features_path: str | Path | None = None,
     *,
     top_k: int = 10,
 ) -> PriorInspection:
     checkpoint = _checkpoint(checkpoint_path)
     opts = _prior_opts(checkpoint)
-    features = read_prior_feature_table(features_path)
-    vectors = _team_vectors(checkpoint, opts)
+    features = read_prior_feature_table(features_path) if features_path is not None else None
+    embedding_table = _embedding_table(checkpoint, opts)
     reconstruction = _reconstruction_mse(checkpoint, features, opts)
+    lookup = _feature_lookup(features)
     rows = []
-    for team_key in sorted(vectors):
-        vector = vectors[team_key].numpy()
+    for team_number in range(0, opts.max_team_number + 1):
+        vector = embedding_table[team_number].numpy()
+        feature = lookup.get(team_number, {})
         rows.append(
             {
-                "team_key": team_key,
+                "team_number": team_number,
+                "team_key": feature.get("team_key", f"frc{team_number}"),
+                "archetype": feature.get("archetype", ""),
+                "narrative_hash": feature.get("narrative_hash", ""),
+                "raw_epa": feature.get("raw_epa", np.nan),
+                "target_epa": feature.get("target_epa", np.nan),
+                "epa_source_year": feature.get("epa_source_year", np.nan),
+                "epa_is_imputed": feature.get("epa_is_imputed", np.nan),
                 "embedding": vector.tolist(),
                 "embedding_norm": float(np.linalg.norm(vector)),
-                "reconstruction_mse": reconstruction.get(team_key, np.nan),
+                "reconstruction_mse": reconstruction.get(team_number, np.nan),
             }
         )
     latent_table = pd.DataFrame(rows)
@@ -217,7 +253,7 @@ def _plot_pca(
             )
     ax.set_xlabel(x_column.upper())
     ax.set_ylabel(y_column.upper())
-    ax.set_title(f"V5.5 Prior Latent Space: {x_column.upper()} vs {y_column.upper()}")
+    ax.set_title(f"V5.6 Prior Latent Space: {x_column.upper()} vs {y_column.upper()}")
     fig.tight_layout()
     fig.savefig(output_path, dpi=160)
     plt.close(fig)
@@ -233,7 +269,35 @@ def _plot_norm_hist(latent_table: pd.DataFrame, output_path: Path) -> None:
     ax.hist(latent_table["embedding_norm"], bins=30, color="#3b82f6", alpha=0.85)
     ax.set_xlabel("Embedding L2 norm")
     ax.set_ylabel("Team count")
-    ax.set_title("V5.5 Prior Embedding Norms")
+    ax.set_title("V5.6 Prior Embedding Norms")
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=160)
+    plt.close(fig)
+
+
+def _plot_pca_epa(latent_table: pd.DataFrame, output_path: Path) -> None:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    values = pd.to_numeric(latent_table.get("target_epa"), errors="coerce")
+    finite = values.notna() & np.isfinite(values.to_numpy(dtype=float, na_value=np.nan))
+    colors = values if finite.any() else latent_table["embedding_norm"]
+    label = "Normalized EPA target" if finite.any() else "Embedding L2 norm"
+    fig, ax = plt.subplots(figsize=(10, 7))
+    scatter = ax.scatter(
+        latent_table["pc1"],
+        latent_table["pc2"],
+        s=18,
+        alpha=0.72,
+        c=colors,
+        cmap="coolwarm" if finite.any() else "viridis",
+    )
+    ax.set_xlabel("PC1")
+    ax.set_ylabel("PC2")
+    ax.set_title("V5.6.1 Prior Latent Space Colored By EPA")
+    fig.colorbar(scatter, ax=ax, label=label)
     fig.tight_layout()
     fig.savefig(output_path, dpi=160)
     plt.close(fig)
@@ -250,7 +314,7 @@ def _plot_training_loss(history: pd.DataFrame, output_path: Path) -> None:
         ax.plot(history["epoch"], history["train_loss"], color="#0f766e", linewidth=1.8)
     ax.set_xlabel("Epoch")
     ax.set_ylabel("MSE")
-    ax.set_title("V5.5 Prior Autoencoder Training Loss")
+    ax.set_title("V5.6 Prior Distiller Training Loss")
     fig.tight_layout()
     fig.savefig(output_path, dpi=160)
     plt.close(fig)
@@ -268,6 +332,7 @@ def write_prior_inspection_artifacts(
     inspection.sanity_checks.to_csv(out / "prior_sanity_checks.csv", index=False)
     _plot_pca(inspection.latent_table, "pc1", "pc2", out / "prior_pca_pc1_pc2.png")
     _plot_pca(inspection.latent_table, "pc1", "pc3", out / "prior_pca_pc1_pc3.png")
+    _plot_pca_epa(inspection.latent_table, out / "prior_pca_epa_pc1_pc2.png")
     _plot_norm_hist(inspection.latent_table, out / "prior_embedding_norm_hist.png")
     _plot_training_loss(inspection.training_history, out / "prior_training_loss.png")
     return out

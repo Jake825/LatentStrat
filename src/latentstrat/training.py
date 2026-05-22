@@ -6,6 +6,7 @@ import sys
 import warnings
 from copy import deepcopy
 from dataclasses import dataclass
+from itertools import cycle
 
 import numpy as np
 import pandas as pd
@@ -15,7 +16,13 @@ from torch import Tensor
 from torch.utils.data import DataLoader, Dataset, Subset
 
 from latentstrat.config import LatentStratOptions, default_options
-from latentstrat.data import Split, target_matrix
+from latentstrat.data import (
+    Split,
+    optional_target_matrix,
+    target_matrix,
+    v57_binary_target_names,
+    v57_continuous_target_names,
+)
 from latentstrat.model import SetTransformerModel, init_model, optimizer_parameter_groups
 
 
@@ -30,6 +37,13 @@ class LossMetrics:
     event_embedding_l2_loss: float
     head_l2_loss: float
     set_l2_loss: float
+    atomic_loss: float = 0.0
+    foul_loss: float = 0.0
+    bonus_loss: float = 0.0
+    special_loss: float = 0.0
+    rank_loss: float = 0.0
+    playoff_loss: float = 0.0
+    selection_loss: float = 0.0
 
 
 @dataclass
@@ -64,6 +78,8 @@ class MatchTensorDataset(Dataset):
         bin_targets: Tensor,
         endgame_targets: Tensor,
         award_targets: Tensor,
+        v57_cont_targets: Tensor | None = None,
+        v57_bin_targets: Tensor | None = None,
     ) -> None:
         self.red_team_idx = red_team_idx
         self.blue_team_idx = blue_team_idx
@@ -75,6 +91,16 @@ class MatchTensorDataset(Dataset):
         self.bin_targets = bin_targets
         self.endgame_targets = endgame_targets
         self.award_targets = award_targets
+        self.v57_cont_targets = (
+            v57_cont_targets
+            if v57_cont_targets is not None
+            else torch.empty((len(red_team_idx), 0), dtype=torch.float32)
+        )
+        self.v57_bin_targets = (
+            v57_bin_targets
+            if v57_bin_targets is not None
+            else torch.empty((len(red_team_idx), 0), dtype=torch.float32)
+        )
 
     @classmethod
     def from_table(
@@ -86,6 +112,18 @@ class MatchTensorDataset(Dataset):
             table, [f"{mapping.target_name}_z" for mapping in opts.target_map]
         )
         bin_targets = target_matrix(table, list(opts.binary_targets))
+        v57_cont_columns = [f"{name}_z" for name in v57_continuous_target_names(opts)]
+        v57_bin_columns = v57_binary_target_names(opts)
+        v57_cont_targets = (
+            optional_target_matrix(table, v57_cont_columns)
+            if any(column in table.columns for column in v57_cont_columns)
+            else np.empty((len(table), 0), dtype=float)
+        )
+        v57_bin_targets = (
+            optional_target_matrix(table, v57_bin_columns)
+            if any(column in table.columns for column in v57_bin_columns)
+            else np.empty((len(table), 0), dtype=float)
+        )
         endgame_targets = endgame_target_matrix(table, opts)
         award_targets = award_target_tensor(table, opts)
         return cls(
@@ -99,6 +137,8 @@ class MatchTensorDataset(Dataset):
             bin_targets=torch.as_tensor(bin_targets, dtype=torch.float32),
             endgame_targets=torch.as_tensor(endgame_targets, dtype=torch.long),
             award_targets=torch.as_tensor(award_targets, dtype=torch.float32),
+            v57_cont_targets=torch.as_tensor(v57_cont_targets, dtype=torch.float32),
+            v57_bin_targets=torch.as_tensor(v57_bin_targets, dtype=torch.float32),
         )
 
     def __len__(self) -> int:
@@ -116,6 +156,171 @@ class MatchTensorDataset(Dataset):
             self.bin_targets[index],
             self.endgame_targets[index],
             self.award_targets[index],
+            self.v57_cont_targets[index],
+            self.v57_bin_targets[index],
+        )
+
+
+class RankPairDataset(Dataset):
+    def __init__(
+        self,
+        higher_base_idx: Tensor,
+        lower_base_idx: Tensor,
+        higher_event_idx: Tensor,
+        lower_event_idx: Tensor,
+    ) -> None:
+        self.higher_base_idx = higher_base_idx
+        self.lower_base_idx = lower_base_idx
+        self.higher_event_idx = higher_event_idx
+        self.lower_event_idx = lower_event_idx
+
+    @classmethod
+    def from_table(cls, table: pd.DataFrame) -> RankPairDataset:
+        rows = []
+        if table is not None and not table.empty:
+            for _, event_rows in table.dropna(subset=["qual_rank"]).groupby("event_key"):
+                ordered = event_rows.sort_values("qual_rank")
+                left_rows = ordered.iloc[:-1].itertuples()
+                right_rows = ordered.iloc[1:].itertuples()
+                for left, right in zip(left_rows, right_rows, strict=False):
+                    rows.append(
+                        (
+                            int(left.team_base_idx),
+                            int(right.team_base_idx),
+                            int(getattr(left, "team_event_idx", 0)),
+                            int(getattr(right, "team_event_idx", 0)),
+                        )
+                    )
+        data = np.asarray(rows, dtype=np.int64).reshape((-1, 4))
+        return cls(
+            torch.as_tensor(data[:, 0], dtype=torch.long),
+            torch.as_tensor(data[:, 1], dtype=torch.long),
+            torch.as_tensor(data[:, 2], dtype=torch.long),
+            torch.as_tensor(data[:, 3], dtype=torch.long),
+        )
+
+    def __len__(self) -> int:
+        return int(self.higher_base_idx.shape[0])
+
+    def __getitem__(self, index: int) -> tuple[Tensor, ...]:
+        return (
+            self.higher_base_idx[index],
+            self.lower_base_idx[index],
+            self.higher_event_idx[index],
+            self.lower_event_idx[index],
+        )
+
+
+class AlliancePairDataset(Dataset):
+    def __init__(
+        self,
+        better_base_idx: Tensor,
+        worse_base_idx: Tensor,
+        better_event_idx: Tensor,
+        worse_event_idx: Tensor,
+    ) -> None:
+        self.better_base_idx = better_base_idx
+        self.worse_base_idx = worse_base_idx
+        self.better_event_idx = better_event_idx
+        self.worse_event_idx = worse_event_idx
+
+    @classmethod
+    def from_table(cls, table: pd.DataFrame) -> AlliancePairDataset:
+        rows = []
+        if table is not None and not table.empty:
+            for _, event_rows in table.dropna(subset=["playoff_finish_order"]).groupby("event_key"):
+                ordered = event_rows.sort_values("playoff_finish_order")
+                left_rows = ordered.iloc[:-1].itertuples()
+                right_rows = ordered.iloc[1:].itertuples()
+                for left, right in zip(left_rows, right_rows, strict=False):
+                    rows.append(
+                        (
+                            [int(getattr(left, f"team_{slot}_base_idx")) for slot in (1, 2, 3)],
+                            [int(getattr(right, f"team_{slot}_base_idx")) for slot in (1, 2, 3)],
+                            [int(getattr(left, f"team_{slot}_event_idx")) for slot in (1, 2, 3)],
+                            [int(getattr(right, f"team_{slot}_event_idx")) for slot in (1, 2, 3)],
+                        )
+                    )
+        if rows:
+            better_base, worse_base, better_event, worse_event = zip(*rows, strict=True)
+        else:
+            better_base = worse_base = better_event = worse_event = []
+        return cls(
+            torch.as_tensor(better_base, dtype=torch.long).reshape((-1, 3)),
+            torch.as_tensor(worse_base, dtype=torch.long).reshape((-1, 3)),
+            torch.as_tensor(better_event, dtype=torch.long).reshape((-1, 3)),
+            torch.as_tensor(worse_event, dtype=torch.long).reshape((-1, 3)),
+        )
+
+    def __len__(self) -> int:
+        return int(self.better_base_idx.shape[0])
+
+    def __getitem__(self, index: int) -> tuple[Tensor, ...]:
+        return (
+            self.better_base_idx[index],
+            self.worse_base_idx[index],
+            self.better_event_idx[index],
+            self.worse_event_idx[index],
+        )
+
+
+class SelectionTripletDataset(Dataset):
+    def __init__(
+        self,
+        captain_base_idx: Tensor,
+        pick_base_idx: Tensor,
+        passed_base_idx: Tensor,
+        captain_event_idx: Tensor,
+        pick_event_idx: Tensor,
+        passed_event_idx: Tensor,
+    ) -> None:
+        self.captain_base_idx = captain_base_idx
+        self.pick_base_idx = pick_base_idx
+        self.passed_base_idx = passed_base_idx
+        self.captain_event_idx = captain_event_idx
+        self.pick_event_idx = pick_event_idx
+        self.passed_event_idx = passed_event_idx
+
+    @classmethod
+    def from_table(cls, table: pd.DataFrame) -> SelectionTripletDataset:
+        required = ["captain_base_idx", "pick_base_idx", "passed_over_base_idx"]
+        rows = []
+        if table is not None and not table.empty and all(c in table.columns for c in required):
+            valid = table.dropna(subset=required)
+            for row in valid.itertuples():
+                if int(row.passed_over_base_idx) <= 0:
+                    continue
+                rows.append(
+                    (
+                        int(row.captain_base_idx),
+                        int(row.pick_base_idx),
+                        int(row.passed_over_base_idx),
+                        int(getattr(row, "captain_event_idx", 0)),
+                        int(getattr(row, "pick_event_idx", 0)),
+                        int(getattr(row, "passed_over_event_idx", 0)),
+                    )
+                )
+        data = np.asarray(rows, dtype=np.int64).reshape((-1, 6))
+        return cls(
+            torch.as_tensor(data[:, 0], dtype=torch.long),
+            torch.as_tensor(data[:, 1], dtype=torch.long),
+            torch.as_tensor(data[:, 2], dtype=torch.long),
+            torch.as_tensor(data[:, 3], dtype=torch.long),
+            torch.as_tensor(data[:, 4], dtype=torch.long),
+            torch.as_tensor(data[:, 5], dtype=torch.long),
+        )
+
+    def __len__(self) -> int:
+        return int(self.captain_base_idx.shape[0])
+
+    def __getitem__(self, index: int) -> tuple[Tensor, ...]:
+        return (
+            self.captain_base_idx[index],
+            self.pick_base_idx[index],
+            self.passed_base_idx[index],
+            self.captain_event_idx[index],
+            self.pick_event_idx[index],
+            self.passed_event_idx[index],
         )
 
 
@@ -251,12 +456,16 @@ def batch_to_device(batch: tuple[Tensor, ...], device: torch.device) -> tuple[Te
 
 
 def _active_embedding_l2(
-    embedding: torch.nn.Embedding, indices: Tensor, coefficient: float
+    embedding: torch.nn.Embedding,
+    indices: Tensor,
+    coefficient: float,
+    *,
+    include_zero: bool = False,
 ) -> Tensor:
     if coefficient == 0:
         return torch.zeros((), dtype=embedding.weight.dtype, device=indices.device)
     active = torch.unique(indices.flatten())
-    active = active[active > 0]
+    active = active[active >= 0] if include_zero else active[active > 0]
     if active.numel() == 0:
         return torch.zeros((), dtype=embedding.weight.dtype, device=indices.device)
     return coefficient * embedding(active).pow(2).sum()
@@ -269,7 +478,7 @@ def active_embedding_l2(
     coefficient: float,
 ) -> Tensor:
     active_indices = torch.cat([red_team_idx, blue_team_idx], dim=1)
-    return _active_embedding_l2(model.Z_base, active_indices, coefficient)
+    return _active_embedding_l2(model.Z_base, active_indices, coefficient, include_zero=True)
 
 
 def active_event_embedding_l2(
@@ -279,7 +488,10 @@ def active_event_embedding_l2(
     coefficient: float,
 ) -> Tensor:
     return _active_embedding_l2(
-        model.Z_event, torch.cat([red_event_idx, blue_event_idx], dim=1), coefficient
+        model.Z_event,
+        torch.cat([red_event_idx, blue_event_idx], dim=1),
+        coefficient,
+        include_zero=False,
     )
 
 
@@ -288,10 +500,33 @@ def ordinal_targets_to_cumulative(targets: Tensor, num_classes: int) -> Tensor:
     return (targets.unsqueeze(-1) > thresholds).to(torch.float32)
 
 
-def _homoscedastic(loss: Tensor, log_var: Tensor, valid: bool) -> Tensor:
-    if not valid:
-        return torch.zeros((), dtype=loss.dtype, device=loss.device)
-    return torch.exp(-log_var) * loss + log_var
+def _masked_mse(prediction: Tensor, target: Tensor) -> tuple[Tensor, bool]:
+    valid = torch.isfinite(target)
+    if not torch.any(valid):
+        return torch.zeros((), dtype=prediction.dtype, device=prediction.device), False
+    return F.mse_loss(prediction[valid], target[valid]), True
+
+
+def _masked_bce_with_logits(prediction: Tensor, target: Tensor) -> tuple[Tensor, bool]:
+    valid = torch.isfinite(target)
+    if not torch.any(valid):
+        return torch.zeros((), dtype=prediction.dtype, device=prediction.device), False
+    return F.binary_cross_entropy_with_logits(prediction[valid], target[valid]), True
+
+
+def _split_v57_targets(
+    values: Tensor,
+    opts: LatentStratOptions,
+    *,
+    continuous: bool,
+) -> tuple[Tensor, Tensor]:
+    if values.numel() == 0:
+        empty = values.new_empty((values.shape[0], 0))
+        return empty, empty
+    first_width = 2 * (
+        len(opts.atomic_count_targets) if continuous else len(opts.bonus_binary_targets)
+    )
+    return values[:, :first_width], values[:, first_width:]
 
 
 def model_loss(
@@ -310,6 +545,8 @@ def model_loss(
     blue_missing_mask: Tensor | None = None,
     endgame_targets: Tensor | None = None,
     award_targets: Tensor | None = None,
+    v57_cont_targets: Tensor | None = None,
+    v57_bin_targets: Tensor | None = None,
 ) -> tuple[Tensor, LossMetrics, object]:
     opts = opts or default_options()
     pred = (forward_model or model)(
@@ -325,8 +562,8 @@ def model_loss(
         raw_cont_loss = zero
         cont_term = zero
     else:
-        raw_cont_loss = F.mse_loss(pred.cont_z, cont_targets)
-        cont_term = _homoscedastic(raw_cont_loss, model.log_var_continuous, True)
+        raw_cont_loss, cont_active = _masked_mse(pred.cont_z, cont_targets)
+        cont_term = model.balance_loss("continuous", raw_cont_loss, cont_active)
     if bin_targets.numel() == 0:
         raw_bin_loss = zero
         bin_term = zero
@@ -336,7 +573,7 @@ def model_loss(
             bin_targets,
             pos_weight=positive_weights,
         )
-        bin_term = _homoscedastic(raw_bin_loss, model.log_var_win, True)
+        bin_term = model.balance_loss("win", raw_bin_loss, True)
 
     slot_missing = torch.cat([pred.red_missing_mask, pred.blue_missing_mask], dim=1)
     if endgame_targets is None or pred.endgame_logits.numel() == 0:
@@ -349,7 +586,7 @@ def model_loss(
             raw_endgame_loss = F.binary_cross_entropy_with_logits(
                 pred.endgame_logits[valid], cumulative[valid]
             )
-            endgame_term = _homoscedastic(raw_endgame_loss, model.log_var_endgame, True)
+            endgame_term = model.balance_loss("endgame", raw_endgame_loss, True)
         else:
             raw_endgame_loss = zero
             endgame_term = zero
@@ -363,10 +600,45 @@ def model_loss(
             raw_award_loss = F.binary_cross_entropy_with_logits(
                 pred.award_logits[finite], award_targets[finite]
             )
-            award_term = _homoscedastic(raw_award_loss, model.log_var_awards, True)
+            award_term = model.balance_loss("awards", raw_award_loss, True)
         else:
             raw_award_loss = zero
             award_term = zero
+
+    atomic_targets, foul_targets = (
+        _split_v57_targets(v57_cont_targets, opts, continuous=True)
+        if v57_cont_targets is not None
+        else (zero.new_empty((pred.cont_z.shape[0], 0)), zero.new_empty((pred.cont_z.shape[0], 0)))
+    )
+    bonus_targets, special_targets = (
+        _split_v57_targets(v57_bin_targets, opts, continuous=False)
+        if v57_bin_targets is not None
+        else (zero.new_empty((pred.cont_z.shape[0], 0)), zero.new_empty((pred.cont_z.shape[0], 0)))
+    )
+    if atomic_targets.numel() and pred.atomic_z.numel():
+        raw_atomic_loss, atomic_active = _masked_mse(pred.atomic_z, atomic_targets)
+    else:
+        raw_atomic_loss, atomic_active = zero, False
+    atomic_term = model.balance_loss("atomic", raw_atomic_loss, atomic_active)
+    if foul_targets.numel() and pred.foul_z.numel():
+        raw_foul_loss, foul_active = _masked_mse(pred.foul_z, foul_targets)
+    else:
+        raw_foul_loss, foul_active = zero, False
+    foul_term = model.balance_loss("foul", raw_foul_loss, foul_active)
+    if bonus_targets.numel() and pred.bonus_logits.numel():
+        raw_bonus_loss, bonus_active = _masked_bce_with_logits(
+            pred.bonus_logits, bonus_targets
+        )
+    else:
+        raw_bonus_loss, bonus_active = zero, False
+    bonus_term = model.balance_loss("bonus", raw_bonus_loss, bonus_active)
+    if special_targets.numel() and pred.special_logits.numel():
+        raw_special_loss, special_active = _masked_bce_with_logits(
+            pred.special_logits, special_targets
+        )
+    else:
+        raw_special_loss, special_active = zero, False
+    special_term = model.balance_loss("special", raw_special_loss, special_active)
 
     emb_l2 = active_embedding_l2(model, red_team_idx, blue_team_idx, opts.l2_embedding)
     event_l2 = zero
@@ -374,7 +646,18 @@ def model_loss(
         event_l2 = active_event_embedding_l2(
             model, red_event_idx, blue_event_idx, opts.event_delta_l2
         )
-    total = cont_term + bin_term + endgame_term + award_term + emb_l2 + event_l2
+    total = (
+        cont_term
+        + bin_term
+        + endgame_term
+        + award_term
+        + atomic_term
+        + foul_term
+        + bonus_term
+        + special_term
+        + emb_l2
+        + event_l2
+    )
     metrics = LossMetrics(
         continuous_loss=float(raw_cont_loss.detach().cpu()),
         binary_loss=float(raw_bin_loss.detach().cpu()),
@@ -385,6 +668,10 @@ def model_loss(
         event_embedding_l2_loss=float(event_l2.detach().cpu()),
         head_l2_loss=0.0,
         set_l2_loss=0.0,
+        atomic_loss=float(raw_atomic_loss.detach().cpu()),
+        foul_loss=float(raw_foul_loss.detach().cpu()),
+        bonus_loss=float(raw_bonus_loss.detach().cpu()),
+        special_loss=float(raw_special_loss.detach().cpu()),
     )
     return total, metrics, pred
 
@@ -437,6 +724,8 @@ def _loss_from_batch(
         binary,
         endgame,
         awards,
+        v57_cont,
+        v57_bin,
     ) = batch
     return model_loss(
         model,
@@ -453,7 +742,88 @@ def _loss_from_batch(
         blue_missing_mask=blue_missing,
         endgame_targets=endgame,
         award_targets=awards,
+        v57_cont_targets=v57_cont,
+        v57_bin_targets=v57_bin,
     )
+
+
+def _rank_loss_from_batch(
+    model: SetTransformerModel, batch: tuple[Tensor, ...], opts: LatentStratOptions
+) -> Tensor:
+    higher, lower, higher_event, lower_event = batch
+    higher_score = model.team_value(higher, higher_event)
+    lower_score = model.team_value(lower, lower_event)
+    target = torch.ones_like(higher_score)
+    return F.margin_ranking_loss(
+        higher_score, lower_score, target, margin=float(opts.rank_margin)
+    )
+
+
+def _playoff_loss_from_batch(
+    model: SetTransformerModel, batch: tuple[Tensor, ...], opts: LatentStratOptions
+) -> Tensor:
+    better, worse, better_event, worse_event = batch
+    better_score = model.alliance_value(better, better_event)
+    worse_score = model.alliance_value(worse, worse_event)
+    target = torch.ones_like(better_score)
+    return F.margin_ranking_loss(
+        better_score, worse_score, target, margin=float(opts.playoff_margin)
+    )
+
+
+def _selection_loss_from_batch(
+    model: SetTransformerModel, batch: tuple[Tensor, ...], opts: LatentStratOptions
+) -> Tensor:
+    captain, pick, passed, captain_event, pick_event, passed_event = batch
+    anchor = model.team_latent(captain, captain_event)
+    positive = model.team_latent(pick, pick_event)
+    negative = model.team_latent(passed, passed_event)
+    return F.triplet_margin_loss(
+        anchor, positive, negative, margin=float(opts.selection_triplet_margin)
+    )
+
+
+def _sidecar_loader(
+    dataset: Dataset | None,
+    opts: LatentStratOptions,
+    *,
+    generator: torch.Generator,
+    device: torch.device,
+) -> DataLoader | None:
+    if dataset is None or len(dataset) == 0:
+        return None
+    return DataLoader(
+        dataset,
+        batch_size=opts.mini_batch_size,
+        shuffle=True,
+        generator=generator,
+        num_workers=opts.dataloader_num_workers,
+        pin_memory=device.type == "cuda",
+    )
+
+
+def _prepare_sidecar_loaders(
+    sidecar_tables: dict[str, pd.DataFrame] | None,
+    opts: LatentStratOptions,
+    *,
+    generator: torch.Generator,
+    device: torch.device,
+) -> dict[str, DataLoader]:
+    if not sidecar_tables:
+        return {}
+    datasets: dict[str, Dataset] = {}
+    if "rankings" in sidecar_tables:
+        datasets["rank"] = RankPairDataset.from_table(sidecar_tables["rankings"])
+    if "playoffs" in sidecar_tables:
+        datasets["playoff"] = AlliancePairDataset.from_table(sidecar_tables["playoffs"])
+    if "selections" in sidecar_tables:
+        datasets["selection"] = SelectionTripletDataset.from_table(sidecar_tables["selections"])
+    loaders = {}
+    for name, dataset in datasets.items():
+        loader = _sidecar_loader(dataset, opts, generator=generator, device=device)
+        if loader is not None:
+            loaders[name] = loader
+    return loaders
 
 
 def evaluate_loss(
@@ -496,6 +866,7 @@ def train_model(
     initial_model: SetTransformerModel | None = None,
     verbose: bool = True,
     venue_mode: bool = False,
+    sidecar_tables: dict[str, pd.DataFrame] | None = None,
 ) -> tuple[SetTransformerModel, pd.DataFrame, TrainingDiagnostics]:
     opts = opts or default_options()
     device = resolve_device(opts.device)
@@ -532,6 +903,10 @@ def train_model(
     train_loader = _make_loader(
         dataset, train_rows, opts, shuffle=True, generator=generator, device=device
     )
+    sidecar_loaders = _prepare_sidecar_loaders(
+        sidecar_tables, opts, generator=generator, device=device
+    )
+    sidecar_iters = {name: cycle(loader) for name, loader in sidecar_loaders.items()}
     train_eval_loader = _make_loader(dataset, train_rows, opts, shuffle=False, device=device)
     validation_loader = _make_loader(dataset, validation_rows, opts, shuffle=False, device=device)
 
@@ -562,6 +937,17 @@ def train_model(
                 loss, _, _ = _loss_from_batch(
                     model, batch, opts, positive_weights, forward_model
                 )
+                for name, iterator in sidecar_iters.items():
+                    sidecar_batch = batch_to_device(next(iterator), device)
+                    if name == "rank":
+                        raw_loss = _rank_loss_from_batch(model, sidecar_batch, opts)
+                    elif name == "playoff":
+                        raw_loss = _playoff_loss_from_batch(model, sidecar_batch, opts)
+                    elif name == "selection":
+                        raw_loss = _selection_loss_from_batch(model, sidecar_batch, opts)
+                    else:
+                        continue
+                    loss = loss + model.balance_loss(name, raw_loss, True)
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()

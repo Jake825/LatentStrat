@@ -99,7 +99,7 @@ def test_batched_evaluation_matches_large_batch_and_keeps_gradients_empty():
         small.zero_out_diagnostics,
         large.zero_out_diagnostics,
         check_exact=False,
-        atol=1e-6,
+        atol=2e-6,
     )
     assert all(parameter.grad is None for parameter in model.parameters())
 

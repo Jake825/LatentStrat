@@ -11,16 +11,19 @@ controls, and feature availability.
 
 ## Entry Point
 
-For V5.5 prior vectors before match training, run:
+For V5.6.1 prior dictionary vectors before match training, run:
 
 ```bash
 latentstrat inspect-prior --checkpoint data/pretrained_prior_2026.pt \
-  --features data/prior_features_2026.parquet \
   --output artifacts/prior_2026
 ```
 
-This writes prior PCA plots, cosine neighbors, reconstruction MSE, sanity
-checks, and training-loss artifacts.
+This writes prior PCA plots, cosine neighbors, sanity checks, norm histograms,
+EPA-colored PCA when prior features are supplied, and training-loss artifacts for the learned `embedding_table` rows
+`0..max_team_number`, including the learned ghost robot. A production V5.6
+checkpoint is stripped and does not
+carry the sacrificial decoder, so reconstruction MSE is intentionally `NaN`
+unless an older full-model checkpoint is inspected with `--features`.
 
 For V5 `Z_base` after match training, run:
 
@@ -70,8 +73,9 @@ about team reputation.
 ## PMA Attention And Zero-Out Diagnostics
 
 PMA weights describe how the learned pooling seed summarized a contextualized
-alliance block prior to prediction. Masked missing slots receive zero attention.
-They are not literal causal explanations.
+alliance block prior to prediction. Missing slots are routed to the learned
+ghost row and remain visible to attention. They are not literal causal
+explanations.
 
 Read the PMA outputs against `zero_out_diagnostics.csv`. Representation utility
 is stronger when artificially masking a specific slot to `0.0` causes a measured

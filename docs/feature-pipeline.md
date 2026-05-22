@@ -20,6 +20,42 @@ Enrichment sources should left-join onto this spine. Scouting rows, Statbotics
 rows, or external spreadsheets should not become the primary training row set
 unless a future model intentionally changes the row grain.
 
+## V5.7 Score-Breakdown Targets
+
+V5.7 adds a versioned mapper layer between TBA's season-specific
+`score_breakdown` JSON and the model-facing Parquet schema. The 2026 mapper
+writes generic columns so future PyTorch code does not depend on game-specific
+names:
+
+- Atomic count targets such as `red_atomic_auto_count`,
+  `red_atomic_shift2_count`, and `blue_atomic_endgame_count`.
+- Committed foul targets such as `red_committed_foul_pts`; TBA foul points are
+  awarded to the opponent, so these columns are intentionally inverted.
+- Bonus binary targets such as `red_bonus_energized`,
+  `red_bonus_supercharged`, and `red_bonus_traversal`.
+- Special binary targets such as `red_special_g206_penalty`.
+
+If an official match is missing its score breakdown, the match row remains on
+the spine and the V5.7 targets are written as `NaN`. Training masks those values
+instead of imputing false zeros.
+
+## V5.7 Relational Sidecars
+
+Rankings, alliance selections, and playoff outcomes have post-event or
+event-level grain, so they are written as optional sidecar Parquet files rather
+than merged into match rows:
+
+- `rankings_YYYY.parquet`: `event_key`, `team_key`, `qual_rank`,
+  `matches_played`, and available TBA ranking stats.
+- `selections_YYYY.parquet`: `captain_team_key`, `pick_team_key`,
+  `pick_order`, and `passed_over_team_key`. Passed-over teams are computed from
+  rankings during sidecar generation.
+- `playoffs_YYYY.parquet`: alliance team keys and `playoff_finish_order`.
+
+Declines are intentionally not modeled because TBA does not reliably populate
+them in real event data. Sidecars are auxiliary training labels only; they are
+not pre-match input features.
+
 ## Scouting Joins
 
 Optional scouting data lives in `data/scouting.db`. When present,
@@ -79,25 +115,37 @@ preserve useful pandas dtypes, including nullable integer columns, timestamps,
 strings, and numeric feature columns. Tensor-bound values are cast deliberately
 when `MatchTensorDataset` builds PyTorch tensors.
 
-## V5.5 Prior Features
+## V5.6.1 Prior Features
 
-`build-prior-features` writes a separate text-prior Parquet file for offline
-pretraining. It reads team keys from an existing target-season feature file, but
-uses that file only for team identity. The prior narrative is built from TBA
-team profile, event history, and awards where `year < target_season`.
+`build-prior-features` writes a separate prior Parquet file for offline
+pretraining. It builds a fixed transductive universe for team numbers
+`0..12500` by default. Row `0` is the learned ghost robot. Known teams are
+pulled from paginated TBA team endpoints; unknown historical gaps and future
+rookie numbers receive generated narrative anchors.
 
-The output contains one row per team with:
+The output contains one row per team number with:
 
+- `team_number`
 - `team_key`
+- `archetype`: `ghost_token`, `anchor`, `ghost`, `sibling`, or `future`
 - `target_season`
 - cleaned natural-language `narrative`
 - stable `narrative_hash`
 - `embedding_model` and `llm_dim`
 - `openai_narrative_vector`, a 256-D text embedding
+- `raw_epa`, `target_epa`, `epa_source_year`, `epa_is_imputed`, `epa_mean`, and
+  `epa_std`
 
+Anchor and Ghost narratives are built from TBA team profile, event history, and
+awards where `year < target_season`. Sibling narratives describe nearby known
+teams by number to ground empty historical slots. Future rookie narratives use
+the projected registration formula and modern COTS-era technical grounding.
 There is no explicit hardware vector or award-decay vector. Historical awards
-are injected into the narrative text next to their event, and the OpenAI
-embedding cache prevents duplicate API calls for unchanged narratives.
+are injected into natural text, and the OpenAI embedding cache prevents
+duplicate API calls for unchanged narratives. `target_epa` is a normalized
+prior-season Statbotics EPA target. By default, target season `2026` uses
+completed `2025` EPA. Team `0` uses raw EPA `0.0`, and missing team EPA uses the
+rookie baseline `mean - 0.2 * std` before normalization.
 
 ## Team Indexing
 
@@ -105,18 +153,18 @@ Training maps string FRC team keys such as `frc254` to V5 embedding indices in
 memory:
 
 1. `make_v5_team_index_maps` scans all six team slot columns.
-2. `team_base_idx` maps real team keys to contiguous integers starting at `1`.
+2. `team_base_idx` maps `frc####` directly to numeric row `####` for team
+   numbers up to the V5.6 prior maximum; `frc0` is the learned ghost robot.
 3. `team_event_idx` maps `(event_key, team_key)` pairs to contiguous integers
    starting at `1`.
-4. Index `0` is reserved for null/empty slots in both maps.
+4. Blank or explicit missing slots use `team_base_idx=0` and `team_event_idx=0`;
+   base row `0` is learned, while event row `0` remains the no-delta row.
 5. Per-slot `missing_team_mask` columns are true only for explicit blank/missing
    team slots.
 6. `MatchTensorDataset` converts these columns to PyTorch tensors.
 
-The mapping is per training run. Unknown teams require rebuilding the mapping
-with an updated feature table or a deliberate future inference policy. The
-current model does not define a persistent public vocabulary or unknown-team
-embedding.
+Team numbers above the current V5.6 prior maximum raise a clear error. Rebuild
+the prior with a larger `max_team_number` before training on those teams.
 
 ## Missing Data
 
@@ -129,9 +177,10 @@ meaning:
 - Keep unknown categorical values distinct from known negative values.
 - Do not fill pre-match rows with post-match or post-event aggregates.
 
-V5 can represent explicit missing team slots with the null index and attention
-mask. DQ and surrogate flags remain diagnostics; they are not treated as missing
-robots by default.
+V5.6 represents explicit missing team slots with the learned ghost base row and
+the no-delta event row. Those slots are still visible to attention. DQ and
+surrogate flags remain diagnostics; they are not treated as missing robots by
+default.
 
 ## Commands
 
@@ -141,8 +190,24 @@ Build a season feature table:
 latentstrat build-features --season 2026 --output data/features_2026.parquet
 ```
 
+Build the same table with V5.7 sidecars:
+
+```bash
+latentstrat build-features --season 2026 --output data/features_2026.parquet \
+  --sidecar-output-dir data/v57_sidecars
+```
+
 Train from that local Parquet file:
 
 ```bash
 latentstrat train-features data/features_2026.parquet --output artifacts/features_run
+```
+
+Train with optional V5.7 sidecar losses:
+
+```bash
+latentstrat train-features data/features_2026.parquet \
+  --rankings-sidecar data/v57_sidecars/rankings_2026.parquet \
+  --selections-sidecar data/v57_sidecars/selections_2026.parquet \
+  --playoffs-sidecar data/v57_sidecars/playoffs_2026.parquet
 ```

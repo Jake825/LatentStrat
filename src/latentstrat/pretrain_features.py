@@ -1,4 +1,4 @@
-"""V5.5 text-only prior feature construction."""
+"""V5.6 transductive prior feature construction."""
 
 from __future__ import annotations
 
@@ -11,9 +11,13 @@ import time
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from itertools import groupby
+from operator import itemgetter
 from pathlib import Path
+from statistics import median
 from typing import Any
 
+import numpy as np
 import pandas as pd
 from pydantic import BaseModel
 
@@ -21,23 +25,32 @@ from frc.providers.tba_provider import TbaProvider
 from latentstrat.config import PriorOpts
 
 PARQUET_ENGINE = "pyarrow"
-TEAM_SLOT_COLUMNS = (
-    "red_team_1_key",
-    "red_team_2_key",
-    "red_team_3_key",
-    "blue_team_1_key",
-    "blue_team_2_key",
-    "blue_team_3_key",
+GHOST_TEAM_NARRATIVE = (
+    "This is a null robot. It does not exist on the field. It scores zero points. "
+    "It has no autonomous routine. It does not play defense."
 )
+
+
+@dataclass(frozen=True)
+class KnownTeamRecord:
+    team_number: int
+    team_key: str
+    profile: Any
+    years: list[int]
+    events: list[Any]
+    awards: list[Any]
 
 
 @dataclass(frozen=True)
 class PriorFeatureMetadata:
     target_season: int
     team_count: int
-    source_feature_path: str
+    max_team_number: int
     embedding_model: str
     llm_dim: int
+    epa_source_year: int
+    epa_mean: float
+    epa_std: float
 
 
 @dataclass
@@ -83,6 +96,13 @@ def award_year(award: Any) -> int | None:
     return _year_from_key(_field(award, "event_key"))
 
 
+def team_number_from_key(team_key: str) -> int:
+    match = re.fullmatch(r"frc(\d+)", str(team_key).strip())
+    if not match:
+        raise ValueError(f"Invalid FRC team key: {team_key!r}")
+    return int(match.group(1))
+
+
 def clean_narrative_text(text: str) -> str:
     """Normalize generated narrative text away from JSON-looking artifacts."""
 
@@ -92,112 +112,425 @@ def clean_narrative_text(text: str) -> str:
     return cleaned.strip()
 
 
-def extract_team_keys_from_feature_table(table: pd.DataFrame) -> list[str]:
-    columns = [column for column in TEAM_SLOT_COLUMNS if column in table.columns]
-    if not columns:
-        columns = [column for column in table.columns if column.endswith("_team_key")]
-    if not columns:
-        raise KeyError("Feature table does not contain team key columns.")
-    keys = {
-        str(value)
-        for column in columns
-        for value in table[column].tolist()
-        if pd.notna(value) and str(value)
-    }
-    return sorted(keys)
+def compress_years(years: Sequence[int]) -> str:
+    """Convert [2001, 2002, 2003, 2005] into '2001-2003, 2005'."""
+
+    unique_years = sorted({int(year) for year in years if year is not None})
+    if not unique_years:
+        return "No active years."
+    ranges = []
+    for _, group in groupby(enumerate(unique_years), lambda item: item[0] - item[1]):
+        values = list(map(itemgetter(1), group))
+        ranges.append(str(values[0]) if len(values) == 1 else f"{values[0]}-{values[-1]}")
+    return ", ".join(ranges)
 
 
-def read_team_keys_from_feature_file(path: str | Path) -> list[str]:
-    table = pd.read_parquet(path, engine=PARQUET_ENGINE)
-    return extract_team_keys_from_feature_table(table)
+def _location(team_info: Any) -> str:
+    parts = [
+        _field(team_info, "city"),
+        _field(team_info, "state_prov"),
+        _field(team_info, "country"),
+    ]
+    return ", ".join(str(part) for part in parts if part) or "an unknown location"
 
 
-def _event_sort_key(event: Any) -> tuple[int, str, str]:
-    year = event_year(event) or 0
-    start_date = str(_field(event, "start_date", "") or "")
-    key = str(_field(event, "key", "") or "")
-    return year, start_date, key
+def _historical_years(years: Sequence[int], target_season: int) -> list[int]:
+    return sorted({int(year) for year in years if year is not None and int(year) < target_season})
 
 
-def _award_sort_key(award: Any) -> tuple[int, str, str]:
-    year = award_year(award) or 0
-    event_key = str(_field(award, "event_key", "") or "")
-    name = str(_field(award, "name", "") or "")
-    return year, event_key, name
-
-
-def _recipient_team_keys(award: Any) -> set[str]:
-    recipients = _field(award, "recipient_list", []) or []
-    return {
-        str(_field(recipient, "team_key", "") or "")
-        for recipient in recipients
-        if _field(recipient, "team_key", None)
-    }
-
-
-def build_team_narrative(
-    team_key: str,
-    team_profile: Any,
-    team_events: Sequence[Any],
-    team_awards: Sequence[Any],
+def build_rich_team_narrative(
+    team_info: Any,
+    years_participated: Sequence[int],
+    awards: Sequence[Any],
+    events: Sequence[Any],
     target_season: int,
+    *,
+    active_in_target: bool,
 ) -> str:
-    """Build a target-season-quarantined natural-language team history."""
+    """Compile maximum TBA signal into a dense semantic narrative."""
 
-    profile_parts = [f"Team {team_key}."]
-    nickname = _field(team_profile, "nickname")
-    if nickname:
-        profile_parts.append(f"Nickname {nickname}.")
-    home_parts = [
-        _field(team_profile, "city"),
-        _field(team_profile, "state_prov"),
-        _field(team_profile, "country"),
+    number = int(_field(team_info, "team_number", 0) or 0)
+    nickname = _field(team_info, "nickname") or f"Team {number}"
+    rookie_year = _field(team_info, "rookie_year") or "Unknown"
+    sponsors = _field(team_info, "name") or "Unknown sponsors"
+    location = _location(team_info)
+    known_years = _historical_years(years_participated, target_season)
+    archetype = "active Anchor team" if active_in_target else "historical Ghost team"
+    narrative = [
+        (
+            f"Team {number}, {nickname}, is a FIRST Robotics Competition {archetype} "
+            f"based in {location}."
+        ),
+        f"They were established in the {rookie_year} rookie class.",
+        f"The team is officially supported by and affiliated with: {sponsors}.",
+        (
+            f"Before the {target_season} season, they were active during: "
+            f"{compress_years(known_years)}."
+        ),
     ]
-    home = ", ".join(str(part) for part in home_parts if part)
-    if home:
-        profile_parts.append(f"Home {home}.")
-    rookie_year = _field(team_profile, "rookie_year")
-    if rookie_year:
-        profile_parts.append(f"Rookie year {rookie_year}.")
+    if active_in_target:
+        narrative.append(f"They are registered as active for the {target_season} season.")
+    else:
+        narrative.append(
+            "They are represented by their historical legacy and retired program identity."
+        )
 
-    awards_by_event: dict[str, list[str]] = defaultdict(list)
-    for award in sorted(team_awards, key=_award_sort_key):
+    event_wins = [
+        award_year(award)
+        for award in awards
+        if _field(award, "award_type") == 1
+        and award_year(award) is not None
+        and award_year(award) < target_season
+    ]
+    if event_wins:
+        narrative.append(
+            "They have won official events in the following years: "
+            f"{compress_years(event_wins)}."
+        )
+
+    championship_years = [
+        event_year(event)
+        for event in events
+        if _field(event, "event_type") in {3, 4}
+        and event_year(event) is not None
+        and event_year(event) < target_season
+    ]
+    if championship_years:
+        narrative.append(
+            "They advanced to the FIRST World Championship in these years: "
+            f"{compress_years(championship_years)}."
+        )
+
+    award_dict: dict[str, list[int]] = defaultdict(list)
+    for award in awards:
         year = award_year(award)
-        if year is None or year >= target_season:
+        award_type = _field(award, "award_type")
+        if award_type in {1, 2} or year is None or year >= target_season:
             continue
-        if team_key not in _recipient_team_keys(award):
-            continue
-        event_key = str(_field(award, "event_key", "") or "")
-        award_name = str(_field(award, "name", "") or "").strip()
-        if award_name:
-            awards_by_event[event_key].append(award_name)
+        name = str(_field(award, "name", "") or "").split("(", 1)[0].strip()
+        if name:
+            award_dict[name].append(int(year))
 
-    historical_events = [
-        event
-        for event in sorted(team_events, key=_event_sort_key)
-        if (event_year(event) is not None and event_year(event) < target_season)
+    if award_dict:
+        narrative.append(
+            "Throughout their history, the team has been recognized with specific awards:"
+        )
+        for award_name, years_won in sorted(award_dict.items()):
+            narrative.append(f"{award_name}: {compress_years(years_won)}.")
+    return clean_narrative_text(" ".join(narrative))
+
+
+def build_gap_team_narrative(
+    number: int,
+    rookie_year: int,
+    nearby_teams: Sequence[Mapping[str, Any]],
+) -> str:
+    narrative = [
+        (
+            "Team "
+            f"{number} is currently an unassigned FIRST Robotics Competition number "
+            f"from the {rookie_year} rookie class."
+        ),
+        (
+            "This number slot is reserved for a future sibling team, junior varsity "
+            "squad, or returning veteran program reboot from this specific era."
+        ),
     ]
+    if nearby_teams:
+        neighbors = ", ".join(
+            f"Team {team['number']} ({team['name']} from {team['location']})"
+            for team in nearby_teams
+        )
+        narrative.append(
+            f"Surrounding historical and active teams from this generation include: {neighbors}."
+        )
+        narrative.append(
+            "A team taking this number would likely inherit the mentorship, "
+            "historical build-culture, and community backing of the surrounding "
+            "programs from this generation."
+        )
+    return clean_narrative_text(" ".join(narrative))
 
-    event_parts: list[str] = []
-    for event in historical_events:
-        year = event_year(event)
-        event_key = str(_field(event, "key", "") or "")
-        name = str(_field(event, "name", "") or event_key).strip()
-        phrase = f"Played {year} {name}."
-        awards = awards_by_event.get(event_key, [])
-        if awards:
-            phrase += f" Won {', '.join(awards)}."
-        event_parts.append(phrase)
 
-    known_event_keys = {str(_field(event, "key", "") or "") for event in historical_events}
-    for event_key, awards in awards_by_event.items():
-        if event_key and event_key not in known_event_keys:
-            year = _year_from_key(event_key)
-            event_parts.append(f"Won {', '.join(awards)} at {year or 'historical'} {event_key}.")
+def projected_future_rookie_year(number: int, opts: PriorOpts | None = None) -> int:
+    opts = opts or PriorOpts()
+    return round(
+        2026 + ((number - opts.future_baseline_team) / opts.future_growth_per_year)
+    )
 
-    if not event_parts:
-        event_parts.append("No historical target-season-safe TBA events found.")
-    return clean_narrative_text(" ".join([*profile_parts, *event_parts]))
+
+def build_future_rookie_narrative(number: int, opts: PriorOpts | None = None) -> str:
+    opts = opts or PriorOpts()
+    projected_year = projected_future_rookie_year(number, opts)
+    narrative = [
+        f"Team {number} is a projected future FIRST Robotics Competition rookie team.",
+        (
+            "Based on current registration growth trends, this team number is "
+            f"projected to debut in the {projected_year} season."
+        ),
+        (
+            "As a modern-era rookie, this team will enter the competition landscape "
+            "utilizing advanced commercial-off-the-shelf components."
+        ),
+        (
+            "Their baseline technical capability is expected to include turnkey "
+            "swerve drive systems, brushless motors, and community-driven software "
+            "libraries such as WPILib and AdvantageKit."
+        ),
+    ]
+    return clean_narrative_text(" ".join(narrative))
+
+
+def _nearby_teams(number: int, known: Mapping[int, KnownTeamRecord], count_each_side: int = 2):
+    lower = sorted((team for team in known if team < number), reverse=True)[:count_each_side]
+    upper = sorted(team for team in known if team > number)[:count_each_side]
+    rows = []
+    for team_number in sorted([*lower, *upper]):
+        record = known[team_number]
+        rows.append(
+            {
+                "number": record.team_number,
+                "name": _field(record.profile, "nickname") or f"Team {record.team_number}",
+                "location": _location(record.profile),
+                "rookie_year": _field(record.profile, "rookie_year"),
+            }
+        )
+    return rows
+
+
+def _gap_rookie_year(number: int, known: Mapping[int, KnownTeamRecord], target_season: int) -> int:
+    nearby_years = [
+        int(team["rookie_year"])
+        for team in _nearby_teams(number, known)
+        if team.get("rookie_year") is not None
+    ]
+    return round(median(nearby_years)) if nearby_years else int(target_season)
+
+
+def build_known_team_universe(
+    provider: TbaProvider,
+    opts: PriorOpts | None = None,
+) -> dict[int, KnownTeamRecord]:
+    opts = opts or PriorOpts()
+    known: dict[int, KnownTeamRecord] = {}
+    page = 0
+    while True:
+        teams = provider.get_teams_page(page, simple=True)
+        if not teams:
+            break
+        for listed in teams:
+            number = int(_field(listed, "team_number", 0) or 0)
+            if number <= 0 or number > opts.max_team_number:
+                continue
+            team_key = str(_field(listed, "key") or f"frc{number}")
+            try:
+                profile = provider.get_team(team_key)
+            except Exception:
+                profile = listed
+            try:
+                years = provider.get_team_years(team_key)
+            except Exception:
+                years = []
+            try:
+                events = provider.get_team_events(team_key)
+            except Exception:
+                events = []
+            try:
+                awards = provider.get_team_awards(team_key)
+            except Exception:
+                awards = []
+            known[number] = KnownTeamRecord(number, team_key, profile, years, events, awards)
+        page += 1
+    return known
+
+
+def build_prior_narratives(
+    known: Mapping[int, KnownTeamRecord],
+    target_season: int,
+    opts: PriorOpts | None = None,
+) -> pd.DataFrame:
+    opts = opts or PriorOpts()
+    rows = [
+        {
+            "team_number": 0,
+            "team_key": "frc0",
+            "target_season": target_season,
+            "archetype": "ghost_token",
+            "narrative": GHOST_TEAM_NARRATIVE,
+            "narrative_hash": hashlib.sha256(GHOST_TEAM_NARRATIVE.encode()).hexdigest(),
+        }
+    ]
+    for number in range(1, opts.max_team_number + 1):
+        record = known.get(number)
+        if record is not None:
+            active = int(target_season) in set(record.years)
+            archetype = "anchor" if active else "ghost"
+            narrative = build_rich_team_narrative(
+                record.profile,
+                record.years,
+                record.awards,
+                record.events,
+                target_season,
+                active_in_target=active,
+            )
+            team_key = record.team_key
+        elif number < opts.future_start_number:
+            archetype = "sibling"
+            team_key = f"frc{number}"
+            narrative = build_gap_team_narrative(
+                number,
+                _gap_rookie_year(number, known, target_season),
+                _nearby_teams(number, known),
+            )
+        else:
+            archetype = "future"
+            team_key = f"frc{number}"
+            narrative = build_future_rookie_narrative(number, opts)
+        rows.append(
+            {
+                "team_number": number,
+                "team_key": team_key,
+                "target_season": target_season,
+                "archetype": archetype,
+                "narrative": narrative,
+                "narrative_hash": hashlib.sha256(narrative.encode()).hexdigest(),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _nested_field(record: Any, path: Sequence[str], default: Any = None) -> Any:
+    value = record
+    for part in path:
+        value = _plain(value)
+        if isinstance(value, Mapping):
+            value = value.get(part, default)
+        else:
+            value = getattr(value, part, default)
+        if value is default:
+            return default
+    return value
+
+
+def extract_statbotics_total_epa(row: Any) -> float | None:
+    """Extract the prior-season total-points EPA from a Statbotics team-year row."""
+
+    candidates = [
+        _nested_field(row, ("epa", "total_points", "mean")),
+        _nested_field(row, ("epa", "breakdown", "total_points")),
+        _field(row, "epa_end"),
+    ]
+    for value in candidates:
+        if value is None or str(value).strip() == "":
+            continue
+        try:
+            result = float(value)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(result):
+            return result
+    return None
+
+
+def _statbotics_team_number(row: Any) -> int | None:
+    value = _field(row, "team")
+    if value is None:
+        value = _field(row, "team_number")
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def collect_prior_season_epa(
+    statbotics_provider: Any,
+    source_year: int,
+    opts: PriorOpts | None = None,
+) -> dict[int, float]:
+    """Fetch all available prior-season team EPA values from Statbotics."""
+
+    opts = opts or PriorOpts()
+    limit = 1_000
+    offset = 0
+    output: dict[int, float] = {}
+    while True:
+        try:
+            page = statbotics_provider.get_team_years(
+                year=int(source_year),
+                limit=limit,
+                offset=offset,
+            )
+        except TypeError:
+            page = statbotics_provider.get_team_years(year=int(source_year))
+            offset = limit
+        if not page:
+            break
+        for row in page:
+            team_number = _statbotics_team_number(row)
+            if team_number is None or team_number <= 0 or team_number > opts.max_team_number:
+                continue
+            epa = extract_statbotics_total_epa(row)
+            if epa is not None:
+                output[int(team_number)] = float(epa)
+        if len(page) < limit:
+            break
+        offset += limit
+    return output
+
+
+def add_epa_targets(
+    table: pd.DataFrame,
+    statbotics_provider: Any,
+    target_season: int,
+    opts: PriorOpts | None = None,
+    *,
+    epa_source_year: int | None = None,
+) -> pd.DataFrame:
+    """Add normalized prior-season EPA targets to the V5.6 prior feature table."""
+
+    opts = opts or PriorOpts()
+    source_year = int(epa_source_year or opts.epa_source_year or int(target_season) - 1)
+    epa_by_team = collect_prior_season_epa(statbotics_provider, source_year, opts)
+    finite_values = np.asarray(
+        [value for team, value in epa_by_team.items() if team > 0 and np.isfinite(value)],
+        dtype=np.float64,
+    )
+    if finite_values.size:
+        mean = float(np.mean(finite_values))
+        std = float(np.std(finite_values))
+        if not np.isfinite(std) or std <= np.finfo(float).eps:
+            std = 1.0
+    else:
+        mean = 0.0
+        std = 1.0
+    rookie_raw = mean + float(opts.epa_rookie_baseline_z) * std
+    output = table.copy()
+    raw_epa: list[float] = []
+    target_epa: list[float] = []
+    imputed: list[bool] = []
+    for value in output["team_number"]:
+        team_number = int(value)
+        if team_number == 0:
+            raw = 0.0
+            is_imputed = False
+        elif team_number in epa_by_team:
+            raw = float(epa_by_team[team_number])
+            is_imputed = False
+        else:
+            raw = float(rookie_raw)
+            is_imputed = True
+        raw_epa.append(raw)
+        target_epa.append((raw - mean) / std)
+        imputed.append(is_imputed)
+    output["raw_epa"] = raw_epa
+    output["target_epa"] = target_epa
+    output["epa_source_year"] = source_year
+    output["epa_is_imputed"] = imputed
+    output["epa_mean"] = mean
+    output["epa_std"] = std
+    return output
 
 
 def embedding_cache_key(model: str, dimensions: int, narrative_text: str) -> str:
@@ -210,9 +543,7 @@ class OpenAIEmbeddingCache:
 
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
-        self._memory_connection = (
-            sqlite3.connect(":memory:") if str(path) == ":memory:" else None
-        )
+        self._memory_connection = sqlite3.connect(":memory:") if str(path) == ":memory:" else None
         if self._memory_connection is None:
             self.path.parent.mkdir(parents=True, exist_ok=True)
         self._ensure_schema()
@@ -261,7 +592,7 @@ class OpenAIEmbeddingCache:
         if len(embedding) != dimensions:
             raise ValueError(f"Embedding width {len(embedding)} does not match {dimensions}.")
         key = embedding_cache_key(model, dimensions, narrative_text)
-        narrative_hash = hashlib.sha256(narrative_text.encode("utf-8")).hexdigest()
+        narrative_hash = hashlib.sha256(narrative_text.encode()).hexdigest()
         with self._connect() as connection:
             connection.execute(
                 """
@@ -309,13 +640,12 @@ def _is_retryable_embedding_error(exc: Exception) -> bool:
     status = _status_code(exc)
     if status == 429 or (status is not None and 500 <= status <= 599):
         return True
-    retryable_names = {
+    return type(exc).__name__ in {
         "APIConnectionError",
         "APITimeoutError",
         "RateLimitError",
         "InternalServerError",
     }
-    return type(exc).__name__ in retryable_names
 
 
 def _embedding_create_with_backoff(
@@ -348,29 +678,27 @@ def _embedding_create_with_backoff(
 
 
 def embed_narratives(
-    narratives: Mapping[str, str],
+    narratives: Mapping[int | str, str],
     opts: PriorOpts | None = None,
     *,
     client: Any | None = None,
     cache: OpenAIEmbeddingCache | None = None,
     stats: EmbeddingStats | None = None,
-) -> dict[str, list[float]]:
+) -> dict[int | str, list[float]]:
     opts = opts or PriorOpts()
     cache = cache or OpenAIEmbeddingCache(opts.cache_path)
     stats = stats or EmbeddingStats()
-    outputs: dict[str, list[float]] = {}
-    pending: dict[str, tuple[str, list[str]]] = {}
-    for team_key, narrative in narratives.items():
+    outputs: dict[int | str, list[float]] = {}
+    pending: dict[str, tuple[str, list[int | str]]] = {}
+    for key, narrative in narratives.items():
         cached = cache.get(opts.embedding_model, opts.llm_dim, narrative)
         if cached is not None:
             stats.cache_hits += 1
-            outputs[team_key] = cached
+            outputs[key] = cached
             continue
         stats.cache_misses += 1
-        key = embedding_cache_key(opts.embedding_model, opts.llm_dim, narrative)
-        if key not in pending:
-            pending[key] = (narrative, [])
-        pending[key][1].append(team_key)
+        cache_key = embedding_cache_key(opts.embedding_model, opts.llm_dim, narrative)
+        pending.setdefault(cache_key, (narrative, []))[1].append(key)
 
     if pending:
         client = client or _openai_client()
@@ -384,53 +712,62 @@ def embed_narratives(
             embeddings = _response_embeddings(response)
             if len(embeddings) != len(narrative_batch):
                 raise ValueError("OpenAI embedding response length did not match request length.")
-            for (narrative, team_keys), embedding in zip(item_batch, embeddings, strict=True):
+            for (narrative, keys), embedding in zip(item_batch, embeddings, strict=True):
                 cache.put(opts.embedding_model, opts.llm_dim, narrative, embedding)
-                for team_key in team_keys:
-                    outputs[team_key] = embedding
+                for key in keys:
+                    outputs[key] = embedding
     return outputs
 
 
 def build_prior_feature_table(
-    team_keys: Sequence[str],
     provider: TbaProvider,
     target_season: int,
     opts: PriorOpts | None = None,
     *,
     client: Any | None = None,
+    known: Mapping[int, KnownTeamRecord] | None = None,
+    statbotics_provider: Any | None = None,
+    epa_source_year: int | None = None,
 ) -> pd.DataFrame:
     opts = opts or PriorOpts()
-    narratives: dict[str, str] = {}
-    for team_key in sorted({str(key) for key in team_keys if str(key)}):
-        profile = provider.get_team(team_key)
-        events = provider.get_team_events(team_key)
-        awards = provider.get_team_awards(team_key)
-        narratives[team_key] = build_team_narrative(
-            team_key,
-            profile,
-            events,
-            awards,
-            target_season,
-        )
+    if statbotics_provider is None:
+        from frc.providers.statbotics_provider import StatboticsProvider
 
+        statbotics_provider = StatboticsProvider()
+    known = known if known is not None else build_known_team_universe(provider, opts)
+    table = build_prior_narratives(known, target_season, opts)
+    table = add_epa_targets(
+        table,
+        statbotics_provider,
+        target_season,
+        opts,
+        epa_source_year=epa_source_year,
+    )
     stats = EmbeddingStats()
-    embeddings = embed_narratives(narratives, opts, client=client, stats=stats)
-    rows = []
-    for team_key, narrative in narratives.items():
-        rows.append(
-            {
-                "team_key": team_key,
-                "target_season": target_season,
-                "narrative": narrative,
-                "narrative_hash": hashlib.sha256(narrative.encode("utf-8")).hexdigest(),
-                "embedding_model": opts.embedding_model,
-                "llm_dim": opts.llm_dim,
-                "openai_narrative_vector": embeddings[team_key],
-            }
-        )
-    out = pd.DataFrame(rows).sort_values("team_key").reset_index(drop=True)
-    out.attrs["embedding_stats"] = stats.__dict__.copy()
-    return out
+    embeddings = embed_narratives(
+        dict(zip(table["team_number"], table["narrative"], strict=True)),
+        opts,
+        client=client,
+        stats=stats,
+    )
+    table = table.copy()
+    table["embedding_model"] = opts.embedding_model
+    table["llm_dim"] = opts.llm_dim
+    table["openai_narrative_vector"] = [
+        embeddings[int(team_number)] for team_number in table["team_number"]
+    ]
+    table.attrs["embedding_stats"] = stats.__dict__.copy()
+    table.attrs["metadata"] = PriorFeatureMetadata(
+        target_season=target_season,
+        team_count=len(table),
+        max_team_number=opts.max_team_number,
+        embedding_model=opts.embedding_model,
+        llm_dim=opts.llm_dim,
+        epa_source_year=int(table["epa_source_year"].iloc[0]),
+        epa_mean=float(table["epa_mean"].iloc[0]),
+        epa_std=float(table["epa_std"].iloc[0]),
+    ).__dict__
+    return table
 
 
 def write_prior_feature_table(table: pd.DataFrame, output_path: str | Path) -> Path:
@@ -445,32 +782,3 @@ def read_prior_feature_table(input_path: str | Path) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"Prior feature file does not exist: {path}")
     return pd.read_parquet(path, engine=PARQUET_ENGINE)
-
-
-def build_prior_feature_file(
-    target_season: int,
-    teams_from: str | Path,
-    output: str | Path,
-    provider: TbaProvider,
-    opts: PriorOpts | None = None,
-    *,
-    client: Any | None = None,
-) -> Path:
-    source = Path(teams_from)
-    team_keys = read_team_keys_from_feature_file(source)
-    table = build_prior_feature_table(
-        team_keys,
-        provider,
-        target_season,
-        opts,
-        client=client,
-    )
-    metadata = PriorFeatureMetadata(
-        target_season=target_season,
-        team_count=len(team_keys),
-        source_feature_path=str(source),
-        embedding_model=(opts or PriorOpts()).embedding_model,
-        llm_dim=(opts or PriorOpts()).llm_dim,
-    )
-    table.attrs["metadata"] = metadata.__dict__
-    return write_prior_feature_table(table, output)

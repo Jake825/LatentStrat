@@ -16,6 +16,10 @@ def test_model_shapes_attention_and_heads():
 
     assert pred.cont_z.shape == (2, 4)
     assert pred.bin_logits.shape == (2, 1)
+    assert pred.atomic_z.shape == (2, 2 * len(opts.atomic_count_targets))
+    assert pred.foul_z.shape == (2, 2 * len(opts.foul_targets))
+    assert pred.bonus_logits.shape == (2, 2 * len(opts.bonus_binary_targets))
+    assert pred.special_logits.shape == (2, 2 * len(opts.special_binary_targets))
     assert pred.z_match.shape == (2, 5 * opts.latent_dim)
     assert pred.red_pma_weights.shape == (2, 1, 3)
     assert pred.endgame_logits.shape == (2, 6, 3)
@@ -41,19 +45,45 @@ def test_model_is_tolerant_to_alliance_slot_permutation():
     assert torch.allclose(baseline, permuted, atol=1e-5)
 
 
-def test_team_set_zero_slot_creates_true_zero_vector():
+def test_team_set_zero_slot_routes_to_learned_ghost_row():
     opts = default_options()
     model = init_model(4, opts.latent_dim, 4, 1, opts)
+    model.eval()
     with torch.no_grad():
-        model.null_team_token.zero_()
+        model.team_embedding.weight[0].fill_(7.0)
         model.team_embedding.weight[1].fill_(1.0)
     team_idx = torch.tensor([[1, 2, 3]], dtype=torch.long)
 
-    zeroed, _, _ = model.team_set(team_idx, zero_slot=1)
+    zeroed, effective_missing, _ = model.team_set(team_idx, zero_slot=1)
     unzeroed, _, _ = model.team_set(team_idx, zero_slot=0)
 
-    assert torch.allclose(zeroed[:, 0, :], torch.zeros_like(zeroed[:, 0, :]))
+    assert bool(effective_missing[0, 0])
+    assert torch.allclose(zeroed[:, 0, :], torch.full_like(zeroed[:, 0, :], 7.0))
     assert not torch.allclose(unzeroed[:, 0, :], torch.zeros_like(unzeroed[:, 0, :]))
+
+
+def test_missing_slots_use_ghost_row_without_attention_masking():
+    opts = default_options().model_copy(update={"team_dropout_rate": 0.0})
+    model = init_model(6, opts.latent_dim, 4, 1, opts)
+    model.eval()
+    with torch.no_grad():
+        model.team_embedding.weight[0].fill_(4.0)
+    red = torch.tensor([[0, 1, 2]], dtype=torch.long)
+    blue = torch.tensor([[3, 4, 5]], dtype=torch.long)
+    missing = torch.tensor([[True, False, False]])
+
+    slot_vectors, effective_missing, dropout = model.team_set(red, missing_mask=missing)
+    pred = model(red, blue, red_missing_mask=missing, pma_mode="uniform")
+
+    assert torch.allclose(slot_vectors[:, 0, :], torch.full_like(slot_vectors[:, 0, :], 4.0))
+    assert bool(effective_missing[0, 0])
+    assert not dropout.any()
+    assert pred.red_missing_mask.tolist() == [[True, False, False]]
+    np.testing.assert_allclose(
+        pred.red_pma_weights.detach().numpy(),
+        np.full((1, 1, 3), 1.0 / 3.0),
+        rtol=1e-6,
+    )
 
 
 def test_optimizer_groups_do_not_decay_embeddings_biases_or_norms():
@@ -76,6 +106,21 @@ def test_optimizer_groups_do_not_decay_embeddings_biases_or_norms():
     assert id(model.cont_head.bias) in not_decayed
     assert id(model.sab.norm1.weight) in not_decayed
     assert id(model.cont_head.weight) in decayed
+    assert id(model.atomic_head.weight) in decayed
+    assert id(model.team_value_head.linear.weight) in decayed
+
+
+def test_value_heads_return_rank_scalars():
+    opts = default_options().model_copy(update={"team_dropout_rate": 0.0})
+    model = init_model(8, opts.latent_dim, 4, 1, opts)
+    teams = torch.tensor([1, 2, 3], dtype=torch.long)
+    alliance = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.long)
+
+    team_values = model.team_value(teams)
+    alliance_values = model.alliance_value(alliance)
+
+    assert team_values.shape == (3,)
+    assert alliance_values.shape == (2,)
 
 
 def test_inactive_embedding_row_is_not_changed_by_optimizer_step():
@@ -104,10 +149,16 @@ def test_random_team_dropout_is_training_only_and_keeps_one_slot():
     teams = torch.tensor([[1, 2, 3]], dtype=torch.long)
 
     model.train()
-    _, effective_missing, dropout = model.team_set(teams)
+    with torch.no_grad():
+        model.team_embedding.weight[0].fill_(5.0)
+    slot_vectors, effective_missing, dropout = model.team_set(teams)
 
     assert dropout.sum().item() == 2
     assert effective_missing.sum().item() == 2
+    assert torch.allclose(
+        slot_vectors[effective_missing],
+        torch.full_like(slot_vectors[effective_missing], 5.0),
+    )
 
     model.eval()
     _, eval_missing, eval_dropout = model.team_set(teams)

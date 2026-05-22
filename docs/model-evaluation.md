@@ -17,9 +17,12 @@ A model that predicts 75 percent win probability should win roughly 75 percent
 of those cases over a well-populated calibration bin. Check bin counts before
 trusting sparse regions of the curve.
 
+V5.7 bonus and special heads output logits. Convert them to probabilities only
+for metrics and reporting; training uses masked `BCEWithLogitsLoss`.
+
 ## Continuous Targets
 
-For V5 auto and teleop point targets, inspect:
+For V5 auto, teleop, V5.7 atomic-count, and committed-foul targets, inspect:
 
 - RMSE for large misses.
 - MAE for point-unit interpretation.
@@ -28,6 +31,22 @@ For V5 auto and teleop point targets, inspect:
 Continuous and binary targets should be interpreted separately. A model can
 improve score prediction while hurting win-probability calibration, or the
 reverse.
+
+V5.7 score-breakdown targets may be sparse when TBA omits breakdowns. Metrics
+should include only finite target entries.
+
+## Learning-To-Rank Sidecars
+
+Rankings, alliance selections, and playoff sidecars are post-event auxiliary
+training labels. Evaluate them as representation-shaping losses, not pre-match
+prediction inputs:
+
+- Qualification rank pairs should give lower numerical ranks higher team-value
+  scores.
+- Playoff alliance pairs should give better finish orders higher alliance-value
+  scores.
+- Alliance selection triplets should place captains closer to selected picks
+  than to computed passed-over teams.
 
 ## Ordinal Endgame
 
@@ -66,8 +85,8 @@ available at prediction time.
 ## Attention And Zero-Out Diagnostics
 
 PMA attention tables and zero-out diagnostics are architecture-specific review
-tools. V5 attention tables include missing-slot flags and assign zero attention
-to masked slots. They can show which slots influenced pooled alliance
+tools. V5 attention tables include missing-slot flags, while learned ghost
+slots remain visible to attention. They can show which slots influenced pooled alliance
 representations and how predictions respond when a slot is masked.
 
 These artifacts are diagnostics, not causal proof. Use them alongside metrics,

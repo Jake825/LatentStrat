@@ -22,6 +22,7 @@ dependencies:
       - pydantic>=2
       - python-dotenv
       - sqlmodel>=0.0.22
+      - tensorboard>=2.16
       - typer
       - pytest
       - vcrpy

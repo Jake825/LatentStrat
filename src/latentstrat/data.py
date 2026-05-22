@@ -12,6 +12,8 @@ from frc.datastore import FRCDataStore
 from frc.models import Match, MatchAlliance
 from latentstrat.config import LatentStratOptions, TargetMapping, default_options
 
+V56_MAX_TEAM_NUMBER = 12_500
+
 
 @dataclass
 class Split:
@@ -70,6 +72,77 @@ def _breakdown_optional(breakdown: dict[str, Any], tba_field: str, default: Any 
     if snake in breakdown:
         return breakdown[snake]
     return default
+
+
+def _as_float_or_nan(value: Any) -> float:
+    if value is None or pd.isna(value):
+        return float("nan")
+    return float(value)
+
+
+def _as_binary_or_nan(value: Any) -> float:
+    if value is None or pd.isna(value):
+        return float("nan")
+    return float(bool(value))
+
+
+def _v57_score_targets_2026(breakdown: dict[str, Any]) -> dict[str, float]:
+    """Map the 2026 score_breakdown payload into generic V5.7 target names."""
+
+    if not breakdown:
+        return {
+            "atomic_auto_count": float("nan"),
+            "atomic_transition_count": float("nan"),
+            "atomic_shift1_count": float("nan"),
+            "atomic_shift2_count": float("nan"),
+            "atomic_shift3_count": float("nan"),
+            "atomic_shift4_count": float("nan"),
+            "atomic_endgame_count": float("nan"),
+            "bonus_energized": float("nan"),
+            "bonus_supercharged": float("nan"),
+            "bonus_traversal": float("nan"),
+            "special_g206_penalty": float("nan"),
+        }
+    hub_score = breakdown.get("hubScore") or {}
+    return {
+        "atomic_auto_count": _as_float_or_nan(hub_score.get("autoCount")),
+        "atomic_transition_count": _as_float_or_nan(hub_score.get("transitionCount")),
+        "atomic_shift1_count": _as_float_or_nan(hub_score.get("shift1Count")),
+        "atomic_shift2_count": _as_float_or_nan(hub_score.get("shift2Count")),
+        "atomic_shift3_count": _as_float_or_nan(hub_score.get("shift3Count")),
+        "atomic_shift4_count": _as_float_or_nan(hub_score.get("shift4Count")),
+        "atomic_endgame_count": _as_float_or_nan(hub_score.get("endgameCount")),
+        "bonus_energized": _as_binary_or_nan(breakdown.get("energizedAchieved")),
+        "bonus_supercharged": _as_binary_or_nan(breakdown.get("superchargedAchieved")),
+        "bonus_traversal": _as_binary_or_nan(breakdown.get("traversalAchieved")),
+        "special_g206_penalty": _as_binary_or_nan(breakdown.get("g206Penalty")),
+    }
+
+
+def v57_score_targets_for_breakdown(
+    season: int, breakdown: dict[str, Any]
+) -> dict[str, float]:
+    """Return generic V5.7 match-spine targets for a season-specific breakdown."""
+
+    if int(season) == 2026:
+        return _v57_score_targets_2026(breakdown)
+    raise ValueError(f"No V5.7 score-breakdown mapper is registered for season {season}.")
+
+
+def _alliance_columns(targets: tuple[str, ...] | list[str]) -> list[str]:
+    return [f"{color}_{target}" for color in ("red", "blue") for target in targets]
+
+
+def v57_continuous_target_names(opts: LatentStratOptions | None = None) -> list[str]:
+    opts = opts or default_options()
+    return _alliance_columns(tuple(opts.atomic_count_targets) + tuple(opts.foul_targets))
+
+
+def v57_binary_target_names(opts: LatentStratOptions | None = None) -> list[str]:
+    opts = opts or default_options()
+    return _alliance_columns(
+        tuple(opts.bonus_binary_targets) + tuple(opts.special_binary_targets)
+    )
 
 
 def _normalize_endgame_status(value: Any) -> str:
@@ -178,10 +251,9 @@ def _make_alliance_row(
     if raw_score == -1:
         return None
     breakdown = _score_breakdown(match, color)
-    if not breakdown:
-        return None
 
     event_key = _match_event_key(match)
+    season = _extract_season(event_key, match.match_key)
     tba_data = match.tba_data
     comp_level = str(_get_raw(tba_data, "comp_level", ""))
     set_number = float(_get_raw(tba_data, "set_number", np.nan))
@@ -205,7 +277,7 @@ def _make_alliance_row(
         "team_2_key": team_keys[1],
         "team_3_key": team_keys[2],
         "score_raw": raw_score,
-        "has_breakdown": True,
+        "has_breakdown": bool(breakdown),
         "has_surrogate": bool(
             raw_alliance.get("surrogate_team_keys") or alliance.surrogate_team_keys
         ),
@@ -220,7 +292,12 @@ def _make_alliance_row(
         "alliance_order": 2 if color == "blue" else 1,
     }
     for mapping in target_map:
-        row[mapping.target_name] = _breakdown_value(breakdown, mapping.tba_field, "target", color)
+        if breakdown:
+            row[mapping.target_name] = _breakdown_value(
+                breakdown, mapping.tba_field, "target", color
+            )
+        else:
+            row[mapping.target_name] = np.nan
     for slot in (1, 2, 3):
         row[f"auto_tower_robot_{slot}"] = _normalize_endgame_status(
             _breakdown_optional(breakdown, f"autoTowerRobot{slot}", "None")
@@ -234,14 +311,23 @@ def _make_alliance_row(
         "traversal": "traversalAchieved",
     }
     for target in binary_targets:
-        row[target] = bool(_breakdown_value(breakdown, binary_map[target], "binary", color))
+        row[target] = (
+            bool(_breakdown_value(breakdown, binary_map[target], "binary", color))
+            if breakdown
+            else np.nan
+        )
     diagnostic_map = {
         "foul_pts": "foulPoints",
         "major_foul_count": "majorFoulCount",
         "minor_foul_count": "minorFoulCount",
     }
     for target in diagnostic_targets:
-        row[target] = _breakdown_value(breakdown, diagnostic_map[target], "diagnostic", color)
+        row[target] = (
+            _breakdown_value(breakdown, diagnostic_map[target], "diagnostic", color)
+            if breakdown
+            else np.nan
+        )
+    row.update(v57_score_targets_for_breakdown(season, breakdown))
     return row
 
 
@@ -325,6 +411,19 @@ def _make_match_row(red: pd.Series, blue: pd.Series) -> dict[str, Any]:
         "red_foul_pts": red["foul_pts"],
         "blue_foul_pts": blue["foul_pts"],
     }
+    opts = default_options()
+    for target in opts.atomic_count_targets:
+        row[f"red_{target}"] = red.get(target, np.nan)
+        row[f"blue_{target}"] = blue.get(target, np.nan)
+    row["red_committed_foul_pts"] = blue.get("foul_pts", np.nan)
+    row["blue_committed_foul_pts"] = red.get("foul_pts", np.nan)
+    row["red_committed_minor_foul_count"] = blue.get("minor_foul_count", np.nan)
+    row["blue_committed_minor_foul_count"] = red.get("minor_foul_count", np.nan)
+    row["red_committed_major_foul_count"] = blue.get("major_foul_count", np.nan)
+    row["blue_committed_major_foul_count"] = red.get("major_foul_count", np.nan)
+    for target in opts.bonus_binary_targets + opts.special_binary_targets:
+        row[f"red_{target}"] = red.get(target, np.nan)
+        row[f"blue_{target}"] = blue.get(target, np.nan)
     for color, alliance in (("red", red), ("blue", blue)):
         for slot in (1, 2, 3):
             key = str(row[f"{color}_team_{slot}_key"])
@@ -384,6 +483,23 @@ def _team_key_columns(table: pd.DataFrame) -> list[str]:
     return ["team_1_key", "team_2_key", "team_3_key"]
 
 
+def team_number_from_key(team_key: str) -> int:
+    text = str(team_key).strip()
+    if not text.startswith("frc") or not text[3:].isdigit():
+        raise ValueError(f"Invalid FRC team key: {team_key!r}")
+    return int(text[3:])
+
+
+def _team_key_to_v56_base_idx(team_key: str, *, max_team_number: int = V56_MAX_TEAM_NUMBER) -> int:
+    number = team_number_from_key(team_key)
+    if number > max_team_number:
+        raise ValueError(
+            f"Team {team_key} has number {number}, which exceeds V5.6 max_team_number="
+            f"{max_team_number}. Rebuild the V5.6 prior with a larger max_team_number."
+        )
+    return number
+
+
 def make_v5_team_index_maps(
     table: pd.DataFrame,
 ) -> tuple[pd.DataFrame, dict[str, int], dict[str, int]]:
@@ -401,7 +517,7 @@ def make_v5_team_index_maps(
             if pd.notna(value) and str(value)
         }
     )
-    index_map = {key: idx + 1 for idx, key in enumerate(keys)}
+    index_map = {key: _team_key_to_v56_base_idx(key) for key in keys}
     event_pairs = sorted(
         {
             (str(row["event_key"]), str(row[column]))
@@ -501,6 +617,16 @@ def target_matrix(table: pd.DataFrame, target_names: list[str] | tuple[str, ...]
     return values
 
 
+def optional_target_matrix(
+    table: pd.DataFrame, target_names: list[str] | tuple[str, ...]
+) -> np.ndarray:
+    values = np.full((len(table), len(target_names)), np.nan, dtype=float)
+    for idx, name in enumerate(target_names):
+        if name and name in table.columns:
+            values[:, idx] = table[name].astype(float).to_numpy()
+    return values
+
+
 def fit_target_stats(
     table: pd.DataFrame, train_mask: np.ndarray, opts: LatentStratOptions | None = None
 ) -> TargetStats:
@@ -527,4 +653,40 @@ def apply_target_stats(table: pd.DataFrame, stats: TargetStats) -> pd.DataFrame:
         else:
             source = pd.Series(np.zeros(len(out)), index=out.index, dtype=float)
         out[f"{target}_z"] = (source - stats.mu[idx]) / stats.sigma[idx]
+    return out
+
+
+def fit_v57_target_stats(
+    table: pd.DataFrame, train_mask: np.ndarray, opts: LatentStratOptions | None = None
+) -> TargetStats:
+    opts = opts or default_options()
+    target_names = v57_continuous_target_names(opts)
+    if len(train_mask) != len(table):
+        raise ValueError("train_mask must have one element per table row.")
+    if not np.any(train_mask):
+        raise ValueError("At least one training row is required.")
+    values = optional_target_matrix(table, target_names)
+    train = values[train_mask]
+    mu = np.zeros(len(target_names), dtype=float)
+    sigma = np.ones(len(target_names), dtype=float)
+    for idx in range(len(target_names)):
+        finite = train[:, idx][np.isfinite(train[:, idx])]
+        if finite.size:
+            mu[idx] = float(np.mean(finite))
+        if finite.size > 1:
+            sigma[idx] = float(np.std(finite, ddof=1))
+    is_constant = (sigma == 0) | np.isnan(sigma) | np.isnan(mu)
+    mu[np.isnan(mu)] = 0
+    sigma[is_constant] = 1
+    return TargetStats(target_names=target_names, mu=mu, sigma=sigma, is_constant=is_constant)
+
+
+def apply_v57_target_stats(table: pd.DataFrame, stats: TargetStats) -> pd.DataFrame:
+    out = table.copy()
+    for idx, target in enumerate(stats.target_names):
+        if target in out.columns:
+            source = out[target].astype(float)
+            out[f"{target}_z"] = (source - stats.mu[idx]) / stats.sigma[idx]
+        else:
+            out[f"{target}_z"] = np.nan
     return out

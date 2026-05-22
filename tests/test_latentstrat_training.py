@@ -9,7 +9,10 @@ from latentstrat.data import Split, apply_target_stats, fit_target_stats
 from latentstrat.evaluation import evaluate_model
 from latentstrat.model import init_model
 from latentstrat.training import (
+    AlliancePairDataset,
     MatchTensorDataset,
+    RankPairDataset,
+    SelectionTripletDataset,
     model_loss,
     resolve_amp_enabled,
     resolve_compile_enabled,
@@ -53,6 +56,34 @@ def _training_table(row_count=8):
                 "red_win": idx % 2 == 0,
                 "sort_ordinal": idx + 1,
                 "event_week": 0,
+                "red_atomic_auto_count": float(idx),
+                "blue_atomic_auto_count": float(idx + 1),
+                "red_atomic_transition_count": np.nan if idx == 0 else float(idx),
+                "blue_atomic_transition_count": float(idx),
+                "red_atomic_shift1_count": float(idx),
+                "blue_atomic_shift1_count": float(idx),
+                "red_atomic_shift2_count": float(idx),
+                "blue_atomic_shift2_count": float(idx),
+                "red_atomic_shift3_count": float(idx),
+                "blue_atomic_shift3_count": float(idx),
+                "red_atomic_shift4_count": float(idx),
+                "blue_atomic_shift4_count": float(idx),
+                "red_atomic_endgame_count": float(idx),
+                "blue_atomic_endgame_count": float(idx),
+                "red_committed_foul_pts": float(idx % 3),
+                "blue_committed_foul_pts": float((idx + 1) % 3),
+                "red_committed_minor_foul_count": float(idx % 2),
+                "blue_committed_minor_foul_count": float((idx + 1) % 2),
+                "red_committed_major_foul_count": 0.0,
+                "blue_committed_major_foul_count": 0.0,
+                "red_bonus_energized": float(idx % 2 == 0),
+                "blue_bonus_energized": float(idx % 2 == 1),
+                "red_bonus_supercharged": np.nan,
+                "blue_bonus_supercharged": np.nan,
+                "red_bonus_traversal": 0.0,
+                "blue_bonus_traversal": 1.0,
+                "red_special_g206_penalty": 0.0,
+                "blue_special_g206_penalty": 0.0,
             }
         )
     table = pd.DataFrame(rows)
@@ -83,11 +114,22 @@ def test_match_tensor_dataset_converts_once_to_expected_dtypes():
     opts = default_options()
     stats = fit_target_stats(table, np.ones(len(table), dtype=bool), opts)
     prepared = apply_target_stats(table, stats)
+    from latentstrat.data import apply_v57_target_stats, fit_v57_target_stats
+
+    prepared = apply_v57_target_stats(
+        prepared, fit_v57_target_stats(table, np.ones(len(table), dtype=bool), opts)
+    )
 
     dataset = MatchTensorDataset.from_table(prepared, opts)
 
     assert dataset.red_team_idx.dtype == torch.long
     assert dataset.cont_targets.dtype == torch.float32
+    assert dataset.v57_cont_targets.shape[1] == 2 * (
+        len(opts.atomic_count_targets) + len(opts.foul_targets)
+    )
+    assert dataset.v57_bin_targets.shape[1] == 2 * (
+        len(opts.bonus_binary_targets) + len(opts.special_binary_targets)
+    )
     assert len(dataset) == len(table)
 
 
@@ -98,7 +140,11 @@ def test_train_model_uses_dataloader_and_returns_diagnostics():
     )
     split = _split(len(table))
     stats = fit_target_stats(table, split.train_mask, opts)
-    prepared = apply_target_stats(table, stats)
+    from latentstrat.data import apply_v57_target_stats, fit_v57_target_stats
+
+    prepared = apply_v57_target_stats(
+        apply_target_stats(table, stats), fit_v57_target_stats(table, split.train_mask, opts)
+    )
 
     model, history, diagnostics = train_model(prepared, split, opts, verbose=False)
 
@@ -108,6 +154,7 @@ def test_train_model_uses_dataloader_and_returns_diagnostics():
     assert diagnostics.amp_enabled is False
     assert diagnostics.compiled is False
     assert diagnostics.final_loss >= 0
+    assert {"train_loss", "validation_loss"}.issubset(history.columns)
 
 
 def test_evaluation_runs_under_inference_mode_without_gradients():
@@ -178,6 +225,118 @@ def test_award_loss_ignores_nan_targets():
 
     assert torch.isfinite(loss)
     assert metrics.award_loss > 0
+
+
+def test_v57_masked_losses_ignore_nan_targets():
+    opts = default_options().model_copy(update={"team_dropout_rate": 0.0})
+    model = init_model(8, opts.latent_dim, len(opts.target_map), len(opts.binary_targets), opts)
+    red = torch.tensor([[1, 2, 3]], dtype=torch.long)
+    blue = torch.tensor([[4, 5, 6]], dtype=torch.long)
+    cont = torch.zeros((1, len(opts.target_map)))
+    binary = torch.tensor([[1.0]])
+    v57_cont = torch.full(
+        (1, 2 * (len(opts.atomic_count_targets) + len(opts.foul_targets))), float("nan")
+    )
+    v57_bin = torch.full(
+        (1, 2 * (len(opts.bonus_binary_targets) + len(opts.special_binary_targets))),
+        float("nan"),
+    )
+
+    loss, metrics, _ = model_loss(
+        model,
+        red,
+        blue,
+        cont,
+        binary,
+        opts,
+        torch.tensor([1.0]),
+        v57_cont_targets=v57_cont,
+        v57_bin_targets=v57_bin,
+    )
+
+    assert torch.isfinite(loss)
+    assert metrics.atomic_loss == 0.0
+    assert metrics.bonus_loss == 0.0
+
+    v57_cont[0, 0] = 1.0
+    v57_bin[0, 0] = 1.0
+    loss, metrics, _ = model_loss(
+        model,
+        red,
+        blue,
+        cont,
+        binary,
+        opts,
+        torch.tensor([1.0]),
+        v57_cont_targets=v57_cont,
+        v57_bin_targets=v57_bin,
+    )
+
+    assert torch.isfinite(loss)
+    assert metrics.atomic_loss > 0
+    assert metrics.bonus_loss > 0
+
+
+def test_sidecar_datasets_and_training_with_unequal_lengths():
+    table = _training_table(10)
+    opts = default_options().model_copy(
+        update={"epochs": 1, "mini_batch_size": 3, "use_early_stopping": False}
+    )
+    split = _split(len(table))
+    stats = fit_target_stats(table, split.train_mask, opts)
+    from latentstrat.data import apply_v57_target_stats, fit_v57_target_stats
+
+    prepared = apply_v57_target_stats(
+        apply_target_stats(table, stats), fit_v57_target_stats(table, split.train_mask, opts)
+    )
+    rankings = pd.DataFrame(
+        {
+            "event_key": ["2026test"] * 4,
+            "team_key": ["frc1", "frc2", "frc3", "frc4"],
+            "qual_rank": [1, 2, 3, 4],
+            "team_base_idx": [1, 2, 3, 4],
+            "team_event_idx": [1, 2, 3, 4],
+        }
+    )
+    selections = pd.DataFrame(
+        {
+            "event_key": ["2026test"],
+            "captain_base_idx": [1],
+            "pick_base_idx": [3],
+            "passed_over_base_idx": [2],
+            "captain_event_idx": [1],
+            "pick_event_idx": [3],
+            "passed_over_event_idx": [2],
+        }
+    )
+    playoffs = pd.DataFrame(
+        {
+            "event_key": ["2026test", "2026test"],
+            "playoff_finish_order": [1, 2],
+            "team_1_base_idx": [1, 4],
+            "team_2_base_idx": [2, 5],
+            "team_3_base_idx": [3, 6],
+            "team_1_event_idx": [1, 4],
+            "team_2_event_idx": [2, 5],
+            "team_3_event_idx": [3, 6],
+        }
+    )
+
+    assert len(RankPairDataset.from_table(rankings)) == 3
+    assert len(SelectionTripletDataset.from_table(selections)) == 1
+    assert len(AlliancePairDataset.from_table(playoffs)) == 1
+
+    model, history, diagnostics = train_model(
+        prepared,
+        split,
+        opts,
+        verbose=False,
+        sidecar_tables={"rankings": rankings, "selections": selections, "playoffs": playoffs},
+    )
+
+    assert len(history) == 1
+    assert diagnostics.iterations > len(selections)
+    assert model.team_value_head.linear.weight.grad is not None
 
 
 def test_resolve_device_returns_available_torch_device():

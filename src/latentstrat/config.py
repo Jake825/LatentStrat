@@ -79,6 +79,29 @@ class LatentStratOptions(BaseModel):
     )
     binary_targets: tuple[str, ...] = ("red_win",)
     diagnostic_targets: tuple[str, ...] = ("foul_pts", "major_foul_count", "minor_foul_count")
+    atomic_count_targets: tuple[str, ...] = (
+        "atomic_auto_count",
+        "atomic_transition_count",
+        "atomic_shift1_count",
+        "atomic_shift2_count",
+        "atomic_shift3_count",
+        "atomic_shift4_count",
+        "atomic_endgame_count",
+    )
+    foul_targets: tuple[str, ...] = (
+        "committed_foul_pts",
+        "committed_minor_foul_count",
+        "committed_major_foul_count",
+    )
+    bonus_binary_targets: tuple[str, ...] = (
+        "bonus_energized",
+        "bonus_supercharged",
+        "bonus_traversal",
+    )
+    special_binary_targets: tuple[str, ...] = ("special_g206_penalty",)
+    rank_margin: float = 0.1
+    playoff_margin: float = 0.1
+    selection_triplet_margin: float = 0.5
 
 
 class PriorOpts(BaseModel):
@@ -86,7 +109,6 @@ class PriorOpts(BaseModel):
 
     llm_dim: int = 256
     latent_dim: int = 16
-    dropout_rate: float = 0.3
     embedding_model: str = "text-embedding-3-small"
     epochs: int = 1000
     learning_rate: float = 1e-3
@@ -97,6 +119,12 @@ class PriorOpts(BaseModel):
     embedding_retry_multiplier: float = 2.0
     embedding_retry_max_delay: float = 60.0
     embedding_retry_jitter: float = 0.25
+    max_team_number: int = 12_500
+    future_start_number: int = 11_000
+    future_baseline_team: int = 10_900
+    future_growth_per_year: int = 800
+    epa_source_year: int | None = None
+    epa_rookie_baseline_z: float = -0.2
     cache_path: str = "data/prior_cache/openai_embeddings.sqlite"
     device: str = "auto"
     random_seed: int = 2026
