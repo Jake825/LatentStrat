@@ -1,4 +1,4 @@
-"""Native PyTorch model for LatentStrat."""
+"""Native PyTorch V5 model for LatentStrat."""
 
 from __future__ import annotations
 
@@ -19,10 +19,16 @@ class ForwardOutput:
     blue_pma_weights: Tensor
     cont_z: Tensor
     bin_logits: Tensor
+    endgame_logits: Tensor
+    award_logits: Tensor
+    red_missing_mask: Tensor
+    blue_missing_mask: Tensor
+    red_dropout_mask: Tensor
+    blue_dropout_mask: Tensor
 
 
-class SetAttentionBlock(nn.Module):
-    """Transformer-style attention block for unordered team sets."""
+class MAB(nn.Module):
+    """Multihead attention block with residual feed-forward refinement."""
 
     def __init__(
         self,
@@ -53,21 +59,136 @@ class SetAttentionBlock(nn.Module):
         )
         self.norm2 = nn.LayerNorm(latent_dim, eps=layer_norm_epsilon)
 
-    def forward(self, query: Tensor, key_value: Tensor) -> tuple[Tensor, Tensor]:
+    @staticmethod
+    def safe_key_padding_mask(mask: Tensor | None) -> Tensor | None:
+        if mask is None:
+            return None
+        safe = mask.bool().clone()
+        all_masked = safe.all(dim=1)
+        if torch.any(all_masked):
+            safe[all_masked] = False
+        return safe
+
+    def forward(
+        self, query: Tensor, key_value: Tensor, key_padding_mask: Tensor | None = None
+    ) -> tuple[Tensor, Tensor]:
+        safe_mask = self.safe_key_padding_mask(key_padding_mask)
         attn_out, attn_weights = self.attention(
             query=query,
             key=key_value,
             value=key_value,
+            key_padding_mask=safe_mask,
             need_weights=True,
             average_attn_weights=True,
         )
         h = self.norm1(query + attn_out)
         z = self.norm2(h + self.ffn(h))
+        if key_padding_mask is not None and attn_weights.shape[-1] == key_padding_mask.shape[-1]:
+            weights = attn_weights.masked_fill(key_padding_mask[:, None, :].bool(), 0.0)
+            denom = weights.sum(dim=-1, keepdim=True).clamp_min(torch.finfo(weights.dtype).eps)
+            weights = weights / denom
+            all_masked = key_padding_mask.bool().all(dim=1)
+            if torch.any(all_masked):
+                weights[all_masked] = 0.0
+            attn_weights = weights
         return z, attn_weights
 
 
+class SAB(MAB):
+    def forward(self, x: Tensor, key_padding_mask: Tensor | None = None) -> tuple[Tensor, Tensor]:
+        return super().forward(x, x, key_padding_mask)
+
+
+class CROSS(MAB):
+    pass
+
+
+class PMA(nn.Module):
+    def __init__(self, latent_dim: int, ffn_dim: int, **block_args) -> None:
+        super().__init__()
+        self.seed = nn.Parameter(torch.empty(latent_dim))
+        nn.init.normal_(self.seed, mean=0.0, std=0.02)
+        self.block = MAB(latent_dim, ffn_dim, **block_args)
+
+    def forward(
+        self, h: Tensor, key_padding_mask: Tensor | None = None, mode: str = "learned"
+    ) -> tuple[Tensor, Tensor]:
+        if mode == "uniform":
+            weights = torch.ones(
+                (h.shape[0], 1, h.shape[1]), dtype=h.dtype, device=h.device
+            )
+            if key_padding_mask is not None:
+                weights = weights.masked_fill(key_padding_mask[:, None, :].bool(), 0.0)
+            denom = weights.sum(dim=-1, keepdim=True).clamp_min(torch.finfo(h.dtype).eps)
+            weights = weights / denom
+            pooled = torch.bmm(weights, h).squeeze(1)
+            return pooled, weights
+        if mode != "learned":
+            raise ValueError('pma_mode must be "learned" or "uniform".')
+        seed = self.seed.view(1, 1, -1).expand(h.shape[0], 1, -1)
+        pooled, weights = self.block(seed, h, key_padding_mask)
+        return pooled.squeeze(1), weights
+
+
+class SiameseWinHead(nn.Module):
+    """Anti-symmetric win head: swapping alliances negates the logit."""
+
+    def __init__(self, latent_dim: int) -> None:
+        super().__init__()
+        self.gate = nn.Sequential(nn.Linear(2 * latent_dim, latent_dim), nn.Sigmoid())
+        self.score = nn.Linear(latent_dim, 1, bias=False)
+
+    def forward(self, z_red: Tensor, z_blue: Tensor) -> Tensor:
+        diff = z_red - z_blue
+        interaction = torch.cat([diff.abs(), z_red * z_blue], dim=-1)
+        return self.score(diff * self.gate(interaction))
+
+
+class OrdinalEndgameHead(nn.Module):
+    def __init__(self, latent_dim: int, num_classes: int) -> None:
+        super().__init__()
+        self.num_classes = num_classes
+        self.linear = nn.Linear(latent_dim, max(num_classes - 1, 1))
+
+    def forward(self, slot_context: Tensor) -> Tensor:
+        logits = self.linear(slot_context)
+        return logits[..., : max(self.num_classes - 1, 0)]
+
+
+class JudgesRoomHead(nn.Module):
+    def __init__(self, latent_dim: int, num_awards: int) -> None:
+        super().__init__()
+        self.linear = nn.Linear(latent_dim, num_awards)
+
+    def forward(self, slot_context: Tensor) -> Tensor:
+        return self.linear(slot_context)
+
+
+class DeltaIntegrationGate(nn.Module):
+    """Offline gate for folding event deltas into durable base embeddings."""
+
+    def __init__(self, latent_dim: int, hidden_dim: int | None = None) -> None:
+        super().__init__()
+        hidden = hidden_dim or max(4 * latent_dim, 8)
+        self.net = nn.Sequential(
+            nn.Linear(2 * latent_dim + 1, hidden),
+            nn.GELU(),
+            nn.Linear(hidden, latent_dim),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, z_base: Tensor, z_event: Tensor, delta_weeks: Tensor) -> Tensor:
+        if delta_weeks.ndim == 1:
+            delta_weeks = delta_weeks.unsqueeze(-1)
+        delta_weeks = delta_weeks.to(dtype=z_base.dtype, device=z_base.device)
+        return self.net(torch.cat([z_base, z_event, delta_weeks], dim=-1))
+
+    def integrate(self, z_base: Tensor, z_event: Tensor, delta_weeks: Tensor) -> Tensor:
+        return z_base + self(z_base, z_event, delta_weeks) * z_event
+
+
 class SetTransformerModel(nn.Module):
-    """Cross-alliance Set Transformer for FRC match prediction."""
+    """V5 cross-alliance Set Transformer for FRC match and auxiliary targets."""
 
     def __init__(
         self,
@@ -76,13 +197,27 @@ class SetTransformerModel(nn.Module):
         num_cont_targets: int,
         num_bin_targets: int,
         opts: LatentStratOptions | None = None,
+        *,
+        num_event_teams: int | None = None,
+        num_endgame_classes: int | None = None,
+        num_awards: int | None = None,
     ) -> None:
         super().__init__()
         opts = opts or default_options()
         self.opts = opts
         self.latent_dim = latent_dim
-        self.team_embedding = nn.Embedding(num_teams, latent_dim)
-        nn.init.normal_(self.team_embedding.weight, mean=0.0, std=0.02)
+        self.num_cont_targets = num_cont_targets
+        self.num_bin_targets = num_bin_targets
+        self.num_endgame_classes = num_endgame_classes or len(opts.endgame_class_order)
+        self.num_awards = num_awards or len(opts.award_targets)
+
+        self.Z_base = nn.Embedding(max(num_teams, 1), latent_dim, padding_idx=0)
+        self.Z_event = nn.Embedding(max(num_event_teams or num_teams, 1), latent_dim, padding_idx=0)
+        self.team_embedding = self.Z_base
+        nn.init.normal_(self.Z_base.weight, mean=0.0, std=0.02)
+        nn.init.zeros_(self.Z_base.weight.data[0])
+        nn.init.zeros_(self.Z_event.weight)
+        self.null_team_token = nn.Parameter(torch.zeros(latent_dim))
 
         block_args = {
             "num_heads": opts.attention_heads,
@@ -90,70 +225,110 @@ class SetTransformerModel(nn.Module):
             "ffn_dropout": opts.ffn_dropout,
             "layer_norm_epsilon": opts.set_layer_norm_epsilon,
         }
-        self.sab = SetAttentionBlock(latent_dim, opts.set_ffn_dim, **block_args)
-        self.cross = SetAttentionBlock(latent_dim, opts.set_ffn_dim, **block_args)
-        self.pma = SetAttentionBlock(latent_dim, opts.set_ffn_dim, **block_args)
-        self.pma_seed = nn.Parameter(torch.empty(latent_dim))
-        nn.init.normal_(self.pma_seed, mean=0.0, std=0.02)
+        self.sab = SAB(latent_dim, opts.set_ffn_dim, **block_args)
+        self.cross = CROSS(latent_dim, opts.set_ffn_dim, **block_args)
+        self.pma = PMA(latent_dim, opts.set_ffn_dim, **block_args)
 
-        head_dim = 5 * latent_dim
-        self.cont_head = nn.Linear(head_dim, num_cont_targets)
-        self.bin_head = nn.Linear(head_dim, num_bin_targets)
+        self.cont_head = nn.Linear(latent_dim, max(num_cont_targets // 2, 1))
+        self.bin_head = SiameseWinHead(latent_dim)
+        self.endgame_head = OrdinalEndgameHead(latent_dim, self.num_endgame_classes)
+        self.award_head = JudgesRoomHead(latent_dim, self.num_awards)
+        self.delta_integration_gate = DeltaIntegrationGate(latent_dim)
 
-    def team_set(self, team_idx: Tensor, zero_slot: int = 0) -> Tensor:
-        x = self.team_embedding(team_idx.long())
-        if 1 <= zero_slot <= x.shape[1]:
-            slot_mask = torch.ones(team_idx.shape, dtype=x.dtype, device=x.device)
-            slot_mask[:, zero_slot - 1] = 0
-            x = x * slot_mask.unsqueeze(-1)
-        return x
+        self.log_var_continuous = nn.Parameter(torch.zeros(()))
+        self.log_var_win = nn.Parameter(torch.zeros(()))
+        self.log_var_endgame = nn.Parameter(torch.zeros(()))
+        self.log_var_awards = nn.Parameter(torch.zeros(()))
 
-    def pma_pool(self, h: Tensor, pma_mode: str = "learned") -> tuple[Tensor, Tensor]:
-        if pma_mode == "uniform":
-            weights = torch.full(
-                (h.shape[0], 1, h.shape[1]),
-                1.0 / h.shape[1],
-                dtype=h.dtype,
-                device=h.device,
-            )
-            return h.mean(dim=1), weights
-        if pma_mode != "learned":
-            raise ValueError('pma_mode must be "learned" or "uniform".')
+    def _random_dropout_mask(self, missing_mask: Tensor) -> Tensor:
+        rate = float(self.opts.team_dropout_rate)
+        if not self.training or rate <= 0:
+            return torch.zeros_like(missing_mask, dtype=torch.bool)
+        healthy = ~missing_mask.bool()
+        dropout = (torch.rand(missing_mask.shape, device=missing_mask.device) < rate) & healthy
+        effective = missing_mask.bool() | dropout
+        all_masked = effective.all(dim=1)
+        if torch.any(all_masked):
+            healthy_rows = healthy[all_masked]
+            row_positions = torch.nonzero(all_masked, as_tuple=False).flatten()
+            first_healthy = torch.argmax(healthy_rows.to(torch.int64), dim=1)
+            dropout[row_positions, first_healthy] = False
+        return dropout
 
-        seed = self.pma_seed.view(1, 1, -1).expand(h.shape[0], 1, -1)
-        pooled, weights = self.pma(seed, h)
-        return pooled.squeeze(1), weights
+    def team_set(
+        self,
+        team_base_idx: Tensor,
+        team_event_idx: Tensor | None = None,
+        missing_mask: Tensor | None = None,
+        *,
+        zero_slot: int = 0,
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        base_idx = team_base_idx.long()
+        event_idx = torch.zeros_like(base_idx) if team_event_idx is None else team_event_idx.long()
+        explicit_missing = base_idx.eq(0) if missing_mask is None else missing_mask.bool()
+        if 1 <= zero_slot <= base_idx.shape[1]:
+            explicit_missing = explicit_missing.clone()
+            explicit_missing[:, zero_slot - 1] = True
+        dropout_mask = self._random_dropout_mask(explicit_missing)
+        effective_missing = explicit_missing | dropout_mask
+        x = self.Z_base(base_idx.clamp_min(0)) + self.Z_event(event_idx.clamp_min(0))
+        null = self.null_team_token.view(1, 1, -1).to(dtype=x.dtype, device=x.device)
+        x = torch.where(effective_missing.unsqueeze(-1), null, x)
+        return x, effective_missing, dropout_mask
+
+    def pma_pool(
+        self, h: Tensor, missing_mask: Tensor | None = None, pma_mode: str = "learned"
+    ) -> tuple[Tensor, Tensor]:
+        return self.pma(h, missing_mask, pma_mode)
 
     def forward(
         self,
         red_team_idx: Tensor,
         blue_team_idx: Tensor,
         *,
+        red_event_idx: Tensor | None = None,
+        blue_event_idx: Tensor | None = None,
+        red_missing_mask: Tensor | None = None,
+        blue_missing_mask: Tensor | None = None,
         pma_mode: str = "learned",
         red_zero_slot: int = 0,
         blue_zero_slot: int = 0,
     ) -> ForwardOutput:
-        red_set = self.team_set(red_team_idx, red_zero_slot)
-        blue_set = self.team_set(blue_team_idx, blue_zero_slot)
+        red_set, red_effective_missing, red_dropout = self.team_set(
+            red_team_idx, red_event_idx, red_missing_mask, zero_slot=red_zero_slot
+        )
+        blue_set, blue_effective_missing, blue_dropout = self.team_set(
+            blue_team_idx, blue_event_idx, blue_missing_mask, zero_slot=blue_zero_slot
+        )
 
-        red_context, _ = self.sab(red_set, red_set)
-        blue_context, _ = self.sab(blue_set, blue_set)
-        red_interacted, _ = self.cross(red_context, blue_context)
-        blue_interacted, _ = self.cross(blue_context, red_context)
+        red_context, _ = self.sab(red_set, red_effective_missing)
+        blue_context, _ = self.sab(blue_set, blue_effective_missing)
+        red_interacted, _ = self.cross(red_context, blue_context, blue_effective_missing)
+        blue_interacted, _ = self.cross(blue_context, red_context, red_effective_missing)
 
-        z_red, red_weights = self.pma_pool(red_interacted, pma_mode)
-        z_blue, blue_weights = self.pma_pool(blue_interacted, pma_mode)
+        z_red, red_weights = self.pma_pool(red_interacted, red_effective_missing, pma_mode)
+        z_blue, blue_weights = self.pma_pool(blue_interacted, blue_effective_missing, pma_mode)
         diff = z_red - z_blue
         z_match = torch.cat([z_red, z_blue, diff, diff.abs(), z_red * z_blue], dim=1)
+        cont = torch.cat([self.cont_head(z_red), self.cont_head(z_blue)], dim=1)
+        if cont.shape[1] > self.num_cont_targets:
+            cont = cont[:, : self.num_cont_targets]
 
+        slot_context = torch.cat([red_interacted, blue_interacted], dim=1)
         return ForwardOutput(
             z_red=z_red,
             z_blue=z_blue,
             z_match=z_match,
             red_pma_weights=red_weights,
             blue_pma_weights=blue_weights,
-            cont_z=self.cont_head(z_match),
-            bin_logits=self.bin_head(z_match),
+            cont_z=cont,
+            bin_logits=self.bin_head(z_red, z_blue),
+            endgame_logits=self.endgame_head(slot_context),
+            award_logits=self.award_head(slot_context),
+            red_missing_mask=red_effective_missing,
+            blue_missing_mask=blue_effective_missing,
+            red_dropout_mask=red_dropout,
+            blue_dropout_mask=blue_dropout,
         )
 
     def parameter_count(self) -> int:
@@ -166,12 +341,25 @@ def init_model(
     num_cont_targets: int,
     num_bin_targets: int,
     opts: LatentStratOptions | None = None,
+    *,
+    num_event_teams: int | None = None,
+    num_endgame_classes: int | None = None,
+    num_awards: int | None = None,
 ) -> SetTransformerModel:
-    return SetTransformerModel(num_teams, latent_dim, num_cont_targets, num_bin_targets, opts)
+    return SetTransformerModel(
+        num_teams,
+        latent_dim,
+        num_cont_targets,
+        num_bin_targets,
+        opts,
+        num_event_teams=num_event_teams,
+        num_endgame_classes=num_endgame_classes,
+        num_awards=num_awards,
+    )
 
 
 def optimizer_parameter_groups(model: SetTransformerModel, opts: LatentStratOptions) -> list[dict]:
-    """Build AdamW groups with decay only on standard linear/attention weights."""
+    """Build AdamW groups while keeping embeddings on active-row custom L2."""
 
     set_decay = []
     head_decay = []
@@ -181,13 +369,22 @@ def optimizer_parameter_groups(model: SetTransformerModel, opts: LatentStratOpti
             continue
         is_bias = name.endswith(".bias") or name.endswith("_bias")
         is_norm = ".norm" in name or "norm" in name
-        is_embedding = name.startswith("team_embedding")
-        is_seed = name == "pma_seed"
-        if is_bias or is_norm or is_embedding or is_seed:
+        is_embedding = name.startswith(("Z_base", "Z_event", "team_embedding"))
+        is_seed_or_token = name in {"pma.seed", "null_team_token"}
+        is_log_var = name.startswith("log_var_")
+        if is_bias or is_norm or is_embedding or is_seed_or_token or is_log_var:
             no_decay.append(parameter)
         elif name.startswith(("sab.", "cross.", "pma.")):
             set_decay.append(parameter)
-        elif name.startswith(("cont_head.", "bin_head.")):
+        elif name.startswith(
+            (
+                "cont_head.",
+                "bin_head.",
+                "endgame_head.",
+                "award_head.",
+                "delta_integration_gate.",
+            )
+        ):
             head_decay.append(parameter)
         else:
             no_decay.append(parameter)

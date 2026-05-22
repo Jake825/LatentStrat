@@ -11,18 +11,18 @@ from latentstrat.training import match_team_matrices
 def _evaluation_table(row_count=7):
     rows = []
     for idx in range(row_count):
-        red = [idx % 8, (idx + 1) % 8, (idx + 2) % 8]
-        blue = [(idx + 3) % 8, (idx + 4) % 8, (idx + 5) % 8]
+        red = [idx % 8 + 1, (idx + 1) % 8 + 1, (idx + 2) % 8 + 1]
+        blue = [(idx + 3) % 8 + 1, (idx + 4) % 8 + 1, (idx + 5) % 8 + 1]
         rows.append(
             {
                 "event_key": "2026eval",
                 "match_key": f"2026eval_qm{idx + 1}",
-                "red_team_1_key": f"frc{red[0] + 1}",
-                "red_team_2_key": f"frc{red[1] + 1}",
-                "red_team_3_key": f"frc{red[2] + 1}",
-                "blue_team_1_key": f"frc{blue[0] + 1}",
-                "blue_team_2_key": f"frc{blue[1] + 1}",
-                "blue_team_3_key": f"frc{blue[2] + 1}",
+                "red_team_1_key": f"frc{red[0]}",
+                "red_team_2_key": f"frc{red[1]}",
+                "red_team_3_key": f"frc{red[2]}",
+                "blue_team_1_key": f"frc{blue[0]}",
+                "blue_team_2_key": f"frc{blue[1]}",
+                "blue_team_3_key": f"frc{blue[2]}",
                 "red_team_1_idx": red[0],
                 "red_team_2_idx": red[1],
                 "red_team_3_idx": red[2],
@@ -31,6 +31,10 @@ def _evaluation_table(row_count=7):
                 "blue_team_3_idx": blue[2],
                 "red_total_score": 100 + idx,
                 "blue_total_score": 90 + 2 * idx,
+                "red_auto_pts": 20 + idx % 3,
+                "red_teleop_pts": 80 + idx,
+                "blue_auto_pts": 18 + idx % 3,
+                "blue_teleop_pts": 72 + 2 * idx,
                 "win_margin": 10 - idx,
                 "red_foul_pts": idx % 4,
                 "blue_foul_pts": (idx + 1) % 3,
@@ -41,6 +45,12 @@ def _evaluation_table(row_count=7):
             }
         )
     table = pd.DataFrame(rows)
+    for color in ("red", "blue"):
+        for slot in (1, 2, 3):
+            table[f"{color}_team_{slot}_base_idx"] = table[f"{color}_team_{slot}_idx"]
+            table[f"{color}_team_{slot}_event_idx"] = table[f"{color}_team_{slot}_idx"]
+            table[f"{color}_team_{slot}_missing_team_mask"] = False
+            table[f"{color}_team_{slot}_endgame_status"] = "Level1"
     for column in [name for name in table.columns if name.endswith("_idx")]:
         table[column] = table[column].astype("Int64")
     return table
@@ -59,7 +69,7 @@ def _prepared_context(eval_batch_size=2):
     )
     stats = fit_target_stats(table, split.train_mask, opts)
     prepared = apply_target_stats(table, stats)
-    model = init_model(8, opts.latent_dim, len(opts.target_map), len(opts.binary_targets), opts)
+    model = init_model(9, opts.latent_dim, len(opts.target_map), len(opts.binary_targets), opts)
     return prepared, split, stats, model
 
 
@@ -78,6 +88,12 @@ def test_batched_evaluation_matches_large_batch_and_keeps_gradients_empty():
     )
     pd.testing.assert_frame_equal(
         small.binary_metrics, large.binary_metrics, check_exact=False, atol=1e-6
+    )
+    pd.testing.assert_frame_equal(
+        small.endgame_metrics, large.endgame_metrics, check_exact=False, atol=1e-6
+    )
+    pd.testing.assert_frame_equal(
+        small.award_metrics, large.award_metrics, check_exact=False, atol=1e-6
     )
     pd.testing.assert_frame_equal(
         small.zero_out_diagnostics,

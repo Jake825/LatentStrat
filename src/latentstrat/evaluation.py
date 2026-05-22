@@ -1,4 +1,4 @@
-"""Evaluation metrics and diagnostics for LatentStrat models."""
+"""Evaluation metrics and diagnostics for LatentStrat V5 models."""
 
 from __future__ import annotations
 
@@ -7,13 +7,19 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 
 from latentstrat.baselines import Baselines
 from latentstrat.config import LatentStratOptions, default_options
 from latentstrat.data import Split, TargetStats, target_matrix
 from latentstrat.model import SetTransformerModel
-from latentstrat.training import match_team_matrices
+from latentstrat.training import (
+    award_target_tensor,
+    endgame_target_matrix,
+    match_team_matrices,
+    match_v5_matrices,
+)
 
 
 @dataclass
@@ -22,6 +28,8 @@ class EvaluationReport:
     rows_per_parameter: float
     continuous_metrics: pd.DataFrame
     binary_metrics: pd.DataFrame
+    endgame_metrics: pd.DataFrame
+    award_metrics: pd.DataFrame
     calibration: pd.DataFrame
     slices: dict[str, pd.DataFrame]
     set_attention: pd.DataFrame
@@ -109,36 +117,131 @@ def calibration_table(
     return pd.DataFrame(rows)
 
 
+def ordinal_predicted_class(logits: np.ndarray) -> np.ndarray:
+    return np.sum(sigmoid(logits) >= 0.5, axis=-1)
+
+
+def ordinal_expected_value(logits: np.ndarray) -> np.ndarray:
+    return np.sum(sigmoid(logits), axis=-1)
+
+
+def endgame_metrics(
+    actual: np.ndarray,
+    logits: np.ndarray,
+    missing_mask: np.ndarray,
+    split: Split,
+) -> pd.DataFrame:
+    rows = []
+    pred_class = ordinal_predicted_class(logits)
+    pred_expected = ordinal_expected_value(logits)
+    split_masks = (("train", split.train_mask), ("validation", split.validation_mask))
+    for split_name, row_mask in split_masks:
+        slot_mask = row_mask[:, None] & ~missing_mask
+        if not np.any(slot_mask):
+            rows.append(
+                {
+                    "split": split_name,
+                    "accuracy": np.nan,
+                    "mean_abs_class_error": np.nan,
+                    "expected_level_mae": np.nan,
+                    "count": 0,
+                }
+            )
+            continue
+        actual_values = actual[slot_mask]
+        mean_abs_class_error = float(np.mean(np.abs(pred_class[slot_mask] - actual_values)))
+        expected_level_mae = float(np.mean(np.abs(pred_expected[slot_mask] - actual_values)))
+        rows.append(
+            {
+                "split": split_name,
+                "accuracy": float(np.mean(pred_class[slot_mask] == actual_values)),
+                "mean_abs_class_error": mean_abs_class_error,
+                "expected_level_mae": expected_level_mae,
+                "count": int(np.sum(slot_mask)),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def award_metrics(
+    actual: np.ndarray,
+    logits: np.ndarray,
+    missing_mask: np.ndarray,
+    split: Split,
+    names: list[str],
+) -> pd.DataFrame:
+    rows = []
+    probs = sigmoid(logits)
+    split_masks = (("train", split.train_mask), ("validation", split.validation_mask))
+    for split_name, row_mask in split_masks:
+        valid = np.isfinite(actual) & row_mask[:, None, None] & ~missing_mask[:, :, None]
+        for axis_idx, name in enumerate(names):
+            axis_valid = valid[:, :, axis_idx]
+            if not np.any(axis_valid):
+                rows.append(
+                    {
+                        "split": split_name,
+                        "target": name,
+                        "positive_count": 0,
+                        "bce": np.nan,
+                        "average_precision": np.nan,
+                    }
+                )
+                continue
+            y_true = actual[:, :, axis_idx][axis_valid]
+            y_prob = probs[:, :, axis_idx][axis_valid]
+            bce = F.binary_cross_entropy(
+                torch.as_tensor(y_prob, dtype=torch.float32),
+                torch.as_tensor(y_true, dtype=torch.float32),
+            ).item()
+            average_precision = np.nan
+            if np.unique(y_true).size > 1:
+                from sklearn.metrics import average_precision_score
+
+                average_precision = float(average_precision_score(y_true, y_prob))
+            rows.append(
+                {
+                    "split": split_name,
+                    "target": name,
+                    "positive_count": int(np.sum(y_true == 1)),
+                    "bce": bce,
+                    "average_precision": average_precision,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
 def _team_idx_matrix(table: pd.DataFrame) -> np.ndarray:
-    columns = [
-        "red_team_1_idx",
-        "red_team_2_idx",
-        "red_team_3_idx",
-        "blue_team_1_idx",
-        "blue_team_2_idx",
-        "blue_team_3_idx",
-    ]
-    return table[columns].to_numpy(dtype=int)
+    red, blue = match_team_matrices(table)
+    return np.concatenate([red, blue], axis=1)
 
 
 def _row_training_match_counts(table: pd.DataFrame, train_mask: np.ndarray) -> np.ndarray:
     team_idx = _team_idx_matrix(table)
-    counts = np.bincount(team_idx[train_mask].reshape(-1), minlength=int(team_idx.max()) + 1)
-    return counts[team_idx]
+    positive = team_idx[team_idx > 0]
+    minlength = int(positive.max()) + 1 if positive.size else 1
+    counts = np.bincount(team_idx[train_mask].reshape(-1).clip(min=0), minlength=minlength)
+    clipped = team_idx.clip(min=0)
+    if clipped.max() >= len(counts):
+        counts = np.pad(counts, (0, clipped.max() - len(counts) + 1))
+    return counts[clipped]
 
 
 def _row_has_first_event_team(table: pd.DataFrame) -> np.ndarray:
     team_idx = _team_idx_matrix(table)
-    first_event = np.array([""] * (int(team_idx.max()) + 1), dtype=object)
+    max_team = int(team_idx.max()) if team_idx.size else 0
+    first_event = np.array([""] * (max_team + 1), dtype=object)
     order = np.argsort(table["sort_ordinal"].to_numpy())
     events = table["event_key"].astype(str).to_numpy()
     for row in order:
         for team in team_idx[row]:
-            if first_event[team] == "":
+            if team > 0 and first_event[team] == "":
                 first_event[team] = events[row]
-    return np.array(
-        [np.any(first_event[team_idx[row]] == events[row]) for row in range(len(table))]
-    )
+    values = []
+    for row in range(len(table)):
+        row_teams = team_idx[row][team_idx[row] > 0]
+        values.append(np.any(first_event[row_teams] == events[row]))
+    return np.array(values)
 
 
 def slice_metrics(
@@ -176,19 +279,32 @@ def slice_metrics(
 
 
 def set_attention_table(
-    table: pd.DataFrame, split: Split, red_weights: np.ndarray, blue_weights: np.ndarray
+    table: pd.DataFrame,
+    split: Split,
+    red_weights: np.ndarray,
+    blue_weights: np.ndarray,
+    red_missing: np.ndarray | None = None,
+    blue_missing: np.ndarray | None = None,
 ) -> pd.DataFrame:
     rows = []
     split_names = np.array(["other"] * len(table), dtype=object)
     split_names[split.train_mask] = "train"
     split_names[split.validation_mask] = "validation"
     split_names[split.test_mask] = "test"
-    for color, weights, prefix in (("red", red_weights, "red"), ("blue", blue_weights, "blue")):
+    if red_missing is None:
+        red_missing = np.zeros((len(table), 3), dtype=bool)
+    if blue_missing is None:
+        blue_missing = np.zeros((len(table), 3), dtype=bool)
+    for color, weights, prefix, missing in (
+        ("red", red_weights, "red", red_missing),
+        ("blue", blue_weights, "blue", blue_missing),
+    ):
         team_cols = [f"{prefix}_team_1_key", f"{prefix}_team_2_key", f"{prefix}_team_3_key"]
         keys = table[team_cols].astype(str).to_numpy()
         entropy = -np.sum(weights * np.log(np.maximum(weights, np.finfo(float).eps)), axis=1)
         max_slot = np.argmax(weights, axis=1)
         for idx in range(len(table)):
+            all_missing = bool(np.all(missing[idx]))
             rows.append(
                 {
                     "row_index": idx + 1,
@@ -199,12 +315,15 @@ def set_attention_table(
                     "team_1_key": keys[idx, 0],
                     "team_2_key": keys[idx, 1],
                     "team_3_key": keys[idx, 2],
+                    "team_1_missing": bool(missing[idx, 0]),
+                    "team_2_missing": bool(missing[idx, 1]),
+                    "team_3_missing": bool(missing[idx, 2]),
                     "team_1_attention": weights[idx, 0],
                     "team_2_attention": weights[idx, 1],
                     "team_3_attention": weights[idx, 2],
-                    "max_attention_slot": int(max_slot[idx] + 1),
-                    "max_attention_team_key": keys[idx, max_slot[idx]],
-                    "max_attention_weight": weights[idx, max_slot[idx]],
+                    "max_attention_slot": np.nan if all_missing else int(max_slot[idx] + 1),
+                    "max_attention_team_key": "" if all_missing else keys[idx, max_slot[idx]],
+                    "max_attention_weight": np.nan if all_missing else weights[idx, max_slot[idx]],
                     "attention_entropy": entropy[idx],
                 }
             )
@@ -216,13 +335,27 @@ def _predict_batched(
     red: np.ndarray,
     blue: np.ndarray,
     opts: LatentStratOptions | None = None,
+    *,
+    red_event: np.ndarray | None = None,
+    blue_event: np.ndarray | None = None,
+    red_missing: np.ndarray | None = None,
+    blue_missing: np.ndarray | None = None,
+    return_aux: bool = False,
     **forward_kwargs,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+):
     opts = opts or default_options()
     device = next(model.parameters()).device
+    red_event = np.zeros_like(red) if red_event is None else red_event
+    blue_event = np.zeros_like(blue) if blue_event is None else blue_event
+    red_missing = red == 0 if red_missing is None else red_missing
+    blue_missing = blue == 0 if blue_missing is None else blue_missing
     dataset = TensorDataset(
         torch.as_tensor(red, dtype=torch.long),
         torch.as_tensor(blue, dtype=torch.long),
+        torch.as_tensor(red_event, dtype=torch.long),
+        torch.as_tensor(blue_event, dtype=torch.long),
+        torch.as_tensor(red_missing, dtype=torch.bool),
+        torch.as_tensor(blue_missing, dtype=torch.bool),
     )
     loader = DataLoader(
         dataset,
@@ -233,30 +366,50 @@ def _predict_batched(
     )
     was_training = model.training
     model.eval()
-    cont_chunks = []
-    bin_chunks = []
-    red_pma_chunks = []
-    blue_pma_chunks = []
+    chunks = {
+        "cont": [],
+        "bin": [],
+        "endgame": [],
+        "award": [],
+        "red_pma": [],
+        "blue_pma": [],
+        "red_missing": [],
+        "blue_missing": [],
+    }
     non_blocking = device.type == "cuda"
     with torch.inference_mode():
-        for batch_red, batch_blue in loader:
+        for batch in loader:
+            (
+                batch_red,
+                batch_blue,
+                batch_red_event,
+                batch_blue_event,
+                batch_red_missing,
+                batch_blue_missing,
+            ) = batch
             pred = model(
                 batch_red.to(device, non_blocking=non_blocking),
                 batch_blue.to(device, non_blocking=non_blocking),
+                red_event_idx=batch_red_event.to(device, non_blocking=non_blocking),
+                blue_event_idx=batch_blue_event.to(device, non_blocking=non_blocking),
+                red_missing_mask=batch_red_missing.to(device, non_blocking=non_blocking),
+                blue_missing_mask=batch_blue_missing.to(device, non_blocking=non_blocking),
                 **forward_kwargs,
             )
-            cont_chunks.append(pred.cont_z.detach().cpu().numpy())
-            bin_chunks.append(pred.bin_logits.detach().cpu().numpy())
-            red_pma_chunks.append(pred.red_pma_weights.detach().cpu().numpy())
-            blue_pma_chunks.append(pred.blue_pma_weights.detach().cpu().numpy())
+            chunks["cont"].append(pred.cont_z.detach().cpu().numpy())
+            chunks["bin"].append(pred.bin_logits.detach().cpu().numpy())
+            chunks["endgame"].append(pred.endgame_logits.detach().cpu().numpy())
+            chunks["award"].append(pred.award_logits.detach().cpu().numpy())
+            chunks["red_pma"].append(pred.red_pma_weights.detach().cpu().numpy())
+            chunks["blue_pma"].append(pred.blue_pma_weights.detach().cpu().numpy())
+            chunks["red_missing"].append(pred.red_missing_mask.detach().cpu().numpy())
+            chunks["blue_missing"].append(pred.blue_missing_mask.detach().cpu().numpy())
     if was_training:
         model.train()
-    return (
-        np.concatenate(cont_chunks, axis=0),
-        np.concatenate(bin_chunks, axis=0),
-        np.concatenate(red_pma_chunks, axis=0),
-        np.concatenate(blue_pma_chunks, axis=0),
-    )
+    result = {name: np.concatenate(values, axis=0) for name, values in chunks.items()}
+    if return_aux:
+        return result
+    return result["cont"], result["bin"], result["red_pma"], result["blue_pma"]
 
 
 def _predict_cont(
@@ -266,20 +419,29 @@ def _predict_cont(
     target_stats: TargetStats,
     opts: LatentStratOptions | None = None,
     *,
+    red_event: np.ndarray | None = None,
+    blue_event: np.ndarray | None = None,
+    red_missing: np.ndarray | None = None,
+    blue_missing: np.ndarray | None = None,
     pma_mode: str = "learned",
     red_zero_slot: int = 0,
     blue_zero_slot: int = 0,
 ) -> np.ndarray:
-    pred_z, _, _, _ = _predict_batched(
+    pred = _predict_batched(
         model,
         red,
         blue,
         opts,
+        red_event=red_event,
+        blue_event=blue_event,
+        red_missing=red_missing,
+        blue_missing=blue_missing,
         pma_mode=pma_mode,
         red_zero_slot=red_zero_slot,
         blue_zero_slot=blue_zero_slot,
+        return_aux=True,
     )
-    return pred_z * target_stats.sigma + target_stats.mu
+    return pred["cont"] * target_stats.sigma + target_stats.mu
 
 
 def zero_out_diagnostics(
@@ -292,9 +454,12 @@ def zero_out_diagnostics(
     columns = ["scenario", "target", "baseline_rmse", "scenario_rmse", "delta_rmse"]
     if not np.any(split.validation_mask):
         return pd.DataFrame(columns=columns)
-    red, blue = match_team_matrices(table)
+    red, blue, red_event, blue_event, red_missing, blue_missing = match_v5_matrices(table)
     actual = target_matrix(table, [mapping.target_name for mapping in opts.target_map])
-    baseline = _predict_cont(model, red, blue, target_stats, opts)
+    baseline = _predict_cont(
+        model, red, blue, target_stats, opts, red_event=red_event, blue_event=blue_event,
+        red_missing=red_missing, blue_missing=blue_missing
+    )
     baseline_rmse = np.sqrt(
         np.nanmean((baseline[split.validation_mask] - actual[split.validation_mask]) ** 2, axis=0)
     )
@@ -311,6 +476,10 @@ def zero_out_diagnostics(
             blue,
             target_stats,
             opts,
+            red_event=red_event,
+            blue_event=blue_event,
+            red_missing=red_missing,
+            blue_missing=blue_missing,
             pma_mode=pma_mode,
             red_zero_slot=red_slot,
             blue_zero_slot=blue_slot,
@@ -342,16 +511,29 @@ def evaluate_model(
     baselines: Baselines | None = None,
 ) -> EvaluationReport:
     opts = opts or default_options()
-    red, blue = match_team_matrices(table)
-    pred_z, bin_logits, red_pma_weights, blue_pma_weights = _predict_batched(model, red, blue, opts)
-    pred_cont = pred_z * target_stats.sigma + target_stats.mu
-    pred_bin = sigmoid(bin_logits)
+    red, blue, red_event, blue_event, red_missing, blue_missing = match_v5_matrices(table)
+    pred = _predict_batched(
+        model,
+        red,
+        blue,
+        opts,
+        red_event=red_event,
+        blue_event=blue_event,
+        red_missing=red_missing,
+        blue_missing=blue_missing,
+        return_aux=True,
+    )
+    pred_cont = pred["cont"] * target_stats.sigma + target_stats.mu
+    pred_bin = sigmoid(pred["bin"])
     actual_cont = target_matrix(table, [mapping.target_name for mapping in opts.target_map])
     actual_bin = target_matrix(table, list(opts.binary_targets))
+    actual_endgame = endgame_target_matrix(table, opts)
+    actual_awards = award_target_tensor(table, opts)
     parameter_count = model.parameter_count()
     rows_per_parameter = float(np.sum(split.train_mask) / parameter_count)
-    red_weights = red_pma_weights.reshape(len(table), 3)
-    blue_weights = blue_pma_weights.reshape(len(table), 3)
+    red_weights = pred["red_pma"].reshape(len(table), 3)
+    blue_weights = pred["blue_pma"].reshape(len(table), 3)
+    effective_missing = np.concatenate([pred["red_missing"], pred["blue_missing"]], axis=1)
     return EvaluationReport(
         parameter_count=parameter_count,
         rows_per_parameter=rows_per_parameter,
@@ -359,11 +541,17 @@ def evaluate_model(
             actual_cont, pred_cont, split, target_stats.target_names
         ),
         binary_metrics=binary_metrics(actual_bin, pred_bin, split, list(opts.binary_targets)),
+        endgame_metrics=endgame_metrics(actual_endgame, pred["endgame"], effective_missing, split),
+        award_metrics=award_metrics(
+            actual_awards, pred["award"], effective_missing, split, list(opts.award_targets)
+        ),
         calibration=calibration_table(
             actual_bin, pred_bin, split.validation_mask, list(opts.binary_targets)
         ),
         slices=slice_metrics(table, actual_cont, pred_cont, split, target_stats.target_names),
-        set_attention=set_attention_table(table, split, red_weights, blue_weights),
+        set_attention=set_attention_table(
+            table, split, red_weights, blue_weights, pred["red_missing"], pred["blue_missing"]
+        ),
         zero_out_diagnostics=zero_out_diagnostics(model, table, split, target_stats, opts),
         baselines=baselines,
     )

@@ -19,7 +19,7 @@ trusting sparse regions of the curve.
 
 ## Continuous Targets
 
-For score-like targets, inspect:
+For V5 auto and teleop point targets, inspect:
 
 - RMSE for large misses.
 - MAE for point-unit interpretation.
@@ -28,6 +28,24 @@ For score-like targets, inspect:
 Continuous and binary targets should be interpreted separately. A model can
 improve score prediction while hurting win-probability calibration, or the
 reverse.
+
+## Ordinal Endgame
+
+The endgame head predicts cumulative ordinal logits for
+`None < Level1 < Level2 < Level3`. Evaluation reports:
+
+- Class accuracy.
+- Mean absolute class error.
+- Expected-level MAE from cumulative probabilities.
+
+Read these as per-slot robot outcomes, not alliance-level scores.
+
+## Judged Awards
+
+Award metrics are computed only where the NaN-masked ontology has finite target
+entries. This prevents censored axes from producing false negatives. Reports
+include finite-entry BCE, positive counts, and average precision when both
+positive and negative finite labels exist.
 
 ## Baselines And Controls
 
@@ -48,15 +66,16 @@ available at prediction time.
 ## Attention And Zero-Out Diagnostics
 
 PMA attention tables and zero-out diagnostics are architecture-specific review
-tools. They can show which slots influenced pooled alliance representations and
-how predictions respond when a slot is masked.
+tools. V5 attention tables include missing-slot flags and assign zero attention
+to masked slots. They can show which slots influenced pooled alliance
+representations and how predictions respond when a slot is masked.
 
 These artifacts are diagnostics, not causal proof. Use them alongside metrics,
 calibration, feature availability, and scouting context.
 
 ## Embeddings
 
-Embedding inspection exports team vectors, PCA projections, cosine neighbors,
+Embedding inspection exports durable `Z_base` vectors, PCA projections, cosine neighbors,
 archetype similarities, PMA attention, and zero-out diagnostics. Use these to
 form hypotheses about learned structure:
 

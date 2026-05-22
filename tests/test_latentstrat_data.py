@@ -23,6 +23,12 @@ def _breakdown(score):
         "totalTowerPoints": 35,
         "autoTowerPoints": 10,
         "endGameTowerPoints": 25,
+        "autoTowerRobot1": "Level1",
+        "autoTowerRobot2": "None",
+        "autoTowerRobot3": "Level2",
+        "endGameTowerRobot1": "Level1",
+        "endGameTowerRobot2": "Level2",
+        "endGameTowerRobot3": "Level3",
         "foulPoints": 3,
         "majorFoulCount": 0,
         "minorFoulCount": 1,
@@ -88,8 +94,13 @@ def test_build_tables_filters_and_maps_zero_based_indices():
     assert match_table["blue_total_score"].iloc[0] == 100
     assert match_table["win_margin"].iloc[0] == 20
     assert bool(match_table["red_win"].iloc[0])
-    assert team_map["frc1"] == 0
-    assert int(match_table["red_team_1_idx"].iloc[0]) == 0
+    assert match_table["red_auto_pts"].iloc[0] == 20
+    assert match_table["blue_teleop_pts"].iloc[0] == 80
+    assert match_table["red_team_3_endgame_status"].iloc[0] == "Level3"
+    assert team_map["frc1"] == 1
+    assert int(match_table["red_team_1_base_idx"].iloc[0]) == 1
+    assert int(match_table["red_team_1_event_idx"].iloc[0]) == 1
+    assert not bool(match_table["red_team_1_missing_team_mask"].iloc[0])
     assert str(match_table["red_team_1_idx"].dtype) == "Int64"
 
 
@@ -135,13 +146,13 @@ def test_apply_target_stats_adds_z_columns():
     table = pd.DataFrame(
         {
             "sort_ordinal": [1, 2, 3],
-            "red_total_score": [1.0, 3.0, 5.0],
-            "blue_total_score": [2.0, 4.0, 6.0],
-            "win_margin": [-1.0, -1.0, -1.0],
-            "fouls_drawn": [0.0, 0.0, 0.0],
+            "red_auto_pts": [1.0, 3.0, 5.0],
+            "red_teleop_pts": [2.0, 4.0, 6.0],
+            "blue_auto_pts": [0.0, 1.0, 2.0],
+            "blue_teleop_pts": [3.0, 4.0, 5.0],
         }
     )
     split = make_split(table, opts, validation_fraction=0.34)
     stats = fit_target_stats(table, split.train_mask, opts)
     out = apply_target_stats(table, stats)
-    assert "red_total_score_z" in out.columns
+    assert "red_auto_pts_z" in out.columns

@@ -11,8 +11,8 @@ The TBA match table is the dataset spine. Each row is one played match with:
 - `season`, `event_key`, `match_key`, `comp_level`, `set_number`, and
   `match_number`.
 - Six team slot keys: `red_team_1_key` through `blue_team_3_key`.
-- Raw targets such as scores, score differential, win flags, and
-  score-breakdown-derived columns.
+- Raw targets such as red/blue auto points, teleop points, score differential,
+  win flags, per-slot 2026 endgame state, and score-breakdown-derived columns.
 - Timing and ordering columns such as `event_week`, `time`, `actual_time`,
   `predicted_time`, and `sort_ordinal`.
 
@@ -42,6 +42,20 @@ If a scouting source has useful fields that do not fit the current schema,
 propose an explicit schema update, merge behavior, and tests instead of hiding
 the fields in importer-only logic.
 
+## Judged Awards
+
+TBA event awards are post-event auxiliary labels. They are never pre-match
+inputs. `build-features` parses the tracked judged awards into per-slot columns:
+
+- Cultural axes: `impact`, `ei`.
+- Machine axes: `auto`, `quality`, `design`, `control`, `excellence`.
+
+The award target columns intentionally contain `NaN` for unknown or censored
+axes. Impact winners emit both Impact and EI positives. EI winners emit an EI
+positive, and emit an Impact `0.0` only when the team was still chronologically
+eligible to win Impact at that event. Machine award winners emit exactly one
+positive axis and leave unrelated machine axes as `NaN`.
+
 ## Optional Statbotics Enrichment
 
 Statbotics can be useful for external comparison or future feature work, but it
@@ -65,15 +79,39 @@ preserve useful pandas dtypes, including nullable integer columns, timestamps,
 strings, and numeric feature columns. Tensor-bound values are cast deliberately
 when `MatchTensorDataset` builds PyTorch tensors.
 
+## V5.5 Prior Features
+
+`build-prior-features` writes a separate text-prior Parquet file for offline
+pretraining. It reads team keys from an existing target-season feature file, but
+uses that file only for team identity. The prior narrative is built from TBA
+team profile, event history, and awards where `year < target_season`.
+
+The output contains one row per team with:
+
+- `team_key`
+- `target_season`
+- cleaned natural-language `narrative`
+- stable `narrative_hash`
+- `embedding_model` and `llm_dim`
+- `openai_narrative_vector`, a 256-D text embedding
+
+There is no explicit hardware vector or award-decay vector. Historical awards
+are injected into the narrative text next to their event, and the OpenAI
+embedding cache prevents duplicate API calls for unchanged narratives.
+
 ## Team Indexing
 
-Training maps string FRC team keys such as `frc254` to embedding indices in
+Training maps string FRC team keys such as `frc254` to V5 embedding indices in
 memory:
 
-1. `make_team_index_map` scans all six team slot columns.
-2. Non-empty team keys are mapped to contiguous integers.
-3. Nullable pandas `Int64` index columns are added for the current training run.
-4. `MatchTensorDataset` converts those index matrices to `torch.long`.
+1. `make_v5_team_index_maps` scans all six team slot columns.
+2. `team_base_idx` maps real team keys to contiguous integers starting at `1`.
+3. `team_event_idx` maps `(event_key, team_key)` pairs to contiguous integers
+   starting at `1`.
+4. Index `0` is reserved for null/empty slots in both maps.
+5. Per-slot `missing_team_mask` columns are true only for explicit blank/missing
+   team slots.
+6. `MatchTensorDataset` converts these columns to PyTorch tensors.
 
 The mapping is per training run. Unknown teams require rebuilding the mapping
 with an updated feature table or a deliberate future inference policy. The
@@ -91,9 +129,9 @@ meaning:
 - Keep unknown categorical values distinct from known negative values.
 - Do not fill pre-match rows with post-match or post-event aggregates.
 
-Training and evaluation require nonmissing team index inputs. Missing scouting
-or optional feature values are a feature-design issue; missing team slots are a
-model-contract issue.
+V5 can represent explicit missing team slots with the null index and attention
+mask. DQ and surrogate flags remain diagnostics; they are not treated as missing
+robots by default.
 
 ## Commands
 

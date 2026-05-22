@@ -7,8 +7,10 @@ import torch
 from latentstrat.config import default_options
 from latentstrat.data import Split, apply_target_stats, fit_target_stats
 from latentstrat.evaluation import evaluate_model
+from latentstrat.model import init_model
 from latentstrat.training import (
     MatchTensorDataset,
+    model_loss,
     resolve_amp_enabled,
     resolve_compile_enabled,
     resolve_device,
@@ -20,18 +22,18 @@ from latentstrat.training import (
 def _training_table(row_count=8):
     rows = []
     for idx in range(row_count):
-        red = [idx % 6, (idx + 1) % 6, (idx + 2) % 6]
-        blue = [(idx + 3) % 6, (idx + 4) % 6, (idx + 5) % 6]
+        red = [idx % 6 + 1, (idx + 1) % 6 + 1, (idx + 2) % 6 + 1]
+        blue = [(idx + 3) % 6 + 1, (idx + 4) % 6 + 1, (idx + 5) % 6 + 1]
         rows.append(
             {
                 "event_key": "2026test",
                 "match_key": f"2026test_qm{idx + 1}",
-                "red_team_1_key": f"frc{red[0] + 1}",
-                "red_team_2_key": f"frc{red[1] + 1}",
-                "red_team_3_key": f"frc{red[2] + 1}",
-                "blue_team_1_key": f"frc{blue[0] + 1}",
-                "blue_team_2_key": f"frc{blue[1] + 1}",
-                "blue_team_3_key": f"frc{blue[2] + 1}",
+                "red_team_1_key": f"frc{red[0]}",
+                "red_team_2_key": f"frc{red[1]}",
+                "red_team_3_key": f"frc{red[2]}",
+                "blue_team_1_key": f"frc{blue[0]}",
+                "blue_team_2_key": f"frc{blue[1]}",
+                "blue_team_3_key": f"frc{blue[2]}",
                 "red_team_1_idx": red[0],
                 "red_team_2_idx": red[1],
                 "red_team_3_idx": red[2],
@@ -40,6 +42,10 @@ def _training_table(row_count=8):
                 "blue_team_3_idx": blue[2],
                 "red_total_score": 100 + idx,
                 "blue_total_score": 95 + idx,
+                "red_auto_pts": 20 + idx % 3,
+                "red_teleop_pts": 80 + idx,
+                "blue_auto_pts": 18 + idx % 3,
+                "blue_teleop_pts": 77 + idx,
                 "win_margin": 5,
                 "red_foul_pts": 3,
                 "blue_foul_pts": 1,
@@ -50,6 +56,12 @@ def _training_table(row_count=8):
             }
         )
     table = pd.DataFrame(rows)
+    for color in ("red", "blue"):
+        for slot in (1, 2, 3):
+            table[f"{color}_team_{slot}_base_idx"] = table[f"{color}_team_{slot}_idx"]
+            table[f"{color}_team_{slot}_event_idx"] = table[f"{color}_team_{slot}_idx"]
+            table[f"{color}_team_{slot}_missing_team_mask"] = False
+            table[f"{color}_team_{slot}_endgame_status"] = "Level1"
     for column in [name for name in table.columns if name.endswith("_idx")]:
         table[column] = table[column].astype("Int64")
     return table
@@ -124,6 +136,48 @@ def test_positive_weights_handle_balanced_and_degenerate_labels():
     np.testing.assert_allclose(balanced, np.array([1.0], dtype=np.float32))
     np.testing.assert_allclose(all_positive, np.array([1.0], dtype=np.float32))
     np.testing.assert_allclose(all_negative, np.array([1.0], dtype=np.float32))
+
+
+def test_award_loss_ignores_nan_targets():
+    opts = default_options().model_copy(update={"team_dropout_rate": 0.0})
+    model = init_model(8, opts.latent_dim, len(opts.target_map), len(opts.binary_targets), opts)
+    red = torch.tensor([[1, 2, 3]], dtype=torch.long)
+    blue = torch.tensor([[4, 5, 6]], dtype=torch.long)
+    cont = torch.zeros((1, len(opts.target_map)))
+    binary = torch.tensor([[1.0]])
+    endgame = torch.zeros((1, 6), dtype=torch.long)
+    awards = torch.full((1, 6, len(opts.award_targets)), float("nan"))
+
+    loss, metrics, _ = model_loss(
+        model,
+        red,
+        blue,
+        cont,
+        binary,
+        opts,
+        torch.tensor([1.0]),
+        endgame_targets=endgame,
+        award_targets=awards,
+    )
+
+    assert torch.isfinite(loss)
+    assert metrics.award_loss == 0.0
+
+    awards[0, 0, 0] = 1.0
+    loss, metrics, _ = model_loss(
+        model,
+        red,
+        blue,
+        cont,
+        binary,
+        opts,
+        torch.tensor([1.0]),
+        endgame_targets=endgame,
+        award_targets=awards,
+    )
+
+    assert torch.isfinite(loss)
+    assert metrics.award_loss > 0
 
 
 def test_resolve_device_returns_available_torch_device():

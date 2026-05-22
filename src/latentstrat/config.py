@@ -15,7 +15,7 @@ class LatentStratOptions(BaseModel):
 
     season: int = 2026
     smoke_event_key: str = "2026ilch"
-    latent_dim: int = 4
+    latent_dim: int = 16
     attention_heads: int = 1
     attention_dropout: float = 0.0
     ffn_dropout: float = 0.0
@@ -24,8 +24,10 @@ class LatentStratOptions(BaseModel):
     set_ffn_dim: int = 16
     set_layer_norm_epsilon: float = 1e-5
     l2_embedding: float = 1e-4
+    event_delta_l2: float = 1e-1
     l2_heads: float = 1e-5
     l2_set: float = 1e-5
+    team_dropout_rate: float = 0.03
     epochs: int = 200
     mini_batch_size: int = 256
     smoke_mini_batch_size: int = 64
@@ -45,11 +47,27 @@ class LatentStratOptions(BaseModel):
     random_seed: int = 2026
     evidence_seeds: tuple[int, ...] = (2026, 2027, 2028)
     bin_positive_weights: str | list[float] = "auto"
+    continuous_targets: tuple[str, ...] = (
+        "red_auto_pts",
+        "red_teleop_pts",
+        "blue_auto_pts",
+        "blue_teleop_pts",
+    )
+    endgame_class_order: tuple[str, ...] = ("None", "Level1", "Level2", "Level3")
+    award_targets: tuple[str, ...] = (
+        "impact",
+        "ei",
+        "auto",
+        "quality",
+        "design",
+        "control",
+        "excellence",
+    )
     target_map: tuple[TargetMapping, ...] = (
-        TargetMapping(target_name="red_total_score", tba_field="redTotalScore"),
-        TargetMapping(target_name="blue_total_score", tba_field="blueTotalScore"),
-        TargetMapping(target_name="win_margin", tba_field="winMargin"),
-        TargetMapping(target_name="fouls_drawn", tba_field="foulsDrawn"),
+        TargetMapping(target_name="red_auto_pts", tba_field="redAutoPoints"),
+        TargetMapping(target_name="red_teleop_pts", tba_field="redTeleopPoints"),
+        TargetMapping(target_name="blue_auto_pts", tba_field="blueAutoPoints"),
+        TargetMapping(target_name="blue_teleop_pts", tba_field="blueTeleopPoints"),
     )
     alliance_target_map: tuple[TargetMapping, ...] = (
         TargetMapping(target_name="total_score", tba_field="totalPoints"),
@@ -61,6 +79,27 @@ class LatentStratOptions(BaseModel):
     )
     binary_targets: tuple[str, ...] = ("red_win",)
     diagnostic_targets: tuple[str, ...] = ("foul_pts", "major_foul_count", "minor_foul_count")
+
+
+class PriorOpts(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    llm_dim: int = 256
+    latent_dim: int = 16
+    dropout_rate: float = 0.3
+    embedding_model: str = "text-embedding-3-small"
+    epochs: int = 1000
+    learning_rate: float = 1e-3
+    batch_size: int = 256
+    embedding_batch_size: int = 128
+    max_embedding_retries: int = 6
+    embedding_retry_initial_delay: float = 1.0
+    embedding_retry_multiplier: float = 2.0
+    embedding_retry_max_delay: float = 60.0
+    embedding_retry_jitter: float = 0.25
+    cache_path: str = "data/prior_cache/openai_embeddings.sqlite"
+    device: str = "auto"
+    random_seed: int = 2026
 
 
 def default_options() -> LatentStratOptions:

@@ -93,7 +93,7 @@ def build_team_embedding_table(
         }
     )
     team_slots = _team_slots(table)
-    num_teams = len(result)
+    num_teams = max(len(embeddings), int(indices.max()) + 1 if len(indices) else 1)
     result["match_count"] = np.bincount(team_slots.reshape(-1), minlength=num_teams)[indices]
     result["event_count"] = [
         table.loc[np.any(team_slots == idx, axis=1), "event_key"].astype(str).nunique()
@@ -236,10 +236,10 @@ def inspect_embeddings(
     top_k: int = 10,
 ) -> Inspection:
     opts = opts or default_options()
-    embeddings = model.team_embedding.weight.detach().cpu().numpy()
+    embeddings = model.Z_base.weight.detach().cpu().numpy()
     pca_score, pca_model = compute_pca(embeddings)
     team_table = build_team_embedding_table(embeddings, team_index_map, pca_score, table, baselines)
-    normalized = normalize_rows(embeddings)
+    normalized = normalize_rows(embeddings[team_table["team_index"].to_numpy(dtype=int)])
     # Reuse evaluation attention output without split labels here.
     from latentstrat.data import Split
     from latentstrat.evaluation import evaluate_model
@@ -263,7 +263,9 @@ def inspect_embeddings(
     ).set_attention
     return Inspection(
         team_embedding_table=team_table,
-        sanity_checks=sanity_checks(embeddings, team_table),
+        sanity_checks=sanity_checks(
+            embeddings[team_table["team_index"].to_numpy(dtype=int)], team_table
+        ),
         pca_model=pca_model,
         nearest_neighbors=nearest_neighbors(team_table, normalized, top_k),
         archetype_similarity=archetype_similarity(team_table, normalized, top_k),

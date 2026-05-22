@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from frc.models import Match, TbaEvent, TbaMatch, TbaTeam, _as_plain_data
+from frc.models import Match, TbaAward, TbaEvent, TbaMatch, TbaTeam, _as_plain_data
 
 
 class TbaProvider:
@@ -72,8 +72,8 @@ class TbaProvider:
     def get_event_rankings(self, event_key: str) -> dict[str, Any]:
         return _as_plain_data(self.client.event_rankings(event_key))
 
-    def get_event_awards(self, event_key: str) -> list[dict[str, Any]]:
-        return list(self._call("event_awards", event_key))
+    def get_event_awards(self, event_key: str) -> list[TbaAward]:
+        return [TbaAward.model_validate(item) for item in self._call("event_awards", event_key)]
 
     def get_event_alliances(self, event_key: str) -> list[dict[str, Any]]:
         return list(self._call("event_alliances", event_key))
@@ -83,6 +83,19 @@ class TbaProvider:
 
     def get_event_team_keys(self, event_key: str) -> list[str]:
         return list(self._call("event_teams", event_key, keys=True))
+
+    def get_team(self, team_key: str) -> TbaTeam:
+        return TbaTeam.model_validate(self._call("team", team_key))
+
+    def get_team_events(self, team_key: str) -> list[TbaEvent]:
+        try:
+            payload = self._call("team_events", team_key, simple=True)
+        except TypeError:
+            payload = self._call("team_events", team_key)
+        return [TbaEvent.model_validate(item) for item in payload]
+
+    def get_team_awards(self, team_key: str) -> list[TbaAward]:
+        return [TbaAward.model_validate(item) for item in self._call("team_awards", team_key)]
 
     def get_match(self, match_key: str) -> TbaMatch:
         return TbaMatch.model_validate(self._call("match", key=match_key))

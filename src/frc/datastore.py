@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from frc.models import Match, ScoutingData, TbaEvent, Team
+from frc.models import Match, ScoutingData, TbaAward, TbaEvent, Team
 
 
 @dataclass
@@ -12,6 +12,7 @@ class FRCDataStore:
     teams: dict[str, Team] = field(default_factory=dict)
     matches: dict[str, Match] = field(default_factory=dict)
     events: dict[str, TbaEvent] = field(default_factory=dict)
+    awards: dict[str, list[TbaAward]] = field(default_factory=dict)
     scouting_data: dict[tuple[str, str], ScoutingData] = field(default_factory=dict)
 
     def add_team(self, team: Team) -> None:
@@ -25,6 +26,9 @@ class FRCDataStore:
 
     def add_event(self, event: TbaEvent) -> None:
         self.events[event.key] = event
+
+    def add_awards(self, event_key: str, awards: list[TbaAward]) -> None:
+        self.awards[event_key] = list(awards)
 
     def add_scouting_data(self, scouting: ScoutingData) -> None:
         self.scouting_data[(scouting.team_key, scouting.match_key)] = scouting

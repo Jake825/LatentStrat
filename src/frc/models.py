@@ -111,6 +111,37 @@ class TbaEvent(PayloadModel):
         return _as_plain_data(data)
 
 
+class TbaAwardRecipient(PayloadModel):
+    team_key: str | None = None
+    awardee: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_raw(cls, data: Any) -> Any:
+        return _as_plain_data(data)
+
+
+class TbaAward(PayloadModel):
+    name: str = ""
+    award_type: int | None = None
+    event_key: str = ""
+    recipient_list: list[TbaAwardRecipient] = Field(default_factory=list)
+    year: int | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_raw(cls, data: Any) -> Any:
+        raw = _as_plain_data(data)
+        if not isinstance(raw, dict):
+            return raw
+        normalized = dict(raw)
+        recipients = normalized.get("recipient_list") or []
+        normalized["recipient_list"] = [
+            TbaAwardRecipient.model_validate(recipient) for recipient in recipients
+        ]
+        return normalized
+
+
 class TbaMatch(PayloadModel):
     key: str
     event_key: str = ""

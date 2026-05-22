@@ -6,6 +6,7 @@ import pytest
 from sqlmodel import Session
 from typer.testing import CliRunner
 
+from frc.models import TbaAward
 from frc.scouting import (
     EventScouting,
     MatchAllianceScouting,
@@ -19,6 +20,7 @@ from frc.scouting import (
 from latentstrat.cli import app
 from latentstrat.config import default_options
 from latentstrat.features import (
+    add_award_features,
     merge_scouting_features,
     read_feature_table,
     train_feature_table,
@@ -60,6 +62,10 @@ def _feature_table(row_count=8):
                 "event_week": 0,
                 "red_total_score": 100 + idx,
                 "blue_total_score": 90 + idx,
+                "red_auto_pts": 20 + idx % 3,
+                "red_teleop_pts": 80 + idx,
+                "blue_auto_pts": 18 + idx % 3,
+                "blue_teleop_pts": 72 + idx,
                 "red_foul_pts": idx % 4,
                 "blue_foul_pts": (idx + 1) % 4,
                 "win_margin": 10,
@@ -67,7 +73,11 @@ def _feature_table(row_count=8):
                 "red_win": True,
             }
         )
-    return pd.DataFrame(rows)
+    table = pd.DataFrame(rows)
+    for color in ("red", "blue"):
+        for slot in (1, 2, 3):
+            table[f"{color}_team_{slot}_endgame_status"] = "Level1"
+    return table
 
 
 def test_dotenv_loader_hydrates_tba_key_without_committed_secret(tmp_path, monkeypatch):
@@ -116,14 +126,66 @@ def test_train_feature_table_adds_indices_and_writes_artifacts(tmp_path):
     )
 
     assert "red_team_1_idx" in result.prepared.columns
+    assert "red_team_1_base_idx" in result.prepared.columns
+    assert "red_team_1_event_idx" in result.prepared.columns
     assert result.prepared["red_team_1_idx"].dtype == "Int64"
-    assert len(result.team_index_map) == 6
+    assert result.team_index_map["frc1"] == 1
+    assert len(result.team_event_index_map) == 6
     assert (output / "feature_match_table.csv").exists()
     assert (output / "feature_history.csv").exists()
     assert (output / "feature_continuous_metrics.csv").exists()
     assert (output / "feature_binary_metrics.csv").exists()
+    assert (output / "feature_endgame_metrics.csv").exists()
+    assert (output / "feature_award_metrics.csv").exists()
     assert (output / "feature_set_attention.csv").exists()
     assert (output / "feature_zero_out_diagnostics.csv").exists()
+    assert (output / "v5_checkpoint.pt").exists()
+
+
+def test_award_ontology_masks_machine_award_non_axes_and_tracks_ei_eligibility():
+    table = _feature_table(2)
+    table.loc[0, "event_key"] = "2026week1"
+    table.loc[1, "event_key"] = "2026week2"
+    table.loc[0, "sort_ordinal"] = 1
+    table.loc[1, "sort_ordinal"] = 2
+    table.loc[0, "red_team_1_key"] = "frc1"
+    table.loc[1, "red_team_1_key"] = "frc1"
+    table.loc[1, "red_team_2_key"] = "frc2"
+    awards = {
+        "2026week1": [
+            TbaAward(
+                name="FIRST Impact Award",
+                award_type=0,
+                event_key="2026week1",
+                recipient_list=[{"team_key": "frc1"}],
+            ),
+            TbaAward(
+                name="Autonomous Award",
+                award_type=74,
+                event_key="2026week1",
+                recipient_list=[{"team_key": "frc1"}],
+            ),
+        ],
+        "2026week2": [
+            TbaAward(
+                name="Engineering Inspiration Award",
+                award_type=9,
+                event_key="2026week2",
+                recipient_list=[{"team_key": "frc1"}, {"team_key": "frc2"}],
+            )
+        ],
+    }
+
+    out = add_award_features(table, awards)
+
+    assert out.loc[0, "red_team_1_award_auto"] == 1.0
+    assert pd.isna(out.loc[0, "red_team_1_award_quality"])
+    assert out.loc[0, "red_team_1_award_impact"] == 1.0
+    assert out.loc[0, "red_team_1_award_ei"] == 1.0
+    assert pd.isna(out.loc[1, "red_team_1_award_impact"])
+    assert out.loc[1, "red_team_1_award_ei"] == 1.0
+    assert out.loc[1, "red_team_2_award_impact"] == 0.0
+    assert out.loc[1, "red_team_2_award_ei"] == 1.0
 
 
 def test_init_scouting_db_creates_expected_tables(tmp_path):
@@ -233,6 +295,46 @@ def test_train_features_cli_loads_parquet_and_writes_artifacts(tmp_path):
 
     assert result.exit_code == 0, result.output
     assert (output / "feature_match_table.csv").exists()
+    assert (output / "v5_checkpoint.pt").exists()
+
+
+def test_consolidate_event_cli_writes_embedding_store(tmp_path):
+    path = write_feature_table(_feature_table(), tmp_path / "features.parquet")
+    output = tmp_path / "cli_artifacts"
+    db_path = tmp_path / "embeddings.sqlite"
+    runner = CliRunner()
+    train_result = runner.invoke(
+        app,
+        [
+            "train-features",
+            str(path),
+            "--output",
+            str(output),
+            "--epochs",
+            "1",
+            "--mini-batch-size",
+            "4",
+        ],
+    )
+    assert train_result.exit_code == 0, train_result.output
+
+    result = runner.invoke(
+        app,
+        [
+            "consolidate-event",
+            str(output / "v5_checkpoint.pt"),
+            "--event-key",
+            "2026features",
+            "--embedding-db",
+            str(db_path),
+            "--delta-weeks",
+            "2.0",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert db_path.exists()
+    assert (output / "v5_checkpoint_consolidated.pt").exists()
 
 
 def test_feature_file_errors_are_clear(tmp_path):

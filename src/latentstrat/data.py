@@ -63,6 +63,33 @@ def _breakdown_value(breakdown: dict[str, Any], tba_field: str, role: str, color
     raise KeyError(f"Missing {role} breakdown field {tba_field!r} for {color} alliance.")
 
 
+def _breakdown_optional(breakdown: dict[str, Any], tba_field: str, default: Any = np.nan) -> Any:
+    snake = _camel_to_snake(tba_field)
+    if tba_field in breakdown:
+        return breakdown[tba_field]
+    if snake in breakdown:
+        return breakdown[snake]
+    return default
+
+
+def _normalize_endgame_status(value: Any) -> str:
+    if value is None or pd.isna(value):
+        return "None"
+    text = str(value).strip()
+    if not text or text.lower() == "none":
+        return "None"
+    normalized = text.replace(" ", "")
+    aliases = {
+        "Level1": "Level1",
+        "Level2": "Level2",
+        "Level3": "Level3",
+        "L1": "Level1",
+        "L2": "Level2",
+        "L3": "Level3",
+    }
+    return aliases.get(normalized, normalized)
+
+
 def _event_week_map(event_metadata: pd.DataFrame | None) -> dict[str, float]:
     if event_metadata is None or event_metadata.empty:
         return {}
@@ -194,6 +221,13 @@ def _make_alliance_row(
     }
     for mapping in target_map:
         row[mapping.target_name] = _breakdown_value(breakdown, mapping.tba_field, "target", color)
+    for slot in (1, 2, 3):
+        row[f"auto_tower_robot_{slot}"] = _normalize_endgame_status(
+            _breakdown_optional(breakdown, f"autoTowerRobot{slot}", "None")
+        )
+        row[f"endgame_tower_robot_{slot}"] = _normalize_endgame_status(
+            _breakdown_optional(breakdown, f"endGameTowerRobot{slot}", "None")
+        )
     binary_map = {
         "energized": "energizedAchieved",
         "supercharged": "superchargedAchieved",
@@ -284,9 +318,19 @@ def _make_match_row(red: pd.Series, blue: pd.Series) -> dict[str, Any]:
         "comp_ordinal": comp_level_ordinal(str(red["comp_level"])),
         "red_total_score": red["total_score"],
         "blue_total_score": blue["total_score"],
+        "red_auto_pts": red["auto_pts"],
+        "red_teleop_pts": red["teleop_pts"],
+        "blue_auto_pts": blue["auto_pts"],
+        "blue_teleop_pts": blue["teleop_pts"],
         "red_foul_pts": red["foul_pts"],
         "blue_foul_pts": blue["foul_pts"],
     }
+    for color, alliance in (("red", red), ("blue", blue)):
+        for slot in (1, 2, 3):
+            key = str(row[f"{color}_team_{slot}_key"])
+            row[f"{color}_team_{slot}_missing_team_mask"] = not bool(key)
+            row[f"{color}_team_{slot}_auto_status"] = alliance[f"auto_tower_robot_{slot}"]
+            row[f"{color}_team_{slot}_endgame_status"] = alliance[f"endgame_tower_robot_{slot}"]
     row["win_margin"] = row["red_total_score"] - row["blue_total_score"]
     row["fouls_drawn"] = row["red_foul_pts"] - row["blue_foul_pts"]
     row["red_win"] = row["win_margin"] > 0
@@ -340,11 +384,15 @@ def _team_key_columns(table: pd.DataFrame) -> list[str]:
     return ["team_1_key", "team_2_key", "team_3_key"]
 
 
-def make_team_index_map(table: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, int]]:
+def make_v5_team_index_maps(
+    table: pd.DataFrame,
+) -> tuple[pd.DataFrame, dict[str, int], dict[str, int]]:
     key_columns = _team_key_columns(table)
     missing = [column for column in key_columns if column not in table.columns]
     if missing:
         raise KeyError(f"Data table is missing team key columns: {', '.join(missing)}")
+    if "event_key" not in table.columns:
+        raise KeyError("Data table is missing event_key.")
     keys = sorted(
         {
             str(value)
@@ -353,15 +401,43 @@ def make_team_index_map(table: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, in
             if pd.notna(value) and str(value)
         }
     )
-    index_map = {key: idx for idx, key in enumerate(keys)}
+    index_map = {key: idx + 1 for idx, key in enumerate(keys)}
+    event_pairs = sorted(
+        {
+            (str(row["event_key"]), str(row[column]))
+            for _, row in table[["event_key", *key_columns]].iterrows()
+            for column in key_columns
+            if pd.notna(row[column]) and str(row[column])
+        }
+    )
+    event_index_map = {
+        f"{event_key}::{team_key}": idx + 1
+        for idx, (event_key, team_key) in enumerate(event_pairs)
+    }
     out = table.copy()
     for column in key_columns:
-        idx_column = column.replace("_key", "_idx")
-        values = [
-            index_map.get(str(value), pd.NA) if pd.notna(value) and str(value) else pd.NA
-            for value in out[column]
-        ]
-        out[idx_column] = pd.Series(values, dtype="Int64")
+        base_column = column.replace("_key", "_base_idx")
+        event_column = column.replace("_key", "_event_idx")
+        legacy_column = column.replace("_key", "_idx")
+        missing_column = column.replace("_key", "_missing_team_mask")
+        base_values = []
+        event_values = []
+        missing_values = []
+        for event_key, value in zip(out["event_key"], out[column], strict=True):
+            present = pd.notna(value) and bool(str(value))
+            team_key = str(value) if present else ""
+            base_values.append(index_map.get(team_key, 0))
+            event_values.append(event_index_map.get(f"{event_key}::{team_key}", 0))
+            missing_values.append(not present)
+        out[base_column] = pd.Series(base_values, dtype="Int64")
+        out[event_column] = pd.Series(event_values, dtype="Int64")
+        out[legacy_column] = pd.Series(base_values, dtype="Int64")
+        out[missing_column] = pd.Series(missing_values, dtype=bool)
+    return out, index_map, event_index_map
+
+
+def make_team_index_map(table: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, int]]:
+    out, index_map, _ = make_v5_team_index_maps(table)
     return out, index_map
 
 
@@ -446,5 +522,9 @@ def fit_target_stats(
 def apply_target_stats(table: pd.DataFrame, stats: TargetStats) -> pd.DataFrame:
     out = table.copy()
     for idx, target in enumerate(stats.target_names):
-        out[f"{target}_z"] = (out[target].astype(float) - stats.mu[idx]) / stats.sigma[idx]
+        if target in out.columns:
+            source = out[target].astype(float)
+        else:
+            source = pd.Series(np.zeros(len(out)), index=out.index, dtype=float)
+        out[f"{target}_z"] = (source - stats.mu[idx]) / stats.sigma[idx]
     return out

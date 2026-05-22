@@ -10,6 +10,7 @@ dependencies:
   - pyarrow
   - scipy
   - scikit-learn
+  - matplotlib
   - tabulate
   - pytorch
   - pip:
@@ -17,6 +18,7 @@ dependencies:
       - statbotics==3.0.0
       - requests-cache
       - diskcache
+      - openai>=1
       - pydantic>=2
       - python-dotenv
       - sqlmodel>=0.0.22

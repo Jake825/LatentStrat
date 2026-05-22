@@ -1,8 +1,9 @@
 # Embedding Inspection
 
-Embedding inspection is the post-training workflow for understanding the learned
-`team_embedding` weight matrix and the PMA attention tables. It does not retrain
-the model.
+Embedding inspection is the post-training workflow for understanding the durable
+V5 `Z_base` matrix and PMA attention tables. It does not retrain the model.
+`Z_event` is venue-specific and ephemeral, so event deltas are exported as
+separate diagnostics rather than used for the main PCA/neighbors tables.
 
 Read embedding outputs alongside the broader guidance in
 [Model Evaluation](model-evaluation.md), especially calibration, baselines,
@@ -10,7 +11,18 @@ controls, and feature availability.
 
 ## Entry Point
 
-Run the CLI command:
+For V5.5 prior vectors before match training, run:
+
+```bash
+latentstrat inspect-prior --checkpoint data/pretrained_prior_2026.pt \
+  --features data/prior_features_2026.parquet \
+  --output artifacts/prior_2026
+```
+
+This writes prior PCA plots, cosine neighbors, reconstruction MSE, sanity
+checks, and training-loss artifacts.
+
+For V5 `Z_base` after match training, run:
 
 ```bash
 latentstrat inspect-embeddings --event-key 2026ilch
@@ -20,8 +32,9 @@ Outputs are written as `.csv` files under `artifacts/inspection/`.
 
 ## Team Embedding Table
 
-The `team_embeddings.csv` file extracts the raw vectors from PyTorch's
-`nn.Embedding` and joins them with team-perspective analytics, including:
+The `team_embeddings.csv` file extracts raw `Z_base` vectors for real team
+indices starting at `1` and joins them with team-perspective analytics,
+including:
 
 - `team_key` and `team_index`.
 - The raw embedding vector and its L2 norm.
@@ -56,8 +69,9 @@ about team reputation.
 
 ## PMA Attention And Zero-Out Diagnostics
 
-PMA weights describe how the learned `pma_seed` summarized a contextualized
-alliance block prior to prediction. They are not literal causal explanations.
+PMA weights describe how the learned pooling seed summarized a contextualized
+alliance block prior to prediction. Masked missing slots receive zero attention.
+They are not literal causal explanations.
 
 Read the PMA outputs against `zero_out_diagnostics.csv`. Representation utility
 is stronger when artificially masking a specific slot to `0.0` causes a measured

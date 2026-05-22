@@ -10,6 +10,7 @@ data/*.db
 data/*.sqlite
 data/*.sqlite-shm
 data/*.sqlite-wal
+data/*.pt
 .env
 .env.local
 *.sqlite

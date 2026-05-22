@@ -26,6 +26,7 @@ class TBAImporter:
             )
         matches = [Match.from_tba(match) for match in provider.get_event_matches(event_key)]
         store.add_match(matches)
+        store.add_awards(event_key, provider.get_event_awards(event_key))
         return event
 
     @staticmethod

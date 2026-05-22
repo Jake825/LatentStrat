@@ -18,7 +18,7 @@ from frc.importers import TBAImporter
 from frc.providers.tba_provider import TbaProvider
 from frc.scouting import create_db_and_tables
 from latentstrat.baselines import fit_baselines
-from latentstrat.config import LatentStratOptions, default_options
+from latentstrat.config import LatentStratOptions, PriorOpts, default_options
 from latentstrat.data import (
     apply_target_stats,
     build_season_match_table,
@@ -28,13 +28,22 @@ from latentstrat.data import (
 )
 from latentstrat.evaluation import evaluate_model
 from latentstrat.experiments import build_evidence_packet
+from latentstrat.embedding_store import consolidate_event_checkpoint
 from latentstrat.features import (
     build_event_feature_table,
     build_season_feature_table,
+    load_v5_checkpoint_model,
     train_feature_file,
     write_feature_table,
 )
 from latentstrat.inspection import inspect_embeddings
+from latentstrat.pretrain_features import (
+    build_prior_feature_table,
+    read_team_keys_from_feature_file,
+    write_prior_feature_table,
+)
+from latentstrat.prior_inspection import inspect_prior_checkpoint, write_prior_inspection_artifacts
+from latentstrat.pretrain_loop import train_prior_file
 from latentstrat.training import train_model
 
 app = typer.Typer(help="LatentStrat Python CLI")
@@ -160,6 +169,24 @@ def train_features(
     mini_batch_size: Annotated[
         int | None, typer.Option("--mini-batch-size", help="Override training mini-batch size.")
     ] = None,
+    venue_mode: Annotated[
+        bool,
+        typer.Option(
+            "--venue-mode/--standard-mode",
+            help="Freeze the V5 trunk and train only event-delta embeddings.",
+        ),
+    ] = False,
+    event_key: Annotated[
+        str | None, typer.Option("--event-key", help="Event key to isolate for venue mode.")
+    ] = None,
+    checkpoint: Annotated[
+        Path | None,
+        typer.Option("--checkpoint", help="Optional V5 checkpoint to resume/fine-tune."),
+    ] = None,
+    prior_checkpoint: Annotated[
+        Path | None,
+        typer.Option("--prior-checkpoint", help="Optional V5.5 team-key prior checkpoint."),
+    ] = None,
 ) -> None:
     """Train LatentStrat from a local Parquet feature file."""
     updates = {}
@@ -168,11 +195,133 @@ def train_features(
     if mini_batch_size is not None:
         updates["mini_batch_size"] = mini_batch_size
     opts = default_options().model_copy(update=updates)
-    result = train_feature_file(input_path, opts, output_dir=output)
+    initial_model = load_v5_checkpoint_model(checkpoint) if checkpoint is not None else None
+    result = train_feature_file(
+        input_path,
+        opts,
+        output_dir=output,
+        venue_mode=venue_mode,
+        venue_event_key=event_key,
+        initial_model=initial_model,
+        prior_checkpoint=prior_checkpoint,
+    )
     typer.echo(
         f"Feature training complete: rows={len(result.prepared)}, "
         f"teams={len(result.team_index_map)}, final_loss={result.diagnostics.final_loss:.4f}"
     )
+
+
+@app.command("build-prior-features")
+def build_prior_features(
+    target_season: Annotated[
+        int, typer.Option("--target-season", help="Target season to quarantine from priors.")
+    ] = 2026,
+    teams_from: Annotated[
+        Path | None,
+        typer.Option(
+            "--teams-from",
+            help="Target-season feature Parquet used only for team identity.",
+        ),
+    ] = None,
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", help="Output V5.5 prior feature Parquet path."),
+    ] = None,
+    cache_path: Annotated[
+        Path,
+        typer.Option("--cache-path", help="SQLite cache for OpenAI text embeddings."),
+    ] = Path("data/prior_cache/openai_embeddings.sqlite"),
+) -> None:
+    """Build quarantined text-only prior features for V5.5."""
+    source = teams_from or Path(f"data/features_{target_season}.parquet")
+    output_path = output or Path(f"data/prior_features_{target_season}.parquet")
+    opts = PriorOpts(cache_path=str(cache_path))
+    provider = _provider()
+    team_keys = read_team_keys_from_feature_file(source)
+    table = build_prior_feature_table(team_keys, provider, target_season, opts)
+    path = write_prior_feature_table(table, output_path)
+    stats = table.attrs.get("embedding_stats", {})
+    typer.echo(
+        f"Prior feature table written: {path} teams={len(table)} "
+        f"cache_hits={stats.get('cache_hits', 0)} "
+        f"cache_misses={stats.get('cache_misses', 0)} "
+        f"api_batches={stats.get('api_batches', 0)} "
+        f"retries={stats.get('retry_count', 0)}"
+    )
+
+
+@app.command("train-prior")
+def train_prior(
+    features: Annotated[Path, typer.Option("--features", help="V5.5 prior feature Parquet.")],
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", help="Output V5.5 prior checkpoint."),
+    ] = None,
+    epochs: Annotated[
+        int | None, typer.Option("--epochs", help="Override prior pretraining epochs.")
+    ] = None,
+    batch_size: Annotated[
+        int | None, typer.Option("--batch-size", help="Override prior pretraining batch size.")
+    ] = None,
+) -> None:
+    """Train the V5.5 text-prior denoising autoencoder."""
+    updates = {}
+    if epochs is not None:
+        updates["epochs"] = epochs
+    if batch_size is not None:
+        updates["batch_size"] = batch_size
+    opts = PriorOpts(**updates)
+    output_path = output or Path("data") / f"pretrained_prior_{pd.Timestamp.utcnow().year}.pt"
+    result = train_prior_file(features, output_path, opts)
+    typer.echo(
+        f"Prior checkpoint written: {output_path} teams={len(result.team_vectors)} "
+        f"final_loss={result.history['train_loss'].iloc[-1]:.6f}"
+    )
+
+
+@app.command("inspect-prior")
+def inspect_prior(
+    checkpoint: Annotated[
+        Path, typer.Option("--checkpoint", help="V5.5 prior checkpoint from train-prior.")
+    ],
+    features: Annotated[
+        Path, typer.Option("--features", help="V5.5 prior feature Parquet.")
+    ],
+    output: Annotated[
+        Path,
+        typer.Option("--output", help="Directory for prior latent-space diagnostics."),
+    ] = Path("artifacts/prior_2026"),
+    top_k: Annotated[
+        int, typer.Option("--top-k", help="Nearest neighbors per team.")
+    ] = 10,
+) -> None:
+    """Write V5.5 prior latent-space tables and static PNG visuals."""
+    inspection = inspect_prior_checkpoint(checkpoint, features, top_k=top_k)
+    out = write_prior_inspection_artifacts(inspection, output)
+    typer.echo(
+        f"Prior inspection complete: {out} teams={len(inspection.latent_table)} "
+        f"neighbors={len(inspection.nearest_neighbors)}"
+    )
+
+
+@app.command("consolidate-event")
+def consolidate_event(
+    checkpoint: Annotated[Path, typer.Argument(help="V5 checkpoint produced by train-features.")],
+    event_key: Annotated[str, typer.Option("--event-key", help="Event key to consolidate.")],
+    embedding_db: Annotated[
+        Path,
+        typer.Option("--embedding-db", help="SQLite store for durable base embeddings."),
+    ] = Path("data/latentstrat_embeddings.sqlite"),
+    delta_weeks: Annotated[
+        float,
+        typer.Option("--delta-weeks", help="Calendar weeks since this team's previous event."),
+    ] = 1.0,
+) -> None:
+    """Fold event delta embeddings into durable base embeddings."""
+    output = consolidate_event_checkpoint(
+        checkpoint, event_key=event_key, embedding_db=embedding_db, delta_weeks=delta_weeks
+    )
+    typer.echo(f"Consolidated embeddings written to {embedding_db}; checkpoint written: {output}")
 
 
 @app.command("full-season-offline")
