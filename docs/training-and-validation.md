@@ -176,6 +176,19 @@ latentstrat train-features data/features_2026.parquet
   sidecar ranking tasks. Binary V5.7 heads emit logits and are trained with
   masked `BCEWithLogitsLoss`.
 
+### TensorBoard Policy
+
+Every LatentStrat training CLI should support local TensorBoard observability.
+New or modified training commands should expose `--tensorboard/--no-tensorboard`,
+`--tensorboard-logdir`, and an optional `--tensorboard-run-name`. CLI training
+should default to TensorBoard on; direct Python APIs and tests should stay quiet
+unless a writer or log directory is supplied.
+
+Training loops should log total train/validation loss, primary task losses,
+learning rate, and any learned loss weights or log variances. Writers must be
+closed on success or failure, and TensorBoard state must remain a side artifact
+under `runs/`; it should not be saved into model checkpoints.
+
 Optional sidecar losses can be supplied at training time:
 
 ```bash

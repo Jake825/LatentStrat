@@ -19,3 +19,7 @@ The training path can regularize embeddings for active teams. Do not replace thi
 ## Split-Safe Normalization
 
 Target normalization is fitted on the train split and applied to other splits. Keep this split boundary intact. Normalizing on all rows leaks validation/test information.
+
+## TensorBoard Observability
+
+Training script changes should preserve TensorBoard observability. LatentStrat training CLIs are expected to offer local TensorBoard logging by default, with an explicit opt-out for quiet batch and test runs.

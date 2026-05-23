@@ -58,9 +58,12 @@ The preferred ML loop is to run `build-features` after data changes, then run
 `train-features` repeatedly from the local Parquet file. Python also keeps
 SQLite/disk caches for raw provider calls.
 
-`train-prior` writes local TensorBoard event files under `runs/` by default.
-Use `--no-tensorboard` for quiet batch or test runs. The `runs/` directory is
-ignored by Git.
+All LatentStrat training CLI entrypoints should support local TensorBoard logs
+under `runs/` by default, with `--no-tensorboard` available for quiet batch or
+test runs. Current prior and feature training commands follow this convention.
+The `runs/` directory is ignored by Git. See
+[Training and validation](docs/training-and-validation.md) for the logging
+policy expected of future training scripts.
 
 Optional scouting data lives in `data/scouting.db`. `build-features` merges it
 into Parquet when the database exists; training still reads only the Parquet
