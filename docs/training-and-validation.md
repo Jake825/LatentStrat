@@ -1,4 +1,24 @@
+---
+tags:
+  - latentstrat
+  - season-training
+  - prior-training
+  - metrics
+aliases:
+  - "Training And Validation"
+  - "Training Guide"
+related:
+  - "[[prior-training]]"
+  - "[[season-training]]"
+  - "[[metrics-and-artifacts]]"
+  - "[[cli-reference]]"
+---
+
 # Training And Validation
+
+For a guided rebuild path, start with the
+[documentation hub](index.md), [rebuild guide](rebuild-from-scratch.md),
+[prior training](prior-training.md), and [season training](season-training.md).
 
 LatentStrat separates network data ingestion from PyTorch training using a
 data-lake workflow. This prevents memory leaks, makes hyperparameter tuning
@@ -32,15 +52,16 @@ are not blanket-cast to `float32`.
 Use `latentstrat init-scouting-db` to create the optional SQLite scouting
 database. Training never queries SQLite directly.
 
-## 2. V5.6.1 Prior Distillation
+## 2. V5.6.4 Prior Distillation
 
-V5.6.1 is an offline Day Zero initializer for `Z_base`. It builds a fixed
+V5.6.4 is an offline Day Zero initializer for `Z_base`. It builds a fixed
 transductive dictionary for team numbers `0..12500` by default, where row `0` is the
 learned ghost robot.
 Historical known teams, unassigned gap numbers, and future rookie numbers each
 receive target-season-quarantined narrative text. Those narratives are embedded
 with `text-embedding-3-small` at 256 dimensions, then a `TeamPriorDistiller`
-trains `nn.Embedding[12501, 16] -> deep decoder -> OpenAI target + EPA target`.
+trains `nn.Embedding[12501, 16] -> deep decoder -> OpenAI target + normalized EPA
+trajectory target + cultural targets`.
 
 Run:
 
@@ -48,16 +69,16 @@ Run:
 latentstrat build-prior-features --target-season 2026 \
   --output data/prior_features_2026.parquet
 latentstrat train-prior --features data/prior_features_2026.parquet \
-  --output artifacts/prior_v56_day_zero \
+  --output artifacts/prior_v564_latent16 \
   --epochs 1000 \
   --latent-dim 16 \
   --tensorboard
 tensorboard --logdir=runs
 latentstrat inspect-prior \
-  --checkpoint artifacts/prior_v56_day_zero/checkpoint.pt \
-  --output artifacts/prior_2026
+  --checkpoint artifacts/prior_v564_latent16/checkpoint.pt \
+  --output artifacts/prior_v564_latent16/inspection
 latentstrat train-features data/features_2026.parquet \
-  --prior-checkpoint artifacts/prior_v56_day_zero/checkpoint.pt
+  --prior-checkpoint artifacts/prior_v564_latent16/checkpoint.pt
 ```
 
 `build-prior-features` pages the TBA team universe and writes exactly one row
@@ -69,10 +90,19 @@ the projected registration formula. Performance facts in narrative text are
 limited to `year < target_season`; target-season and future results or awards
 are excluded.
 
-The feature table also includes `target_epa`, a z-scored prior-season Statbotics
-EPA target. By default `target_season - 1` is used, so a 2026 prior uses final
-2025 team-year EPA. Team `0` uses raw EPA `0.0`; teams without prior-season EPA
-use the rookie baseline `mean - 0.2 * std` before normalization.
+The feature table also includes four years of Statbotics normalized EPA
+trajectory targets. For `target_season=2026`, those columns are
+`norm_epa_t_minus_4` through `norm_epa_t_minus_1`, sourced from 2022 through
+2025. These values use Statbotics' own normalized EPA field and are not local
+z-scores of raw EPA. Missing team-years stay `NaN` and are masked from the EPA
+trajectory loss.
+
+V5.6.4 also adds raw cultural decoder targets: rookie-year delta from 1992,
+seasons played, total award count, blue banner count, championship appearance
+count, championship win count, and technical award count. These are deliberately
+unnormalized; per-axis homoscedastic log variances balance their scales during
+prior training. Team `0`, sibling rows, and future rows use finite zero cultural
+targets.
 
 OpenAI embeddings are cached in SQLite by a stable hash of
 `(model, dimensions, narrative_text)`. Uncached narratives are embedded in
@@ -81,15 +111,17 @@ errors, and each successful batch is cached immediately so a rerun can resume
 without repeating completed API calls.
 
 The production prior checkpoint is stripped after training. It exports
-`embedding_table: Tensor[12501, 16]` for the default cap, metadata, and training history, but not the
-decoder, EPA head, or full model state. During `train-features --prior-checkpoint`, that
-table is copied directly into `Z_base.weight`, including the learned row `0`
+`embedding_table: Tensor[12501, 16]` for the default cap, metadata, and training
+history, but not the decoder, normalized-EPA head, culture head, or full model
+state. During `train-features --prior-checkpoint`, that table is copied
+directly into `Z_base.weight`, including the learned row `0`
 ghost robot. Team numbers above the checkpoint bounds raise a clear error and
 require rebuilding the V5.6 prior with a larger maximum.
 
 `train-prior` writes local TensorBoard event files under `runs/` by default.
-Use `tensorboard --logdir=runs` to view total loss, OpenAI MSE, EPA MSE, learned
-log variances, and precision weights while the prior trains. Use
+Use `tensorboard --logdir=runs` to view total loss, feature-summed OpenAI
+vector distance, EPA trajectory MSE, learned log variances, per-year normalized
+EPA MSE, per-axis culture MSE, and precision weights while the prior trains. Use
 `--no-tensorboard` to disable this side artifact. TensorBoard logs are ignored
 by Git and are not stored in the stripped checkpoint.
 
@@ -158,6 +190,7 @@ Run:
 
 ```bash
 latentstrat train-features data/features_2026.parquet
+tensorboard --logdir=runs
 ```
 
 - Data is loaded into a `MatchTensorDataset` containing base indices, event
@@ -170,11 +203,20 @@ latentstrat train-features data/features_2026.parquet
 - CUDA runs use pinned-memory transfer when available.
 - Hardware permitting, LatentStrat uses Automatic Mixed Precision via
   `torch.amp.autocast` and safe `torch.compile()` acceleration.
-- Training can use early stopping on validation loss and restore the best epoch's
-  weights.
+- Training can use early stopping on validation loss. Best-validation weights are
+  tracked independently, so `--no-early-stopping --restore-best` can run every
+  requested epoch for TensorBoard while still saving the best validation state.
 - V5.7 uses a homoscedastic task balancer for match-spine tasks and optional
   sidecar ranking tasks. Binary V5.7 heads emit logits and are trained with
   masked `BCEWithLogitsLoss`.
+- V5.7.2 clamps task `log_var` values to `[-5, 5]`, caps precision blow-ups,
+  applies cosine learning-rate decay down to `opts.lr_eta_min`, and uses AdamW
+  decay on trainable Set Transformer/head weights while embeddings keep
+  active-row L2.
+- `train-features` writes TensorBoard event files under `runs/` by default.
+  It logs aggregate train/validation loss, raw task losses, task activity,
+  homoscedastic log variances, precision weights, and learning rate. Use
+  `--no-tensorboard` to disable the side artifact.
 
 ### TensorBoard Policy
 
@@ -201,6 +243,42 @@ latentstrat train-features data/features_2026.parquet \
 The match loader drives each epoch. Non-empty sidecar loaders are cycled so
 short selection or playoff datasets do not stop the match epoch early. Empty
 sidecars are skipped.
+
+For long monitored runs, keep TensorBoard live while disabling early stopping:
+
+```bash
+latentstrat train-features data/features_2026.parquet \
+  --epochs 100 \
+  --no-early-stopping \
+  --restore-best \
+  --rankings-sidecar data/v57_sidecars/rankings_2026.parquet \
+  --selections-sidecar data/v57_sidecars/selections_2026.parquet \
+  --playoffs-sidecar data/v57_sidecars/playoffs_2026.parquet
+```
+
+V5.8 walk-forward validation uses canonical `event_week` values. TBA Week 0 is
+bundled into model-facing Week 1, and missing TBA weeks fall back to dense
+chronological event order. Each fold starts from the Day Zero prior, trains on
+weeks `<= N`, validates on week `N + 1`, and pre-filters sidecars to prevent
+future rankings, selections, or playoff labels from reaching training.
+`walk_forward_metrics.csv` includes row-weighted next-match phase score MSE,
+total score MSE when available, red-win accuracy, Brier score, and log loss.
+LatentStrat reports `p_red_win`; blue win probability is `1 - p_red_win`.
+The command also writes TensorBoard by default: a summary run tracks fold-level
+metrics, while one sub-run per fold tracks epoch-level training curves.
+
+```bash
+latentstrat validate-walk-forward \
+  --features data/features_2026.parquet \
+  --prior-checkpoint artifacts/prior_v564_latent16/checkpoint.pt \
+  --rankings-sidecar data/v57_sidecars/rankings_2026.parquet \
+  --selections-sidecar data/v57_sidecars/selections_2026.parquet \
+  --playoffs-sidecar data/v57_sidecars/playoffs_2026.parquet \
+  --output artifacts/v58_walk_forward_2026 \
+  --epochs 5 \
+  --latent-dim 16 \
+  --tensorboard
+```
 
 ## 5. Baselines And Controls
 
@@ -240,3 +318,13 @@ the result to `data/latentstrat_embeddings.sqlite`:
 ```bash
 latentstrat consolidate-event artifacts/features_run/v5_checkpoint.pt --event-key 2026ilch
 ```
+
+## Related
+
+- [Prior training](prior-training.md): offline Day Zero prior distillation.
+- [Season training](season-training.md): match-spine, sidecar, and
+  walk-forward training flow.
+- [Metrics and artifacts](metrics-and-artifacts.md): how to read validation
+  outputs.
+- [CLI reference](cli-reference.md): command-by-command details.
+- [Current state](current-state.md): current defaults and promoted artifacts.

@@ -14,7 +14,12 @@ from torch import Tensor, nn
 from torch.utils.data import DataLoader, Dataset, Subset
 
 from latentstrat.config import PriorOpts
-from latentstrat.pretrain_features import read_prior_feature_table
+from latentstrat.pretrain_features import (
+    CULTURE_TARGET_COLUMNS,
+    NORM_EPA_OBSERVED_COLUMNS,
+    NORM_EPA_TARGET_COLUMNS,
+    read_prior_feature_table,
+)
 from latentstrat.prior_model import TeamPriorDistiller, prior_distillation_losses
 
 
@@ -42,8 +47,24 @@ class PriorGridDataset(Dataset):
             raise KeyError("Prior grid features are missing team_number.")
         if "openai_narrative_vector" not in table.columns:
             raise KeyError("Prior grid features are missing openai_narrative_vector.")
-        if "target_epa" not in table.columns:
-            raise KeyError("Prior grid features are missing target_epa; rebuild prior features.")
+        missing_norm_epa = [
+            column
+            for column in (*NORM_EPA_TARGET_COLUMNS, *NORM_EPA_OBSERVED_COLUMNS)
+            if column not in table.columns
+        ]
+        if missing_norm_epa:
+            raise KeyError(
+                "Prior grid features are missing V5.6.4 normalized EPA trajectory "
+                f"columns; rebuild prior features. Missing: {missing_norm_epa}."
+            )
+        missing_culture = [
+            column for column in CULTURE_TARGET_COLUMNS if column not in table.columns
+        ]
+        if missing_culture:
+            raise KeyError(
+                "Prior grid features are missing V5.6.4 cultural target columns; "
+                f"rebuild prior features. Missing: {missing_culture}."
+            )
         team_numbers = [int(value) for value in table["team_number"].tolist()]
         if any(value < 0 for value in team_numbers):
             raise ValueError("Prior grid team_number values must be non-negative.")
@@ -58,20 +79,42 @@ class PriorGridDataset(Dataset):
             raise ValueError(f"Expected prior vectors of width {llm_dim}, saw {bad_widths}.")
         self.team_numbers = torch.as_tensor(team_numbers, dtype=torch.long)
         self.vectors = torch.as_tensor(np.stack(vectors, axis=0), dtype=torch.float32)
-        target_epa = pd.to_numeric(table["target_epa"], errors="coerce").to_numpy(
-            dtype=np.float32
+        norm_epa = table[list(NORM_EPA_TARGET_COLUMNS)].apply(pd.to_numeric, errors="coerce")
+        norm_epa_observed = table[list(NORM_EPA_OBSERVED_COLUMNS)].astype(bool)
+        observed_count = int(norm_epa_observed.to_numpy(dtype=bool).sum())
+        if observed_count == 0:
+            raise ValueError(
+                "Prior grid features have zero observed normalized EPA trajectory values; "
+                "rebuild V5.6.4 prior features with Statbotics normalized EPA from `epa.norm`."
+            )
+        observed_values = norm_epa.to_numpy(dtype=np.float32)[
+            norm_epa_observed.to_numpy(dtype=bool)
+        ]
+        if observed_values.size and not np.isfinite(observed_values).all():
+            raise ValueError("Observed prior grid normalized EPA values must be finite.")
+        culture = table[list(CULTURE_TARGET_COLUMNS)].apply(pd.to_numeric, errors="coerce")
+        if not np.isfinite(culture.to_numpy(dtype=np.float32)).all():
+            raise ValueError("Prior grid cultural target values must be finite.")
+        self.target_norm_epa = torch.as_tensor(norm_epa.to_numpy(dtype=np.float32))
+        self.norm_epa_observed = torch.as_tensor(
+            norm_epa_observed.to_numpy(dtype=bool),
+            dtype=torch.bool,
         )
-        if not np.isfinite(target_epa).all():
-            raise ValueError("Prior grid target_epa values must be finite.")
-        self.target_epa = torch.as_tensor(target_epa[:, None], dtype=torch.float32)
+        self.target_culture = torch.as_tensor(culture.to_numpy(dtype=np.float32))
         self.max_team_number = int(max(team_numbers))
         self.llm_dim = int(llm_dim)
 
     def __len__(self) -> int:
         return int(self.team_numbers.shape[0])
 
-    def __getitem__(self, index: int) -> tuple[Tensor, Tensor, Tensor]:
-        return self.team_numbers[index], self.vectors[index], self.target_epa[index]
+    def __getitem__(self, index: int) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+        return (
+            self.team_numbers[index],
+            self.vectors[index],
+            self.target_norm_epa[index],
+            self.norm_epa_observed[index],
+            self.target_culture[index],
+        )
 
 
 def resolve_grid_device(requested: str = "auto") -> torch.device:
@@ -173,27 +216,37 @@ def _batch_metrics(
     model.eval()
     total_loss = 0.0
     total_openai_mse = 0.0
-    total_epa_mse = 0.0
+    total_norm_epa_mse = 0.0
+    total_culture_mse = 0.0
     total_rows = 0
     with torch.inference_mode():
-        for team_numbers, vectors, target_epa in loader:
+        for team_numbers, vectors, target_norm_epa, norm_epa_observed, target_culture in loader:
             team_numbers = team_numbers.to(device)
             vectors = vectors.to(device)
-            target_epa = target_epa.to(device)
-            loss, openai_mse, epa_mse = prior_distillation_losses(
-                model, team_numbers, vectors, target_epa
+            target_norm_epa = target_norm_epa.to(device)
+            norm_epa_observed = norm_epa_observed.to(device)
+            target_culture = target_culture.to(device)
+            losses = prior_distillation_losses(
+                model,
+                team_numbers,
+                vectors,
+                target_norm_epa,
+                norm_epa_observed,
+                target_culture,
             )
             batch_rows = int(vectors.shape[0])
-            total_loss += float(loss.detach().cpu()) * batch_rows
-            total_openai_mse += float(openai_mse.detach().cpu()) * batch_rows
-            total_epa_mse += float(epa_mse.detach().cpu()) * batch_rows
+            total_loss += float(losses.total.detach().cpu()) * batch_rows
+            total_openai_mse += float(losses.openai_mse.detach().cpu()) * batch_rows
+            total_norm_epa_mse += float(losses.norm_epa_mse.detach().cpu()) * batch_rows
+            total_culture_mse += float(losses.culture_mse.detach().cpu()) * batch_rows
             total_rows += batch_rows
     if was_training:
         model.train()
     return {
         "loss": total_loss / max(total_rows, 1),
         "openai_mse": total_openai_mse / max(total_rows, 1),
-        "epa_mse": total_epa_mse / max(total_rows, 1),
+        "norm_epa_mse": total_norm_epa_mse / max(total_rows, 1),
+        "culture_mse": total_culture_mse / max(total_rows, 1),
     }
 
 
@@ -252,22 +305,37 @@ def train_prior_grid_run(
         model.train()
         total_loss = 0.0
         total_openai_mse = 0.0
-        total_epa_mse = 0.0
+        total_norm_epa_mse = 0.0
+        total_culture_mse = 0.0
         total_rows = 0
-        for team_numbers, vectors, target_epa in train_loader:
+        for (
+            team_numbers,
+            vectors,
+            target_norm_epa,
+            norm_epa_observed,
+            target_culture,
+        ) in train_loader:
             team_numbers = team_numbers.to(device)
             vectors = vectors.to(device)
-            target_epa = target_epa.to(device)
+            target_norm_epa = target_norm_epa.to(device)
+            norm_epa_observed = norm_epa_observed.to(device)
+            target_culture = target_culture.to(device)
             optimizer.zero_grad(set_to_none=True)
-            loss, openai_mse, epa_mse = prior_distillation_losses(
-                model, team_numbers, vectors, target_epa
+            losses = prior_distillation_losses(
+                model,
+                team_numbers,
+                vectors,
+                target_norm_epa,
+                norm_epa_observed,
+                target_culture,
             )
-            loss.backward()
+            losses.total.backward()
             optimizer.step()
             batch_rows = int(vectors.shape[0])
-            total_loss += float(loss.detach().cpu()) * batch_rows
-            total_openai_mse += float(openai_mse.detach().cpu()) * batch_rows
-            total_epa_mse += float(epa_mse.detach().cpu()) * batch_rows
+            total_loss += float(losses.total.detach().cpu()) * batch_rows
+            total_openai_mse += float(losses.openai_mse.detach().cpu()) * batch_rows
+            total_norm_epa_mse += float(losses.norm_epa_mse.detach().cpu()) * batch_rows
+            total_culture_mse += float(losses.culture_mse.detach().cpu()) * batch_rows
             total_rows += batch_rows
         train_loss = total_loss / max(total_rows, 1)
         validation = _batch_metrics(model, validation_loader, device)
@@ -277,12 +345,15 @@ def train_prior_grid_run(
                 "epoch": epoch,
                 "train_loss": train_loss,
                 "train_openai_mse": total_openai_mse / max(total_rows, 1),
-                "train_epa_mse": total_epa_mse / max(total_rows, 1),
+                "train_norm_epa_mse": total_norm_epa_mse / max(total_rows, 1),
+                "train_culture_mse": total_culture_mse / max(total_rows, 1),
                 "validation_loss": validation["loss"],
                 "validation_openai_mse": validation["openai_mse"],
-                "validation_epa_mse": validation["epa_mse"],
+                "validation_norm_epa_mse": validation["norm_epa_mse"],
+                "validation_culture_mse": validation["culture_mse"],
                 "log_var_openai": float(model.log_var_openai.detach().cpu()),
                 "log_var_epa": float(model.log_var_epa.detach().cpu()),
+                "log_var_culture_mean": float(model.log_var_culture.detach().cpu().mean()),
             }
         )
     history = pd.DataFrame(history_rows)
@@ -309,11 +380,15 @@ def train_prior_grid_run(
         "final_train_openai_mse": float(history["train_openai_mse"].iloc[-1]),
         "final_validation_openai_mse": float(history["validation_openai_mse"].iloc[-1]),
         "best_validation_openai_mse": float(history["validation_openai_mse"].min()),
-        "final_train_epa_mse": float(history["train_epa_mse"].iloc[-1]),
-        "final_validation_epa_mse": float(history["validation_epa_mse"].iloc[-1]),
-        "best_validation_epa_mse": float(history["validation_epa_mse"].min()),
+        "final_train_norm_epa_mse": float(history["train_norm_epa_mse"].iloc[-1]),
+        "final_validation_norm_epa_mse": float(history["validation_norm_epa_mse"].iloc[-1]),
+        "best_validation_norm_epa_mse": float(history["validation_norm_epa_mse"].min()),
+        "final_train_culture_mse": float(history["train_culture_mse"].iloc[-1]),
+        "final_validation_culture_mse": float(history["validation_culture_mse"].iloc[-1]),
+        "best_validation_culture_mse": float(history["validation_culture_mse"].min()),
         "final_log_var_openai": float(history["log_var_openai"].iloc[-1]),
         "final_log_var_epa": float(history["log_var_epa"].iloc[-1]),
+        "final_log_var_culture_mean": float(history["log_var_culture_mean"].iloc[-1]),
         "epochs_to_converge": _epochs_to_converge(history),
         "trainable_parameters": parameter_count,
         "elapsed_seconds": elapsed,
@@ -421,11 +496,15 @@ def run_prior_grid(
                     "final_train_openai_mse": np.nan,
                     "final_validation_openai_mse": np.nan,
                     "best_validation_openai_mse": np.nan,
-                    "final_train_epa_mse": np.nan,
-                    "final_validation_epa_mse": np.nan,
-                    "best_validation_epa_mse": np.nan,
+                    "final_train_norm_epa_mse": np.nan,
+                    "final_validation_norm_epa_mse": np.nan,
+                    "best_validation_norm_epa_mse": np.nan,
+                    "final_train_culture_mse": np.nan,
+                    "final_validation_culture_mse": np.nan,
+                    "best_validation_culture_mse": np.nan,
                     "final_log_var_openai": np.nan,
                     "final_log_var_epa": np.nan,
+                    "final_log_var_culture_mean": np.nan,
                     "epochs_to_converge": np.nan,
                     "trainable_parameters": np.nan,
                     "elapsed_seconds": np.nan,

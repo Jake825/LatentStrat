@@ -35,3 +35,6 @@ Use this skill when a task changes or reviews LatentStrat Markdown documentation
 - Use `$latentstrat-feature-pipeline`, `$pytorch-set-transformer`, and `$latentstrat-model-evaluation` when documenting ML feature construction, model architecture, metrics, artifacts, or embeddings.
 - Use `$latentstrat-scouting-db`, `$frc-scouting-data-types`, and related scouting skills when documenting scouting ingestion or schema behavior.
 - Use `$git-workflow` when documentation work is part of commit or release preparation.
+- Use `$obsidian-cli` when docs work involves Obsidian wikilinks, tags, properties, backlinks, MOCs, vault-native embeds, note movement, or vault diagnostics.
+- Keep public docs GitHub-readable unless the user asks for Obsidian-native behavior.
+- Use `docs/assets/` and standard Markdown image links for repo-facing diagrams and plots.

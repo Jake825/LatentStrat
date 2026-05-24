@@ -1,4 +1,25 @@
+---
+tags:
+  - latentstrat
+  - model-architecture
+aliases:
+  - "Model Structure"
+  - "Set Transformer Structure"
+related:
+  - "[[model-architecture-reference]]"
+  - "[[prior-training]]"
+  - "[[season-training]]"
+  - "[[ghost robot]]"
+---
+
 # Model Structure
+
+For a higher-level explanation of how the model fits into the project, see the
+[Documentation Hub](index.md), [Prior Training](prior-training.md), and
+[Season Training](season-training.md).
+
+For the exact tensor shapes, layer dimensions, parameter counts, and loss
+equations, see the [Model Architecture Reference](model-architecture-reference.md).
 
 LatentStrat V5 is a cross-alliance Set Transformer written in PyTorch.
 Each match row contains three red slots and three blue slots. Each slot carries a
@@ -22,7 +43,8 @@ masks are retained as diagnostics and for auxiliary target masking.
 
 ## Day Zero Prior
 
-V5.6.1 can initialize `Z_base` from an offline text-plus-EPA transductive prior
+V5.6.4 can initialize `Z_base` from an offline text-plus-normalized-EPA
+trajectory and cultural transductive prior
 checkpoint. The pretraining artifact stores `embedding_table`, normally shaped
 `[12501, 16]`, where row `0` is the learned ghost robot and row `254` is the
 learned prior vector for `frc254`. During `train-features --prior-checkpoint`,
@@ -99,3 +121,14 @@ Z_new_base = Z_base + trust_gate * Z_event
 
 `delta_weeks` is required because the physical time between events changes how
 much an event delta should be trusted.
+
+## Related
+
+- [Model architecture reference](model-architecture-reference.md): exact tensor
+  shapes, parameter counts, and equations.
+- [Prior training](prior-training.md): how `Z_base` is initialized.
+- [Season training](season-training.md): how match and sidecar training use the
+  model.
+- [Ghost robot](ghost%20robot.md): the learned missing-slot row.
+- [Embedding inspection](embedding-inspection.md): how to inspect learned team
+  vectors.

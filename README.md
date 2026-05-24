@@ -13,14 +13,14 @@ pip install -e ".[dev]"
 ```
 
 The runtime stack is Python 3.11+, `tbapy` for The Blue Alliance API v3,
-`statbotics==3.0.0` for EPA/Statbotics data, `openai>=1` for optional V5.6.1
-text-plus-EPA prior distillation, Pandas/NumPy/SciPy/PyArrow for tables and Parquet
+`statbotics==3.0.0` for EPA/Statbotics data, `openai>=1` for optional V5.6.4
+text-plus-normalized-EPA prior distillation, Pandas/NumPy/SciPy/PyArrow for tables and Parquet
 features, scikit-learn for linear baselines, and PyTorch for the Set
 Transformer model.
 
 ## Secrets
 
-Live TBA ingestion reads `TBA_API_KEY` from the environment. V5.6.1 prior
+Live TBA ingestion reads `TBA_API_KEY` from the environment. V5.6.4 prior
 distillation also needs `OPENAI_API_KEY` when generating uncached text
 embeddings. For local development, create `.env` from `.env.example`:
 
@@ -33,18 +33,24 @@ The CLI loads `.env` automatically. `.env` is ignored by Git.
 
 ## Commands
 
+For a complete command-by-command reference, see
+[CLI reference](docs/cli-reference.md).
+
 ```bash
 latentstrat api-smoke
 latentstrat init-scouting-db --path data/scouting.db
 latentstrat build-features --event-key 2026ilch --output data/features_2026ilch.parquet
 latentstrat build-features --season 2026 --output data/features_2026.parquet --sidecar-output-dir data/v57_sidecars
 latentstrat build-prior-features --target-season 2026 --output data/prior_features_2026.parquet
-latentstrat train-prior --features data/prior_features_2026.parquet --output artifacts/prior_v56_day_zero --epochs 1000 --latent-dim 16 --tensorboard
+latentstrat train-prior --features data/prior_features_2026.parquet --output artifacts/prior_v564_latent16 --epochs 1000 --latent-dim 16 --tensorboard
 tensorboard --logdir=runs
-latentstrat inspect-prior --checkpoint artifacts/prior_v56_day_zero/checkpoint.pt --output artifacts/prior_2026
+latentstrat inspect-prior --checkpoint artifacts/prior_v564_latent16/checkpoint.pt --output artifacts/prior_v564_latent16/inspection
 latentstrat run-prior-grid --features data/prior_features_2026.parquet --output artifacts/prior_elbow_grid --epochs 500 --latent-dims 2,4,8,16,32,64,128,256
-latentstrat train-features data/features_2026.parquet --prior-checkpoint artifacts/prior_v56_day_zero/checkpoint.pt
+latentstrat train-features data/features_2026.parquet --prior-checkpoint artifacts/prior_v564_latent16/checkpoint.pt
 latentstrat train-features data/features_2026.parquet --rankings-sidecar data/v57_sidecars/rankings_2026.parquet --selections-sidecar data/v57_sidecars/selections_2026.parquet --playoffs-sidecar data/v57_sidecars/playoffs_2026.parquet
+latentstrat train-features data/features_2026.parquet --epochs 100 --no-early-stopping --restore-best
+tensorboard --logdir=runs
+latentstrat validate-walk-forward --features data/features_2026.parquet --prior-checkpoint artifacts/prior_v564_latent16/checkpoint.pt --rankings-sidecar data/v57_sidecars/rankings_2026.parquet --selections-sidecar data/v57_sidecars/selections_2026.parquet --playoffs-sidecar data/v57_sidecars/playoffs_2026.parquet --output artifacts/v58_walk_forward_2026 --epochs 5 --latent-dim 16
 latentstrat train-features data/features_2026ilch.parquet --output artifacts/features_run
 latentstrat train-features data/features_2026ilch.parquet --venue-mode --event-key 2026ilch --checkpoint artifacts/features_run/v5_checkpoint.pt
 latentstrat consolidate-event artifacts/features_run/v5_checkpoint.pt --event-key 2026ilch
@@ -73,10 +79,38 @@ V5.7 match features include generic score-breakdown targets for atomic scoring
 counts, committed fouls, bonus ranking-point thresholds, and special penalties.
 Optional rankings, alliance selections, and playoff sidecars can be written with
 `--sidecar-output-dir` and supplied to `train-features` as auxiliary
-learning-to-rank labels.
+learning-to-rank labels. V5.7.2 clamps homoscedastic log variances, uses cosine
+learning-rate decay, and restores the best validation epoch even for long
+`--no-early-stopping` monitoring runs. V5.8 adds walk-forward validation over
+canonical season weeks, with TBA Week 0 bundled into model-facing Week 1.
 
 ## Docs
 
+- [Documentation hub](docs/index.md): guided entrypoint for students and
+  developers.
+- [Student primer](docs/student-primer.md): plain-language explanation of
+  LatentStrat for FRC students.
+- [Current state](docs/current-state.md): canonical snapshot of the current
+  implementation, artifacts, caveats, and validation status.
+- [Changelog](docs/changelog.md): semantic version timeline tied to Git commits
+  and local artifact eras.
+- [Rebuild from scratch](docs/rebuild-from-scratch.md): end-to-end setup,
+  feature building, prior training, season training, and walk-forward commands.
+- [CLI reference](docs/cli-reference.md): current command surface and examples.
+- [Prior training](docs/prior-training.md): V5.6.4 Day Zero prior,
+  narratives, EPA trajectory, culture targets, and checkpoint handoff.
+- [Season training](docs/season-training.md): V5.7/V5.8 training, sidecars,
+  stability, TensorBoard, and walk-forward validation.
+- [Data sources](docs/data-sources.md): TBA, Statbotics, OpenAI, scouting
+  SQLite, sidecars, and timing boundaries.
+- [Metrics and artifacts](docs/metrics-and-artifacts.md): Brier score, log
+  loss, score MSE, TensorBoard, and artifact interpretation.
+- [Schemas and artifacts reference](docs/schemas-and-artifacts-reference.md):
+  generated Parquet and CSV contracts.
+- [Project history](docs/project-history.md): experiment ledger and design
+  decisions through V5.8.
+- [Experiment ledger](docs/experiment-ledger.md): run-by-run local artifact
+  evidence and design lessons.
 - [Feature pipeline](docs/feature-pipeline.md): TBA match spine, scouting joins,
   Parquet boundaries, V5 team/event indexing, awards, and tensor-ready data.
 - [Training and validation](docs/training-and-validation.md): splits,

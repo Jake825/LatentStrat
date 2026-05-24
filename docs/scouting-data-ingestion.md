@@ -1,3 +1,17 @@
+---
+tags:
+  - latentstrat
+  - scouting-data
+  - feature-pipeline
+aliases:
+  - "Scouting Data Ingestion"
+  - "Scouting Import Guide"
+related:
+  - "[[scouting-data-layer]]"
+  - "[[feature-pipeline]]"
+  - "[[data-sources]]"
+---
+
 # Scouting Data Ingestion Guide
 
 This guide defines the standard pattern for writing custom importers that move

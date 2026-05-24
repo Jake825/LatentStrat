@@ -13,7 +13,11 @@ import torch.nn.functional as F
 
 from latentstrat.config import PriorOpts
 from latentstrat.inspection import compute_pca, normalize_rows
-from latentstrat.pretrain_features import read_prior_feature_table
+from latentstrat.pretrain_features import (
+    CULTURE_TARGET_COLUMNS,
+    NORM_EPA_TARGET_COLUMNS,
+    read_prior_feature_table,
+)
 from latentstrat.pretrain_loop import PriorTensorDataset
 from latentstrat.prior_model import TeamPriorDistiller
 
@@ -64,7 +68,7 @@ def _reconstruction_mse(
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
     with torch.inference_mode():
-        reconstruction, _, _ = model(dataset.team_numbers)
+        reconstruction, _, _, _ = model(dataset.team_numbers)
         mse = F.mse_loss(reconstruction, dataset.vectors, reduction="none").mean(dim=1)
     return {
         int(team_number): float(mse[idx].detach().cpu())
@@ -163,6 +167,9 @@ def _feature_lookup(features: pd.DataFrame | None) -> dict[int, dict[str, Any]]:
             "epa_source_year": row.get("epa_source_year", np.nan),
             "epa_is_imputed": row.get("epa_is_imputed", np.nan),
         }
+        for column in (*NORM_EPA_TARGET_COLUMNS, *CULTURE_TARGET_COLUMNS):
+            if column in row:
+                lookup[number][column] = row.get(column, np.nan)
     return lookup
 
 
@@ -195,9 +202,17 @@ def inspect_prior_checkpoint(
                 "embedding": vector.tolist(),
                 "embedding_norm": float(np.linalg.norm(vector)),
                 "reconstruction_mse": reconstruction.get(team_number, np.nan),
+                **{
+                    column: feature.get(column, np.nan)
+                    for column in (*NORM_EPA_TARGET_COLUMNS, *CULTURE_TARGET_COLUMNS)
+                },
             }
         )
     latent_table = pd.DataFrame(rows)
+    if set(NORM_EPA_TARGET_COLUMNS).issubset(latent_table.columns):
+        latest = pd.to_numeric(latent_table["norm_epa_t_minus_1"], errors="coerce")
+        earliest = pd.to_numeric(latent_table["norm_epa_t_minus_4"], errors="coerce")
+        latent_table["norm_epa_trend"] = latest - earliest
     vector_matrix = np.stack(latent_table["embedding"].map(np.asarray).to_list(), axis=0)
     pca_score, pca_model = compute_pca(vector_matrix)
     latent_table["pc1"] = pca_score[:, 0]
@@ -276,15 +291,38 @@ def _plot_norm_hist(latent_table: pd.DataFrame, output_path: Path) -> None:
 
 
 def _plot_pca_epa(latent_table: pd.DataFrame, output_path: Path) -> None:
+    column = "norm_epa_t_minus_1" if "norm_epa_t_minus_1" in latent_table.columns else "target_epa"
+    label = (
+        "Latest Statbotics normalized EPA"
+        if column == "norm_epa_t_minus_1"
+        else "Normalized EPA target"
+    )
+    _plot_pca_metric(
+        latent_table,
+        column,
+        output_path,
+        title="V5.6 Prior Latent Space Colored By EPA",
+        label=label,
+    )
+
+
+def _plot_pca_metric(
+    latent_table: pd.DataFrame,
+    color_column: str,
+    output_path: Path,
+    *,
+    title: str,
+    label: str | None = None,
+) -> None:
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    values = pd.to_numeric(latent_table.get("target_epa"), errors="coerce")
+    values = pd.to_numeric(latent_table.get(color_column), errors="coerce")
     finite = values.notna() & np.isfinite(values.to_numpy(dtype=float, na_value=np.nan))
     colors = values if finite.any() else latent_table["embedding_norm"]
-    label = "Normalized EPA target" if finite.any() else "Embedding L2 norm"
+    label = (label or color_column) if finite.any() else "Embedding L2 norm"
     fig, ax = plt.subplots(figsize=(10, 7))
     scatter = ax.scatter(
         latent_table["pc1"],
@@ -296,7 +334,7 @@ def _plot_pca_epa(latent_table: pd.DataFrame, output_path: Path) -> None:
     )
     ax.set_xlabel("PC1")
     ax.set_ylabel("PC2")
-    ax.set_title("V5.6.1 Prior Latent Space Colored By EPA")
+    ax.set_title(title)
     fig.colorbar(scatter, ax=ax, label=label)
     fig.tight_layout()
     fig.savefig(output_path, dpi=160)
@@ -333,6 +371,22 @@ def write_prior_inspection_artifacts(
     _plot_pca(inspection.latent_table, "pc1", "pc2", out / "prior_pca_pc1_pc2.png")
     _plot_pca(inspection.latent_table, "pc1", "pc3", out / "prior_pca_pc1_pc3.png")
     _plot_pca_epa(inspection.latent_table, out / "prior_pca_epa_pc1_pc2.png")
+    metric_plots = {
+        "norm_epa_t_minus_1": "prior_pca_norm_epa_latest_pc1_pc2.png",
+        "norm_epa_trend": "prior_pca_norm_epa_trend_pc1_pc2.png",
+        "raw_rookie_year_delta": "prior_pca_rookie_year_delta_pc1_pc2.png",
+        "raw_seasons_played": "prior_pca_seasons_played_pc1_pc2.png",
+        "raw_blue_banner_count": "prior_pca_blue_banners_pc1_pc2.png",
+        "raw_technical_award_count": "prior_pca_technical_awards_pc1_pc2.png",
+    }
+    for column, filename in metric_plots.items():
+        if column in inspection.latent_table.columns:
+            _plot_pca_metric(
+                inspection.latent_table,
+                column,
+                out / filename,
+                title=f"V5.6 Prior Latent Space Colored By {column}",
+            )
     _plot_norm_hist(inspection.latent_table, out / "prior_embedding_norm_hist.png")
     _plot_training_loss(inspection.training_history, out / "prior_training_loss.png")
     return out

@@ -108,6 +108,7 @@ def test_optimizer_groups_do_not_decay_embeddings_biases_or_norms():
     assert id(model.cont_head.weight) in decayed
     assert id(model.atomic_head.weight) in decayed
     assert id(model.team_value_head.linear.weight) in decayed
+    assert {group["weight_decay"] for group in groups if group["weight_decay"]} == {1e-4}
 
 
 def test_value_heads_return_rank_scalars():

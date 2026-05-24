@@ -163,16 +163,93 @@ def _normalize_endgame_status(value: Any) -> str:
     return aliases.get(normalized, normalized)
 
 
+def _event_key_column(event_metadata: pd.DataFrame) -> str | None:
+    names = set(event_metadata.columns)
+    return next((c for c in ("key", "event_key", "EventKey") if c in names), None)
+
+
+def _event_date_column(event_metadata: pd.DataFrame) -> str | None:
+    names = set(event_metadata.columns)
+    return next(
+        (
+            c
+            for c in (
+                "start_date",
+                "StartDate",
+                "startDate",
+                "sort_time",
+                "scheduled_time",
+                "end_date",
+            )
+            if c in names
+        ),
+        None,
+    )
+
+
+def canonical_event_week_table(event_metadata: pd.DataFrame | None) -> pd.DataFrame:
+    columns = ["event_key", "raw_event_week", "event_week"]
+    if event_metadata is None or event_metadata.empty:
+        return pd.DataFrame(columns=columns)
+    key_col = _event_key_column(event_metadata)
+    if key_col is None:
+        return pd.DataFrame(columns=columns)
+    out = pd.DataFrame({"event_key": event_metadata[key_col].astype(str)})
+    names = set(event_metadata.columns)
+    week_col = next(
+        (c for c in ("week", "raw_event_week", "EventWeek", "Week") if c in names), None
+    )
+    raw_week = (
+        pd.to_numeric(event_metadata[week_col], errors="coerce")
+        if week_col is not None
+        else pd.Series(np.nan, index=event_metadata.index)
+    )
+    out["raw_event_week"] = raw_week.to_numpy(dtype=float)
+    out["event_week"] = raw_week + 1
+    date_col = _event_date_column(event_metadata)
+    if date_col is not None:
+        dates = pd.to_datetime(event_metadata[date_col], errors="coerce", utc=True)
+    else:
+        dates = pd.Series(pd.NaT, index=event_metadata.index, dtype="datetime64[ns, UTC]")
+    normalized_dates = dates.dt.normalize()
+    date_frame = pd.DataFrame({"date": normalized_dates, "event_key": out["event_key"]})
+    valid_dates = date_frame.dropna(subset=["date"]).sort_values(
+        ["date", "event_key"], kind="mergesort"
+    )
+    inferred: dict[str, int] = {}
+    if not valid_dates.empty:
+        origin = valid_dates["date"].min()
+        inferred = {
+            str(row.event_key): int((row.date - origin).days // 7) + 1
+            for row in valid_dates.itertuples()
+        }
+    missing_week = ~np.isfinite(out["event_week"].to_numpy(dtype=float))
+    if missing_week.any():
+        fallback_values = [
+            inferred.get(str(event_key), idx + 1)
+            for idx, event_key in enumerate(out.loc[missing_week, "event_key"])
+        ]
+        out.loc[missing_week, "event_week"] = fallback_values
+    out["event_week"] = pd.to_numeric(out["event_week"], errors="coerce")
+    finite = np.isfinite(out["event_week"].to_numpy(dtype=float))
+    out.loc[finite, "event_week"] = out.loc[finite, "event_week"].astype(int).clip(lower=1)
+    return out[columns]
+
+
 def _event_week_map(event_metadata: pd.DataFrame | None) -> dict[str, float]:
+    weeks = canonical_event_week_table(event_metadata)
+    if weeks.empty:
+        return {}
+    valid = weeks.dropna(subset=["event_week"])
+    return {str(row.event_key): float(row.event_week) for row in valid.itertuples()}
+
+
+def _raw_event_week_map(event_metadata: pd.DataFrame | None) -> dict[str, float]:
     if event_metadata is None or event_metadata.empty:
         return {}
-    names = set(event_metadata.columns)
-    key_col = next((c for c in ("key", "event_key", "EventKey") if c in names), None)
-    week_col = next((c for c in ("week", "event_week", "EventWeek", "Week") if c in names), None)
-    if key_col is None or week_col is None:
-        return {}
-    valid = event_metadata[[key_col, week_col]].dropna()
-    return {str(row[key_col]): float(row[week_col]) for _, row in valid.iterrows()}
+    weeks = canonical_event_week_table(event_metadata)
+    valid = weeks.dropna(subset=["raw_event_week"])
+    return {str(row.event_key): float(row.raw_event_week) for row in valid.itertuples()}
 
 
 def _match_event_key(match: Match) -> str:
@@ -243,6 +320,7 @@ def _make_alliance_row(
     opponent_color: str,
     event_order: int,
     event_weeks: dict[str, float],
+    raw_event_weeks: dict[str, float],
     target_map: tuple[TargetMapping, ...],
     binary_targets: tuple[str, ...],
     diagnostic_targets: tuple[str, ...],
@@ -287,6 +365,7 @@ def _make_alliance_row(
         "post_result_time": post,
         "sort_time": sort_time,
         "sort_ordinal": np.nan,
+        "raw_event_week": raw_event_weeks.get(event_key, np.nan),
         "event_week": event_weeks.get(event_key, np.nan),
         "comp_ordinal": comp_level_ordinal(comp_level),
         "alliance_order": 2 if color == "blue" else 1,
@@ -348,6 +427,7 @@ def build_season_alliance_table(
     event_keys = sorted({_match_event_key(match) for match in matches})
     event_order = {key: idx + 1 for idx, key in enumerate(event_keys)}
     event_weeks = _event_week_map(event_metadata)
+    raw_event_weeks = _raw_event_week_map(event_metadata)
     rows = []
     for match in matches:
         event_key = _match_event_key(match)
@@ -358,6 +438,7 @@ def build_season_alliance_table(
                 opponent,
                 event_order[event_key],
                 event_weeks,
+                raw_event_weeks,
                 target_map,
                 binary_targets,
                 opts.diagnostic_targets,
@@ -400,6 +481,7 @@ def _make_match_row(red: pd.Series, blue: pd.Series) -> dict[str, Any]:
         "post_result_time": red["post_result_time"],
         "sort_time": red["sort_time"],
         "sort_ordinal": np.nan,
+        "raw_event_week": red.get("raw_event_week", np.nan),
         "event_week": red["event_week"],
         "comp_ordinal": comp_level_ordinal(str(red["comp_level"])),
         "red_total_score": red["total_score"],

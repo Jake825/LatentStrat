@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
@@ -26,6 +27,7 @@ from frc.scouting import (
 from latentstrat.baselines import fit_baselines
 from latentstrat.config import LatentStratOptions, default_options
 from latentstrat.data import (
+    Split,
     apply_target_stats,
     apply_v57_target_stats,
     build_season_match_table,
@@ -91,6 +93,7 @@ class FeatureTrainingResult:
     prior_checkpoint: str | None = None
     prior_vectors_applied: int = 0
     sidecar_tables: dict[str, pd.DataFrame] | None = None
+    tensorboard_logdir: str | None = None
 
 
 def _validate_feature_table(table: pd.DataFrame) -> pd.DataFrame:
@@ -440,6 +443,36 @@ def build_event_sidecars(event_keys: list[str], provider: TbaProvider) -> dict[s
     }
 
 
+def event_week_table_from_feature_table(table: pd.DataFrame) -> pd.DataFrame:
+    if "event_key" not in table.columns or "event_week" not in table.columns:
+        return pd.DataFrame(columns=["event_key", "raw_event_week", "event_week"])
+    columns = ["event_key", "event_week"]
+    if "raw_event_week" in table.columns:
+        columns.insert(1, "raw_event_week")
+    event_weeks = table[columns].drop_duplicates(subset=["event_key"]).copy()
+    if "raw_event_week" not in event_weeks.columns:
+        event_weeks["raw_event_week"] = np.nan
+    return event_weeks[["event_key", "raw_event_week", "event_week"]]
+
+
+def enrich_sidecars_with_event_weeks(
+    sidecars: dict[str, pd.DataFrame], event_weeks: pd.DataFrame | None
+) -> dict[str, pd.DataFrame]:
+    if event_weeks is None or event_weeks.empty:
+        return sidecars
+    week_table = event_weeks[["event_key", "raw_event_week", "event_week"]].drop_duplicates(
+        subset=["event_key"]
+    )
+    enriched = {}
+    for name, table in sidecars.items():
+        if table.empty or "event_key" not in table.columns:
+            enriched[name] = table.copy()
+            continue
+        base = table.drop(columns=["raw_event_week", "event_week"], errors="ignore")
+        enriched[name] = base.merge(week_table, on="event_key", how="left")
+    return enriched
+
+
 def write_sidecar_tables(
     sidecars: dict[str, pd.DataFrame], output_dir: str | Path, season: int
 ) -> dict[str, Path]:
@@ -548,9 +581,15 @@ def build_season_feature_table(
 
 
 def build_feature_sidecars(
-    event_keys: list[str], provider: TbaProvider, season: int, output_dir: str | Path | None = None
+    event_keys: list[str],
+    provider: TbaProvider,
+    season: int,
+    output_dir: str | Path | None = None,
+    event_weeks: pd.DataFrame | None = None,
 ) -> dict[str, pd.DataFrame]:
-    sidecars = build_event_sidecars(event_keys, provider)
+    sidecars = enrich_sidecars_with_event_weeks(
+        build_event_sidecars(event_keys, provider), event_weeks
+    )
     if output_dir is not None:
         write_sidecar_tables(sidecars, output_dir, season)
     return sidecars
@@ -613,6 +652,9 @@ def train_feature_table(
     initial_model: SetTransformerModel | None = None,
     prior_checkpoint: str | Path | None = None,
     sidecar_tables: dict[str, pd.DataFrame] | None = None,
+    split_override: Split | None = None,
+    tensorboard_writer: object | None = None,
+    tensorboard_logdir: str | Path | None = None,
 ) -> FeatureTrainingResult:
     opts = opts or default_options()
     indexed, team_index_map, team_event_index_map = make_v5_team_index_maps(
@@ -622,7 +664,7 @@ def train_feature_table(
         indexed = indexed[indexed["event_key"].astype(str) == str(venue_event_key)].reset_index(
             drop=True
         )
-    split = make_split(indexed, opts, policy=opts.split_policy)
+    split = split_override or make_split(indexed, opts, policy=opts.split_policy)
     target_stats = fit_target_stats(indexed, split.train_mask, opts)
     v57_target_stats = fit_v57_target_stats(indexed, split.train_mask, opts)
     prepared = apply_v57_target_stats(apply_target_stats(indexed, target_stats), v57_target_stats)
@@ -656,8 +698,11 @@ def train_feature_table(
         venue_mode=venue_mode,
         initial_model=training_model,
         sidecar_tables=indexed_sidecars,
+        tensorboard_writer=tensorboard_writer,
     )
-    report = evaluate_model(model, prepared, split, target_stats, opts, baselines)
+    report = evaluate_model(
+        model, prepared, split, target_stats, opts, baselines, v57_target_stats
+    )
     result = FeatureTrainingResult(
         table=indexed,
         prepared=prepared,
@@ -672,6 +717,7 @@ def train_feature_table(
         prior_checkpoint=str(prior_checkpoint) if prior_checkpoint is not None else None,
         prior_vectors_applied=prior_vectors_applied,
         sidecar_tables=indexed_sidecars,
+        tensorboard_logdir=str(tensorboard_logdir) if tensorboard_logdir is not None else None,
     )
     if output_dir is not None:
         write_feature_training_artifacts(result, output_dir)
@@ -689,6 +735,9 @@ def train_feature_file(
     initial_model: SetTransformerModel | None = None,
     prior_checkpoint: str | Path | None = None,
     sidecar_tables: dict[str, pd.DataFrame] | None = None,
+    split_override: Split | None = None,
+    tensorboard_writer: object | None = None,
+    tensorboard_logdir: str | Path | None = None,
 ) -> FeatureTrainingResult:
     return train_feature_table(
         read_feature_table(input_path),
@@ -700,6 +749,9 @@ def train_feature_file(
         initial_model=initial_model,
         prior_checkpoint=prior_checkpoint,
         sidecar_tables=sidecar_tables,
+        split_override=split_override,
+        tensorboard_writer=tensorboard_writer,
+        tensorboard_logdir=tensorboard_logdir,
     )
 
 
@@ -708,8 +760,13 @@ def write_feature_training_artifacts(result: FeatureTrainingResult, output_dir: 
     out.mkdir(parents=True, exist_ok=True)
     result.prepared.to_csv(out / "feature_match_table.csv", index=False)
     result.history.to_csv(out / "feature_history.csv", index=False)
+    (out / "feature_training_diagnostics.json").write_text(
+        json.dumps(_json_ready(asdict(result.diagnostics)), indent=2),
+        encoding="utf-8",
+    )
     result.report.continuous_metrics.to_csv(out / "feature_continuous_metrics.csv", index=False)
     result.report.binary_metrics.to_csv(out / "feature_binary_metrics.csv", index=False)
+    result.report.common_metrics.to_csv(out / "feature_common_metrics.csv", index=False)
     if hasattr(result.report, "endgame_metrics"):
         result.report.endgame_metrics.to_csv(out / "feature_endgame_metrics.csv", index=False)
     if hasattr(result.report, "award_metrics"):
@@ -747,3 +804,15 @@ def write_feature_training_artifacts(result: FeatureTrainingResult, output_dir: 
         out / "v5_checkpoint.pt",
     )
     return out
+
+
+def _json_ready(value):
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, dict):
+        return {key: _json_ready(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_json_ready(item) for item in value]
+    return value

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import time
 from typing import Annotated
 
 from latentstrat.secrets import load_environment
@@ -34,6 +35,7 @@ from latentstrat.features import (
     build_feature_sidecars,
     build_event_feature_table,
     build_season_feature_table,
+    event_week_table_from_feature_table,
     load_v5_checkpoint_model,
     train_feature_file,
     write_feature_table,
@@ -47,6 +49,8 @@ from latentstrat.prior_inspection import inspect_prior_checkpoint, write_prior_i
 from latentstrat.pretrain_loop import train_prior_file
 from latentstrat.prior_grid import run_prior_grid
 from latentstrat.training import train_model
+from latentstrat.training import create_tensorboard_writer
+from latentstrat.walk_forward import run_walk_forward_validation
 
 app = typer.Typer(help="LatentStrat Python CLI")
 
@@ -172,7 +176,11 @@ def build_features(
     path = write_feature_table(table, output_path)
     if sidecar_output_dir is not None:
         sidecars = build_feature_sidecars(
-            sidecar_event_keys, provider, season, output_dir=sidecar_output_dir
+            sidecar_event_keys,
+            provider,
+            season,
+            output_dir=sidecar_output_dir,
+            event_weeks=event_week_table_from_feature_table(table),
         )
         typer.echo(
             "Sidecars written: "
@@ -204,6 +212,35 @@ def train_features(
     mini_batch_size: Annotated[
         int | None, typer.Option("--mini-batch-size", help="Override training mini-batch size.")
     ] = None,
+    learning_rate: Annotated[
+        float | None, typer.Option("--learning-rate", help="Override AdamW learning rate.")
+    ] = None,
+    early_stopping: Annotated[
+        bool,
+        typer.Option(
+            "--early-stopping/--no-early-stopping",
+            help="Stop training after validation patience is exhausted.",
+        ),
+    ] = True,
+    restore_best: Annotated[
+        bool,
+        typer.Option(
+            "--restore-best/--save-final",
+            help="Restore the best validation weights before writing artifacts.",
+        ),
+    ] = True,
+    lr_eta_min: Annotated[
+        float | None,
+        typer.Option("--lr-eta-min", help="Minimum learning rate for cosine annealing."),
+    ] = None,
+    loss_log_var_min: Annotated[
+        float | None,
+        typer.Option("--loss-log-var-min", help="Minimum homoscedastic log variance."),
+    ] = None,
+    loss_log_var_max: Annotated[
+        float | None,
+        typer.Option("--loss-log-var-max", help="Maximum homoscedastic log variance."),
+    ] = None,
     venue_mode: Annotated[
         bool,
         typer.Option(
@@ -234,6 +271,21 @@ def train_features(
         Path | None,
         typer.Option("--playoffs-sidecar", help="Optional V5.7 playoff sidecar Parquet."),
     ] = None,
+    tensorboard: Annotated[
+        bool,
+        typer.Option(
+            "--tensorboard/--no-tensorboard",
+            help="Write local TensorBoard event files for feature training.",
+        ),
+    ] = True,
+    tensorboard_logdir: Annotated[
+        Path,
+        typer.Option("--tensorboard-logdir", help="TensorBoard root log directory."),
+    ] = Path("runs"),
+    tensorboard_run_name: Annotated[
+        str | None,
+        typer.Option("--tensorboard-run-name", help="Optional TensorBoard run name."),
+    ] = None,
 ) -> None:
     """Train LatentStrat from a local Parquet feature file."""
     updates = {}
@@ -241,6 +293,16 @@ def train_features(
         updates["epochs"] = epochs
     if mini_batch_size is not None:
         updates["mini_batch_size"] = mini_batch_size
+    if learning_rate is not None:
+        updates["learning_rate"] = learning_rate
+    updates["use_early_stopping"] = early_stopping
+    updates["restore_best_validation_model"] = restore_best
+    if lr_eta_min is not None:
+        updates["lr_eta_min"] = lr_eta_min
+    if loss_log_var_min is not None:
+        updates["loss_log_var_min"] = loss_log_var_min
+    if loss_log_var_max is not None:
+        updates["loss_log_var_max"] = loss_log_var_max
     opts = default_options().model_copy(update=updates)
     initial_model = load_v5_checkpoint_model(checkpoint) if checkpoint is not None else None
     sidecar_tables = {}
@@ -251,20 +313,146 @@ def train_features(
     ):
         if path is not None:
             sidecar_tables[name] = pd.read_parquet(path, engine="pyarrow")
-    result = train_feature_file(
-        input_path,
-        opts,
-        output_dir=output,
-        venue_mode=venue_mode,
-        venue_event_key=event_key,
-        initial_model=initial_model,
-        prior_checkpoint=prior_checkpoint,
-        sidecar_tables=sidecar_tables or None,
-    )
+    writer = None
+    run_logdir = None
+    if tensorboard:
+        run_name = tensorboard_run_name or f"v57_features_{opts.season}_{int(time.time())}"
+        run_logdir = tensorboard_logdir / run_name
+        writer = create_tensorboard_writer(str(run_logdir))
+        writer.add_text(
+            "Run/Context",
+            "\n".join(
+                (
+                    f"- input_path: {input_path}",
+                    f"- output: {output}",
+                    f"- epochs: {opts.epochs}",
+                    f"- mini_batch_size: {opts.mini_batch_size}",
+                    f"- learning_rate: {opts.learning_rate}",
+                    f"- lr_eta_min: {opts.lr_eta_min}",
+                    f"- use_early_stopping: {opts.use_early_stopping}",
+                    f"- restore_best_validation_model: {opts.restore_best_validation_model}",
+                    f"- loss_log_var_bounds: [{opts.loss_log_var_min}, {opts.loss_log_var_max}]",
+                    f"- prior_checkpoint: {prior_checkpoint}",
+                    f"- rankings_sidecar: {rankings_sidecar}",
+                    f"- selections_sidecar: {selections_sidecar}",
+                    f"- playoffs_sidecar: {playoffs_sidecar}",
+                )
+            ),
+            0,
+        )
+        typer.echo(f"TensorBoard active: tensorboard --logdir={tensorboard_logdir}")
+    try:
+        result = train_feature_file(
+            input_path,
+            opts,
+            output_dir=output,
+            venue_mode=venue_mode,
+            venue_event_key=event_key,
+            initial_model=initial_model,
+            prior_checkpoint=prior_checkpoint,
+            sidecar_tables=sidecar_tables or None,
+            tensorboard_writer=writer,
+            tensorboard_logdir=run_logdir,
+        )
+    finally:
+        if writer is not None:
+            writer.close()
     typer.echo(
         f"Feature training complete: rows={len(result.prepared)}, "
         f"teams={len(result.team_index_map)}, final_loss={result.diagnostics.final_loss:.4f}"
     )
+
+
+@app.command("validate-walk-forward")
+def validate_walk_forward(
+    features: Annotated[Path, typer.Option("--features", help="V5.8 feature Parquet.")],
+    prior_checkpoint: Annotated[
+        Path, typer.Option("--prior-checkpoint", help="V5.6.4 prior checkpoint.")
+    ],
+    output: Annotated[
+        Path, typer.Option("--output", help="Directory for walk-forward artifacts.")
+    ] = Path("artifacts/v58_walk_forward"),
+    epochs: Annotated[int, typer.Option("--epochs", help="Training epochs per fold.")] = 5,
+    mini_batch_size: Annotated[
+        int | None, typer.Option("--mini-batch-size", help="Override mini-batch size.")
+    ] = None,
+    latent_dim: Annotated[
+        int | None,
+        typer.Option("--latent-dim", help="Override model latent dimension."),
+    ] = None,
+    rankings_sidecar: Annotated[
+        Path | None,
+        typer.Option("--rankings-sidecar", help="Optional V5.7 rankings sidecar Parquet."),
+    ] = None,
+    selections_sidecar: Annotated[
+        Path | None,
+        typer.Option("--selections-sidecar", help="Optional V5.7 selections sidecar Parquet."),
+    ] = None,
+    playoffs_sidecar: Annotated[
+        Path | None,
+        typer.Option("--playoffs-sidecar", help="Optional V5.7 playoff sidecar Parquet."),
+    ] = None,
+    min_train_week: Annotated[
+        int, typer.Option("--min-train-week", help="First canonical week allowed to train.")
+    ] = 1,
+    max_validation_week: Annotated[
+        int | None,
+        typer.Option("--max-validation-week", help="Last canonical validation week."),
+    ] = None,
+    save_fold_checkpoints: Annotated[
+        bool,
+        typer.Option(
+            "--save-fold-checkpoints/--no-save-fold-checkpoints",
+            help="Write one model checkpoint per walk-forward fold.",
+        ),
+    ] = False,
+    tensorboard: Annotated[
+        bool,
+        typer.Option(
+            "--tensorboard/--no-tensorboard",
+            help="Write local TensorBoard event files for walk-forward validation.",
+        ),
+    ] = True,
+    tensorboard_logdir: Annotated[
+        Path,
+        typer.Option("--tensorboard-logdir", help="TensorBoard root log directory."),
+    ] = Path("runs"),
+    tensorboard_run_name: Annotated[
+        str | None,
+        typer.Option("--tensorboard-run-name", help="Optional TensorBoard run name."),
+    ] = None,
+) -> None:
+    """Run V5.8 walk-forward temporal validation."""
+    updates = {"epochs": epochs, "use_early_stopping": False}
+    if mini_batch_size is not None:
+        updates["mini_batch_size"] = mini_batch_size
+    if latent_dim is not None:
+        updates["latent_dim"] = latent_dim
+    opts = default_options().model_copy(update=updates)
+    sidecar_tables = {}
+    for name, path in (
+        ("rankings", rankings_sidecar),
+        ("selections", selections_sidecar),
+        ("playoffs", playoffs_sidecar),
+    ):
+        if path is not None:
+            sidecar_tables[name] = pd.read_parquet(path, engine="pyarrow")
+    result = run_walk_forward_validation(
+        features,
+        output,
+        prior_checkpoint=prior_checkpoint,
+        opts=opts,
+        sidecar_tables=sidecar_tables or None,
+        min_train_week=min_train_week,
+        max_validation_week=max_validation_week,
+        save_fold_checkpoints=save_fold_checkpoints,
+        tensorboard_logdir=tensorboard_logdir if tensorboard else None,
+        tensorboard_run_name=tensorboard_run_name,
+    )
+    if result.tensorboard_logdir is not None:
+        typer.echo(f"TensorBoard active: tensorboard --logdir={tensorboard_logdir}")
+    fold_count = int((result.metrics["fold_number"] != "AVERAGE").sum())
+    typer.echo(f"Walk-forward validation complete: {result.output_dir} folds={fold_count}")
 
 
 @app.command("build-prior-features")
@@ -288,7 +476,7 @@ def build_prior_features(
         int | None,
         typer.Option(
             "--epa-source-year",
-            help="Completed Statbotics season to use for EPA targets.",
+            help="Final completed Statbotics season to use for normalized EPA trajectory.",
         ),
     ] = None,
 ) -> None:
@@ -315,7 +503,7 @@ def build_prior_features(
         f"cache_misses={stats.get('cache_misses', 0)} "
         f"api_batches={stats.get('api_batches', 0)} "
         f"retries={stats.get('retry_count', 0)} "
-        f"epa_source_year={int(table['epa_source_year'].iloc[0])}"
+        f"norm_epa_source_years={table['norm_epa_source_years'].iloc[0]}"
     )
 
 

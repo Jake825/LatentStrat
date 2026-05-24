@@ -2,8 +2,12 @@ import numpy as np
 import pandas as pd
 
 from latentstrat.config import default_options
-from latentstrat.data import Split, apply_target_stats, fit_target_stats
-from latentstrat.evaluation import _predict_batched, evaluate_model
+from latentstrat.data import Split, TargetStats, apply_target_stats, fit_target_stats
+from latentstrat.evaluation import (
+    _predict_batched,
+    common_match_metrics_from_predictions,
+    evaluate_model,
+)
 from latentstrat.model import init_model
 from latentstrat.training import match_team_matrices
 
@@ -116,3 +120,104 @@ def test_predict_batched_preserves_rows_and_attention_shapes_across_chunks():
     assert red_pma.shape == (len(prepared), 1, 3)
     assert blue_pma.shape == (len(prepared), 1, 3)
     np.testing.assert_allclose(red_pma.sum(axis=2), np.ones((len(prepared), 1)), rtol=1e-6)
+
+
+def _logit(probability: float) -> float:
+    return float(np.log(probability / (1 - probability)))
+
+
+def test_common_match_metrics_use_red_win_orientation_and_score_math():
+    opts = default_options()
+    table = pd.DataFrame(
+        {
+            "red_auto_pts": [20.0, 10.0],
+            "red_teleop_pts": [80.0, 50.0],
+            "blue_auto_pts": [15.0, 25.0],
+            "blue_teleop_pts": [75.0, 75.0],
+            "red_total_score": [105.0, 63.0],
+            "blue_total_score": [92.0, 104.0],
+            "red_win": [1.0, 0.0],
+        }
+    )
+    split = Split(
+        train_mask=np.array([False, False]),
+        validation_mask=np.array([True, True]),
+        test_mask=np.array([False, False]),
+        policy="fixture",
+    )
+    target_stats = TargetStats(
+        target_names=["red_auto_pts", "red_teleop_pts", "blue_auto_pts", "blue_teleop_pts"],
+        mu=np.zeros(4),
+        sigma=np.ones(4),
+        is_constant=np.zeros(4, dtype=bool),
+    )
+    foul_names = [f"{color}_{target}" for color in ("red", "blue") for target in opts.foul_targets]
+    v57_stats = TargetStats(
+        target_names=foul_names,
+        mu=np.zeros(len(foul_names)),
+        sigma=np.ones(len(foul_names)),
+        is_constant=np.zeros(len(foul_names), dtype=bool),
+    )
+    pred_cont = table[target_stats.target_names].to_numpy(dtype=float)
+    pred_foul = np.zeros((len(table), len(foul_names)), dtype=float)
+    pred_foul[:, foul_names.index("red_committed_foul_pts")] = [2.0, 4.0]
+    pred_foul[:, foul_names.index("blue_committed_foul_pts")] = [5.0, 3.0]
+    pred_bin = np.array([[_logit(0.99)], [_logit(0.01)]], dtype=float)
+
+    metrics = common_match_metrics_from_predictions(
+        table,
+        split,
+        target_stats,
+        opts,
+        pred_cont,
+        pred_bin,
+        v57_target_stats=v57_stats,
+        pred_foul_z=pred_foul,
+    )
+
+    validation = metrics[metrics["split"] == "validation"].iloc[0]
+    assert validation["match_accuracy"] == 1.0
+    assert validation["win_brier"] < 0.001
+    assert np.isfinite(validation["win_log_loss"])
+    assert validation["next_match_phase_score_mse"] == 0.0
+    assert validation["next_match_total_score_mse"] == 0.0
+    assert validation["alliance_score_count"] == 4
+    assert validation["win_correct_count"] == 2
+
+
+def test_common_match_metrics_without_total_columns_report_nan_total_mse():
+    opts = default_options()
+    table = pd.DataFrame(
+        {
+            "red_auto_pts": [20.0],
+            "red_teleop_pts": [80.0],
+            "blue_auto_pts": [15.0],
+            "blue_teleop_pts": [75.0],
+            "red_win": [1.0],
+        }
+    )
+    split = Split(
+        train_mask=np.array([False]),
+        validation_mask=np.array([True]),
+        test_mask=np.array([False]),
+        policy="fixture",
+    )
+    target_stats = TargetStats(
+        target_names=["red_auto_pts", "red_teleop_pts", "blue_auto_pts", "blue_teleop_pts"],
+        mu=np.zeros(4),
+        sigma=np.ones(4),
+        is_constant=np.zeros(4, dtype=bool),
+    )
+
+    metrics = common_match_metrics_from_predictions(
+        table,
+        split,
+        target_stats,
+        opts,
+        table[target_stats.target_names].to_numpy(dtype=float),
+        np.array([[_logit(0.99)]], dtype=float),
+    )
+
+    validation = metrics[metrics["split"] == "validation"].iloc[0]
+    assert validation["next_match_phase_score_mse"] == 0.0
+    assert np.isnan(validation["next_match_total_score_mse"])

@@ -12,8 +12,8 @@ Use this skill for LatentStrat model architecture work and model-facing tensor c
 1. Describe current model behavior, not aspirational architecture.
 2. Treat alliances as unordered sets of three team slots. Preserve permutation-tolerant behavior when editing model code or tests.
 3. Keep the current representation explicit: shared team embeddings, shared SAB, cross-alliance attention, PMA pooling, then `z_match = [z_red, z_blue, diff, abs(diff), z_red * z_blue]`.
-4. Do not invent padding masks or ghost-team handling. Current training/evaluation requires nonmissing team indices.
-5. Treat `zero_slot` as a diagnostic masking mechanism, not general missing-team support.
+4. Keep current ghost-slot behavior explicit: missing/dropout slots route to learned `Z_base[0]` plus null `Z_event[0]` and remain visible to attention.
+5. Treat `zero_slot` as a diagnostic sensitivity mechanism, distinct from normal ghost-slot routing.
 
 ## References
 

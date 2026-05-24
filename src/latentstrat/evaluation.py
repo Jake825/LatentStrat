@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from latentstrat.baselines import Baselines
 from latentstrat.config import LatentStratOptions, default_options
-from latentstrat.data import Split, TargetStats, target_matrix
+from latentstrat.data import Split, TargetStats, optional_target_matrix, target_matrix
 from latentstrat.model import SetTransformerModel
 from latentstrat.training import (
     award_target_tensor,
@@ -28,6 +28,7 @@ class EvaluationReport:
     rows_per_parameter: float
     continuous_metrics: pd.DataFrame
     binary_metrics: pd.DataFrame
+    common_metrics: pd.DataFrame
     endgame_metrics: pd.DataFrame
     award_metrics: pd.DataFrame
     calibration: pd.DataFrame
@@ -81,6 +82,170 @@ def binary_metrics(
             rows.append(
                 {"split": split_name, "target": target, "brier": brier_value, "log_loss": log_value}
             )
+    return pd.DataFrame(rows)
+
+
+def _safe_metric(sse: float, count: int) -> float:
+    return float(sse / count) if count > 0 else float("nan")
+
+
+def _safe_rate(numerator: float, denominator: int) -> float:
+    return float(numerator / denominator) if denominator > 0 else float("nan")
+
+
+def _sse_and_count(predicted: np.ndarray, actual: np.ndarray) -> tuple[float, int]:
+    valid = np.isfinite(predicted) & np.isfinite(actual)
+    if not np.any(valid):
+        return 0.0, 0
+    err = predicted[valid] - actual[valid]
+    return float(np.sum(err**2)), int(np.sum(valid))
+
+
+def _stats_for_names(stats: TargetStats | None, names: list[str]) -> tuple[np.ndarray, np.ndarray]:
+    if stats is None:
+        return np.zeros(len(names), dtype=float), np.ones(len(names), dtype=float)
+    index = {name: idx for idx, name in enumerate(stats.target_names)}
+    mu = np.zeros(len(names), dtype=float)
+    sigma = np.ones(len(names), dtype=float)
+    for out_idx, name in enumerate(names):
+        if name in index:
+            stat_idx = index[name]
+            mu[out_idx] = float(stats.mu[stat_idx])
+            sigma[out_idx] = float(stats.sigma[stat_idx])
+    return mu, sigma
+
+
+def _phase_score_predictions(
+    table: pd.DataFrame, pred_cont_z: np.ndarray, target_stats: TargetStats
+) -> tuple[np.ndarray, np.ndarray]:
+    target_names = list(target_stats.target_names)
+    predicted_cont = pred_cont_z * target_stats.sigma + target_stats.mu
+    actual_cont = optional_target_matrix(table, target_names)
+    index = {name: idx for idx, name in enumerate(target_names)}
+    required = ("red_auto_pts", "red_teleop_pts", "blue_auto_pts", "blue_teleop_pts")
+    if not all(name in index for name in required):
+        empty = np.full((len(table), 2), np.nan, dtype=float)
+        return empty, empty.copy()
+    red_pred = predicted_cont[:, index["red_auto_pts"]] + predicted_cont[:, index["red_teleop_pts"]]
+    blue_pred = (
+        predicted_cont[:, index["blue_auto_pts"]] + predicted_cont[:, index["blue_teleop_pts"]]
+    )
+    red_actual = actual_cont[:, index["red_auto_pts"]] + actual_cont[:, index["red_teleop_pts"]]
+    blue_actual = actual_cont[:, index["blue_auto_pts"]] + actual_cont[:, index["blue_teleop_pts"]]
+    return np.column_stack([red_pred, blue_pred]), np.column_stack([red_actual, blue_actual])
+
+
+def _total_score_predictions(
+    table: pd.DataFrame,
+    pred_phase: np.ndarray,
+    pred_foul_z: np.ndarray | None,
+    v57_target_stats: TargetStats | None,
+    opts: LatentStratOptions,
+) -> tuple[np.ndarray, np.ndarray]:
+    if pred_foul_z is None or v57_target_stats is None:
+        empty = np.full((len(table), 2), np.nan, dtype=float)
+        return empty, empty.copy()
+    if "red_total_score" not in table.columns or "blue_total_score" not in table.columns:
+        empty = np.full((len(table), 2), np.nan, dtype=float)
+        return empty, empty.copy()
+    foul_names = [
+        f"{color}_{target}" for color in ("red", "blue") for target in opts.foul_targets
+    ]
+    if pred_foul_z.shape[1] < len(foul_names):
+        empty = np.full((len(table), 2), np.nan, dtype=float)
+        return empty, empty.copy()
+    if "red_committed_foul_pts" not in foul_names or "blue_committed_foul_pts" not in foul_names:
+        empty = np.full((len(table), 2), np.nan, dtype=float)
+        return empty, empty.copy()
+    mu, sigma = _stats_for_names(v57_target_stats, foul_names)
+    predicted_fouls = pred_foul_z * sigma + mu
+    red_committed_idx = foul_names.index("red_committed_foul_pts")
+    blue_committed_idx = foul_names.index("blue_committed_foul_pts")
+    predicted_total = np.column_stack(
+        [
+            pred_phase[:, 0] + predicted_fouls[:, blue_committed_idx],
+            pred_phase[:, 1] + predicted_fouls[:, red_committed_idx],
+        ]
+    )
+    actual_total = optional_target_matrix(table, ["red_total_score", "blue_total_score"])
+    return predicted_total, actual_total
+
+
+def common_match_metrics_from_predictions(
+    table: pd.DataFrame,
+    split: Split,
+    target_stats: TargetStats,
+    opts: LatentStratOptions | None,
+    pred_cont_z: np.ndarray,
+    pred_bin_logits: np.ndarray,
+    *,
+    v57_target_stats: TargetStats | None = None,
+    pred_foul_z: np.ndarray | None = None,
+) -> pd.DataFrame:
+    """Compute community-facing match metrics from model predictions.
+
+    Win probability is red-alliance oriented because `red_win` is the canonical
+    binary target. Blue win probability is `1 - p_red_win`.
+    """
+
+    opts = opts or default_options()
+    pred_phase, actual_phase = _phase_score_predictions(table, pred_cont_z, target_stats)
+    pred_total, actual_total = _total_score_predictions(
+        table, pred_phase, pred_foul_z, v57_target_stats, opts
+    )
+    binary_names = list(opts.binary_targets)
+    actual_bin = optional_target_matrix(table, binary_names)
+    red_win_idx = binary_names.index("red_win") if "red_win" in binary_names else None
+    red_win_prob = (
+        sigmoid(pred_bin_logits[:, red_win_idx])
+        if red_win_idx is not None and pred_bin_logits.shape[1] > red_win_idx
+        else np.full(len(table), np.nan, dtype=float)
+    )
+    red_win_actual = (
+        actual_bin[:, red_win_idx]
+        if red_win_idx is not None
+        else np.full(len(table), np.nan, dtype=float)
+    )
+    rows = []
+    for split_name, mask in (("train", split.train_mask), ("validation", split.validation_mask)):
+        phase_sse, phase_count = _sse_and_count(pred_phase[mask], actual_phase[mask])
+        total_sse, total_count = _sse_and_count(pred_total[mask], actual_total[mask])
+        win_valid = mask & np.isfinite(red_win_prob) & np.isfinite(red_win_actual)
+        if np.any(win_valid):
+            probs = np.clip(red_win_prob[win_valid], np.finfo(float).eps, 1 - np.finfo(float).eps)
+            actual = red_win_actual[win_valid].astype(float)
+            brier_values = (probs - actual) ** 2
+            log_loss_values = -(actual * np.log(probs) + (1 - actual) * np.log(1 - probs))
+            correct = (probs >= 0.5) == (actual >= 0.5)
+            win_brier_sum = float(np.sum(brier_values))
+            win_log_loss_sum = float(np.sum(log_loss_values))
+            win_correct_count = int(np.sum(correct))
+            win_count = int(np.sum(win_valid))
+        else:
+            win_brier_sum = 0.0
+            win_log_loss_sum = 0.0
+            win_correct_count = 0
+            win_count = 0
+        rows.append(
+            {
+                "split": split_name,
+                "next_match_phase_score_mse": _safe_metric(phase_sse, phase_count),
+                "next_match_total_score_mse": _safe_metric(total_sse, total_count),
+                "match_accuracy": _safe_rate(win_correct_count, win_count),
+                "win_brier": _safe_rate(win_brier_sum, win_count),
+                "win_log_loss": _safe_rate(win_log_loss_sum, win_count),
+                "match_count": win_count,
+                "alliance_score_count": phase_count,
+                "phase_score_sse": phase_sse,
+                "phase_score_count": phase_count,
+                "total_score_sse": total_sse,
+                "total_score_count": total_count,
+                "win_brier_sum": win_brier_sum,
+                "win_log_loss_sum": win_log_loss_sum,
+                "win_correct_count": win_correct_count,
+                "win_count": win_count,
+            }
+        )
     return pd.DataFrame(rows)
 
 
@@ -369,6 +534,10 @@ def _predict_batched(
     chunks = {
         "cont": [],
         "bin": [],
+        "atomic": [],
+        "foul": [],
+        "bonus": [],
+        "special": [],
         "endgame": [],
         "award": [],
         "red_pma": [],
@@ -398,6 +567,10 @@ def _predict_batched(
             )
             chunks["cont"].append(pred.cont_z.detach().cpu().numpy())
             chunks["bin"].append(pred.bin_logits.detach().cpu().numpy())
+            chunks["atomic"].append(pred.atomic_z.detach().cpu().numpy())
+            chunks["foul"].append(pred.foul_z.detach().cpu().numpy())
+            chunks["bonus"].append(pred.bonus_logits.detach().cpu().numpy())
+            chunks["special"].append(pred.special_logits.detach().cpu().numpy())
             chunks["endgame"].append(pred.endgame_logits.detach().cpu().numpy())
             chunks["award"].append(pred.award_logits.detach().cpu().numpy())
             chunks["red_pma"].append(pred.red_pma_weights.detach().cpu().numpy())
@@ -509,6 +682,7 @@ def evaluate_model(
     target_stats: TargetStats,
     opts: LatentStratOptions | None = None,
     baselines: Baselines | None = None,
+    v57_target_stats: TargetStats | None = None,
 ) -> EvaluationReport:
     opts = opts or default_options()
     red, blue, red_event, blue_event, red_missing, blue_missing = match_v5_matrices(table)
@@ -541,6 +715,16 @@ def evaluate_model(
             actual_cont, pred_cont, split, target_stats.target_names
         ),
         binary_metrics=binary_metrics(actual_bin, pred_bin, split, list(opts.binary_targets)),
+        common_metrics=common_match_metrics_from_predictions(
+            table,
+            split,
+            target_stats,
+            opts,
+            pred["cont"],
+            pred["bin"],
+            v57_target_stats=v57_target_stats,
+            pred_foul_z=pred["foul"],
+        ),
         endgame_metrics=endgame_metrics(actual_endgame, pred["endgame"], effective_missing, split),
         award_metrics=award_metrics(
             actual_awards, pred["award"], effective_missing, split, list(opts.award_targets)

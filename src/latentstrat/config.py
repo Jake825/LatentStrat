@@ -25,8 +25,12 @@ class LatentStratOptions(BaseModel):
     set_layer_norm_epsilon: float = 1e-5
     l2_embedding: float = 1e-4
     event_delta_l2: float = 1e-1
-    l2_heads: float = 1e-5
-    l2_set: float = 1e-5
+    l2_heads: float = 1e-4
+    l2_set: float = 1e-4
+    use_lr_scheduler: bool = True
+    lr_eta_min: float = 1e-5
+    loss_log_var_min: float = -5.0
+    loss_log_var_max: float = 5.0
     team_dropout_rate: float = 0.03
     epochs: int = 200
     mini_batch_size: int = 256

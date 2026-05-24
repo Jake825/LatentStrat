@@ -202,6 +202,11 @@ class HomoscedasticTaskBalancer(nn.Module):
     def precision(self, task_name: str) -> Tensor:
         return torch.exp(-self.log_vars[task_name])
 
+    def clamp_(self, min_value: float, max_value: float) -> None:
+        with torch.no_grad():
+            for parameter in self.log_vars.values():
+                parameter.clamp_(min=min_value, max=max_value)
+
 
 class DeltaIntegrationGate(nn.Module):
     """Offline gate for folding event deltas into durable base embeddings."""

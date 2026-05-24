@@ -22,6 +22,8 @@ from latentstrat.config import default_options
 from latentstrat.features import (
     add_award_features,
     build_event_sidecars,
+    build_feature_sidecars,
+    event_week_table_from_feature_table,
     merge_scouting_features,
     read_feature_table,
     train_feature_table,
@@ -136,11 +138,16 @@ def test_train_feature_table_adds_indices_and_writes_artifacts(tmp_path):
     assert (output / "feature_history.csv").exists()
     assert (output / "feature_continuous_metrics.csv").exists()
     assert (output / "feature_binary_metrics.csv").exists()
+    assert (output / "feature_common_metrics.csv").exists()
     assert (output / "feature_endgame_metrics.csv").exists()
     assert (output / "feature_award_metrics.csv").exists()
     assert (output / "feature_set_attention.csv").exists()
     assert (output / "feature_zero_out_diagnostics.csv").exists()
     assert (output / "v5_checkpoint.pt").exists()
+    common = pd.read_csv(output / "feature_common_metrics.csv")
+    assert set(common["split"]) == {"train", "validation"}
+    assert "next_match_phase_score_mse" in common.columns
+    assert "match_accuracy" in common.columns
 
 
 def test_award_ontology_masks_machine_award_non_axes_and_tracks_ei_eligibility():
@@ -224,6 +231,28 @@ def test_sidecar_generation_preserves_schemas_and_passed_over_team():
     assert selections.loc[0, "passed_over_team_key"] == "frc2"
     assert "declining_team_key" not in selections.columns
     assert int(playoffs.loc[0, "playoff_finish_order"]) == 1
+
+
+def test_feature_sidecars_inherit_event_week_from_feature_table():
+    feature_table = pd.DataFrame(
+        {
+            "event_key": ["2026features"],
+            "raw_event_week": [0],
+            "event_week": [1],
+        }
+    )
+
+    sidecars = build_feature_sidecars(
+        ["2026features"],
+        _FakeSidecarProvider(),
+        2026,
+        event_weeks=event_week_table_from_feature_table(feature_table),
+    )
+
+    for table in sidecars.values():
+        assert "raw_event_week" in table.columns
+        assert "event_week" in table.columns
+        assert set(table["event_week"].dropna()) == {1}
 
 
 def test_init_scouting_db_creates_expected_tables(tmp_path):
@@ -328,12 +357,24 @@ def test_train_features_cli_loads_parquet_and_writes_artifacts(tmp_path):
             "1",
             "--mini-batch-size",
             "4",
+            "--no-early-stopping",
+            "--restore-best",
+            "--lr-eta-min",
+            "0.00001",
+            "--loss-log-var-min",
+            "-4",
+            "--loss-log-var-max",
+            "4",
+            "--no-tensorboard",
         ],
     )
 
     assert result.exit_code == 0, result.output
     assert (output / "feature_match_table.csv").exists()
+    assert (output / "feature_training_diagnostics.json").exists()
     assert (output / "v5_checkpoint.pt").exists()
+    history = pd.read_csv(output / "feature_history.csv")
+    assert "learning_rate" in history.columns
 
 
 def test_consolidate_event_cli_writes_embedding_store(tmp_path):
@@ -352,6 +393,7 @@ def test_consolidate_event_cli_writes_embedding_store(tmp_path):
             "1",
             "--mini-batch-size",
             "4",
+            "--no-tensorboard",
         ],
     )
     assert train_result.exit_code == 0, train_result.output

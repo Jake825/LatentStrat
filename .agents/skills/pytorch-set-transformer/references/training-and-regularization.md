@@ -4,7 +4,14 @@ Use this reference for architecture-sensitive training behavior.
 
 ## Heads And Targets
 
-The model has separate heads for continuous and binary targets. Continuous targets are evaluated with regression metrics such as RMSE and MAE. Binary targets are evaluated as probabilities, so calibration-aware metrics matter.
+The model has separate heads for continuous phase targets, win logits, endgame
+ordinal logits, judged-award logits, V5.7 atomic counts, committed fouls, bonus
+binary logits, special binary logits, and sidecar value tasks. Continuous
+targets are evaluated with regression metrics such as RMSE and MAE. Binary
+targets are evaluated as probabilities, so calibration-aware metrics matter.
+
+Binary heads output raw logits. Use `BCEWithLogitsLoss` with masks for missing
+target entries; do not add model-side sigmoid layers for training.
 
 Coordinate metric interpretation with `$latentstrat-model-evaluation`.
 
@@ -15,6 +22,10 @@ Team embeddings and the rest of the model can use different optimizer settings. 
 ## Active Embedding Regularization
 
 The training path can regularize embeddings for active teams. Do not replace this with global regularization over all possible teams unless a future runtime task explicitly changes the objective and updates the validation story.
+
+`Z_base` active-row regularization includes row `0` because the ghost robot is a
+learned live base row. `Z_event` active-row regularization excludes row `0`
+because event row `0` is the null delta.
 
 ## Split-Safe Normalization
 

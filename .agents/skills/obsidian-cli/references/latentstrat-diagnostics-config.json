@@ -1,0 +1,12 @@
+{
+  "extra_stopwords": [
+    "latentstrat",
+    "frc",
+    "first",
+    "robotics",
+    "competition"
+  ],
+  "section_theme_map": {
+    "assets": "documentation assets"
+  }
+}

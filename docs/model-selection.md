@@ -1,3 +1,16 @@
+---
+tags:
+  - latentstrat
+  - model-evaluation
+  - model-architecture
+aliases:
+  - "Model Selection"
+related:
+  - "[[model-evaluation]]"
+  - "[[model-structure]]"
+  - "[[project-history]]"
+---
+
 # Model Selection
 
 LatentStrat uses one official architecture: the cross-alliance Set Transformer.

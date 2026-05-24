@@ -1,4 +1,22 @@
+---
+tags:
+  - latentstrat
+  - feature-pipeline
+  - data-sources
+aliases:
+  - "Feature Pipeline"
+  - "Feature Builder"
+related:
+  - "[[data-sources]]"
+  - "[[schemas-and-artifacts-reference]]"
+  - "[[season-training]]"
+  - "[[scouting-data-layer]]"
+---
+
 # Feature Pipeline
+
+For a guided overview of where each provider fits, see
+[Data Sources](data-sources.md) and the [Documentation Hub](index.md).
 
 LatentStrat turns FRC data into a typed match-grain Parquet table before any
 PyTorch training starts. The feature table is the contract between provider
@@ -13,8 +31,8 @@ The TBA match table is the dataset spine. Each row is one played match with:
 - Six team slot keys: `red_team_1_key` through `blue_team_3_key`.
 - Raw targets such as red/blue auto points, teleop points, score differential,
   win flags, per-slot 2026 endgame state, and score-breakdown-derived columns.
-- Timing and ordering columns such as `event_week`, `time`, `actual_time`,
-  `predicted_time`, and `sort_ordinal`.
+- Timing and ordering columns such as `raw_event_week`, canonical `event_week`,
+  `time`, `actual_time`, `predicted_time`, and `sort_ordinal`.
 
 Enrichment sources should left-join onto this spine. Scouting rows, Statbotics
 rows, or external spreadsheets should not become the primary training row set
@@ -38,6 +56,15 @@ names:
 If an official match is missing its score breakdown, the match row remains on
 the spine and the V5.7 targets are written as `NaN`. Training masks those values
 instead of imputing false zeros.
+
+## V5.8 Temporal Weeks
+
+`event_week` is the model-facing canonical season week used for walk-forward
+validation. TBA's raw `week` is preserved as `raw_event_week`; canonical
+`event_week` starts at `1`, so raw Week 0 is bundled into Week 1. If a raw week
+is missing, LatentStrat falls back to dense chronological event order using
+event date/sort metadata. Sidecar Parquet files receive the same `event_week`
+by joining on `event_key`.
 
 ## V5.7 Relational Sidecars
 
@@ -115,7 +142,7 @@ preserve useful pandas dtypes, including nullable integer columns, timestamps,
 strings, and numeric feature columns. Tensor-bound values are cast deliberately
 when `MatchTensorDataset` builds PyTorch tensors.
 
-## V5.6.1 Prior Features
+## V5.6.4 Prior Features
 
 `build-prior-features` writes a separate prior Parquet file for offline
 pretraining. It builds a fixed transductive universe for team numbers
@@ -133,8 +160,13 @@ The output contains one row per team number with:
 - stable `narrative_hash`
 - `embedding_model` and `llm_dim`
 - `openai_narrative_vector`, a 256-D text embedding
-- `raw_epa`, `target_epa`, `epa_source_year`, `epa_is_imputed`, `epa_mean`, and
-  `epa_std`
+- `norm_epa_t_minus_4` through `norm_epa_t_minus_1`, sourced from Statbotics
+  normalized EPA for the four completed seasons before the target season
+- `norm_epa_observed_t_minus_4` through `norm_epa_observed_t_minus_1`
+- raw cultural targets: `raw_rookie_year_delta`, `raw_seasons_played`,
+  `raw_total_award_count`, `raw_blue_banner_count`,
+  `raw_championship_appearance_count`, `raw_championship_win_count`, and
+  `raw_technical_award_count`
 
 Anchor and Ghost narratives are built from TBA team profile, event history, and
 awards where `year < target_season`. Sibling narratives describe nearby known
@@ -142,10 +174,12 @@ teams by number to ground empty historical slots. Future rookie narratives use
 the projected registration formula and modern COTS-era technical grounding.
 There is no explicit hardware vector or award-decay vector. Historical awards
 are injected into natural text, and the OpenAI embedding cache prevents
-duplicate API calls for unchanged narratives. `target_epa` is a normalized
-prior-season Statbotics EPA target. By default, target season `2026` uses
-completed `2025` EPA. Team `0` uses raw EPA `0.0`, and missing team EPA uses the
-rookie baseline `mean - 0.2 * std` before normalization.
+duplicate API calls for unchanged narratives. The normalized EPA trajectory
+uses Statbotics' own normalized EPA field, not a local z-score of raw EPA. For
+target season `2026`, the source years are `2022..2025`. Missing team-years stay
+`NaN` with observed masks set to `False`; those axes are skipped in the EPA
+trajectory loss. Cultural targets are raw unnormalized counts, and Team `0`,
+Sibling, and Future rows use finite zero cultural targets.
 
 ## Team Indexing
 
@@ -211,3 +245,13 @@ latentstrat train-features data/features_2026.parquet \
   --selections-sidecar data/v57_sidecars/selections_2026.parquet \
   --playoffs-sidecar data/v57_sidecars/playoffs_2026.parquet
 ```
+
+## Related
+
+- [Data sources](data-sources.md): source-system timing and leakage boundaries.
+- [Schemas and artifacts reference](schemas-and-artifacts-reference.md): column
+  groups emitted by feature and sidecar builds.
+- [Season training](season-training.md): how feature tables are consumed by the
+  Set Transformer.
+- [Scouting data layer](scouting-data-layer.md): local scouting SQLite schema
+  and feature merge behavior.

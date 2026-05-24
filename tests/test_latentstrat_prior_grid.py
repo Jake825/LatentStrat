@@ -7,6 +7,11 @@ from typer.testing import CliRunner
 
 from latentstrat.cli import app
 from latentstrat.config import PriorOpts
+from latentstrat.pretrain_features import (
+    CULTURE_TARGET_COLUMNS,
+    NORM_EPA_OBSERVED_COLUMNS,
+    NORM_EPA_TARGET_COLUMNS,
+)
 from latentstrat.prior_grid import (
     PriorGridDataset,
     make_prior_grid_split,
@@ -31,7 +36,21 @@ def _grid_table(row_count: int = 8) -> pd.DataFrame:
                 [float((idx + offset) % 13) / 13.0 for offset in range(256)]
                 for idx in team_numbers
             ],
-            "target_epa": [float(idx) / 10.0 for idx in team_numbers],
+            **{
+                column: [
+                    float("nan") if idx == 0 else float(idx + axis) / 10.0
+                    for idx in team_numbers
+                ]
+                for axis, column in enumerate(NORM_EPA_TARGET_COLUMNS)
+            },
+            **{
+                column: [idx != 0 for idx in team_numbers]
+                for column in NORM_EPA_OBSERVED_COLUMNS
+            },
+            **{
+                column: [0.0 if idx == 0 else float(idx + axis) for idx in team_numbers]
+                for axis, column in enumerate(CULTURE_TARGET_COLUMNS)
+            },
         }
     )
 
@@ -39,16 +58,18 @@ def _grid_table(row_count: int = 8) -> pd.DataFrame:
 def test_production_prior_distiller_shapes_and_components():
     model = TeamPriorDistiller(PriorOpts(max_team_number=10, latent_dim=3))
 
-    prediction, pred_epa, latent = model(torch.tensor([0, 1, 2]))
+    prediction, pred_norm_epa, pred_culture, latent = model(torch.tensor([0, 1, 2]))
 
     assert prediction.shape == (3, 256)
-    assert pred_epa.shape == (3, 1)
+    assert pred_norm_epa.shape == (3, 4)
+    assert pred_culture.shape == (3, 7)
     assert latent.shape == (3, 3)
     assert set(dict(model.named_children())) == {
         "team_embedding",
         "decoder",
         "openai_head",
-        "epa_head",
+        "norm_epa_head",
+        "culture_head",
     }
     assert model.team_embedding.padding_idx is None
     assert not torch.allclose(model.team_embedding.weight[0], torch.zeros(3))
@@ -66,13 +87,20 @@ def test_grid_dataset_requires_v56_team_numbers():
         )
 
 
-def test_grid_dataset_requires_v561_epa_targets():
-    with pytest.raises(KeyError, match="missing target_epa"):
+def test_grid_dataset_requires_v564_targets():
+    with pytest.raises(KeyError, match="Missing: .*norm_epa_t_minus_1"):
         PriorGridDataset(
             pd.DataFrame(
                 {
                     "team_number": [1],
                     "openai_narrative_vector": [[0.0] * 256],
+                    **{
+                        column: [0.0]
+                        for column in NORM_EPA_TARGET_COLUMNS
+                        if column != "norm_epa_t_minus_1"
+                    },
+                    **{column: [True] for column in NORM_EPA_OBSERVED_COLUMNS},
+                    **{column: [0.0] for column in CULTURE_TARGET_COLUMNS},
                 }
             )
         )
@@ -154,11 +182,15 @@ def test_prior_grid_records_oom_failure_and_continues(tmp_path, monkeypatch):
             "final_train_openai_mse": 0.1,
             "final_validation_openai_mse": 0.2,
             "best_validation_openai_mse": 0.2,
-            "final_train_epa_mse": 0.3,
-            "final_validation_epa_mse": 0.4,
-            "best_validation_epa_mse": 0.4,
+            "final_train_norm_epa_mse": 0.3,
+            "final_validation_norm_epa_mse": 0.4,
+            "best_validation_norm_epa_mse": 0.4,
+            "final_train_culture_mse": 0.5,
+            "final_validation_culture_mse": 0.6,
+            "best_validation_culture_mse": 0.6,
             "final_log_var_openai": 0.0,
             "final_log_var_epa": 0.0,
+            "final_log_var_culture_mean": 0.0,
             "epochs_to_converge": 1,
             "trainable_parameters": 10,
             "elapsed_seconds": 0.01,
@@ -172,12 +204,15 @@ def test_prior_grid_records_oom_failure_and_continues(tmp_path, monkeypatch):
                 "epoch": [1],
                 "train_loss": [0.1],
                 "train_openai_mse": [0.1],
-                "train_epa_mse": [0.3],
+                "train_norm_epa_mse": [0.3],
+                "train_culture_mse": [0.5],
                 "validation_loss": [0.2],
                 "validation_openai_mse": [0.2],
-                "validation_epa_mse": [0.4],
+                "validation_norm_epa_mse": [0.4],
+                "validation_culture_mse": [0.6],
                 "log_var_openai": [0.0],
                 "log_var_epa": [0.0],
+                "log_var_culture_mean": [0.0],
             }
         )
 
@@ -260,7 +295,6 @@ def test_prior_grid_cli_rejects_v55_shaped_features(tmp_path):
         {
             "team_key": ["frc1"],
             "openai_narrative_vector": [[0.0] * 256],
-            "target_epa": [0.0],
         }
     ).to_parquet(features, engine="pyarrow", index=False)
 

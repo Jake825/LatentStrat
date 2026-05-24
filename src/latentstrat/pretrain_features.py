@@ -29,6 +29,46 @@ GHOST_TEAM_NARRATIVE = (
     "This is a null robot. It does not exist on the field. It scores zero points. "
     "It has no autonomous routine. It does not play defense."
 )
+FRC_FIRST_SEASON = 1992
+NORM_EPA_TARGET_COLUMNS = (
+    "norm_epa_t_minus_4",
+    "norm_epa_t_minus_3",
+    "norm_epa_t_minus_2",
+    "norm_epa_t_minus_1",
+)
+NORM_EPA_OBSERVED_COLUMNS = (
+    "norm_epa_observed_t_minus_4",
+    "norm_epa_observed_t_minus_3",
+    "norm_epa_observed_t_minus_2",
+    "norm_epa_observed_t_minus_1",
+)
+CULTURE_TARGET_COLUMNS = (
+    "raw_rookie_year_delta",
+    "raw_seasons_played",
+    "raw_total_award_count",
+    "raw_blue_banner_count",
+    "raw_championship_appearance_count",
+    "raw_championship_win_count",
+    "raw_technical_award_count",
+)
+BLUE_BANNER_AWARD_TYPES = {0, 1, 9, 10}
+TECHNICAL_AWARD_TYPES = {17, 18, 21, 29, 74}
+BLUE_BANNER_NAME_PATTERNS = (
+    "winner",
+    "chairman",
+    "impact",
+    "engineering inspiration",
+    "rookie all star",
+    "rookie all-star",
+)
+TECHNICAL_AWARD_NAME_PATTERNS = (
+    "autonomous",
+    "excellence in engineering",
+    "engineering excellence",
+    "quality",
+    "industrial design",
+    "innovation in control",
+)
 
 
 @dataclass(frozen=True)
@@ -48,9 +88,9 @@ class PriorFeatureMetadata:
     max_team_number: int
     embedding_model: str
     llm_dim: int
-    epa_source_year: int
-    epa_mean: float
-    epa_std: float
+    norm_epa_source_years: list[int]
+    norm_epa_target_names: list[str]
+    culture_target_names: list[str]
 
 
 @dataclass
@@ -412,22 +452,28 @@ def _nested_field(record: Any, path: Sequence[str], default: Any = None) -> Any:
     return value
 
 
-def extract_statbotics_total_epa(row: Any) -> float | None:
-    """Extract the prior-season total-points EPA from a Statbotics team-year row."""
+def _finite_float(value: Any) -> float | None:
+    if value is None or str(value).strip() == "":
+        return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return result if np.isfinite(result) else None
+
+
+def extract_statbotics_norm_epa(row: Any) -> float | None:
+    """Extract Statbotics' own normalized EPA from a team-year row."""
 
     candidates = [
-        _nested_field(row, ("epa", "total_points", "mean")),
-        _nested_field(row, ("epa", "breakdown", "total_points")),
-        _field(row, "epa_end"),
+        _nested_field(row, ("epa", "norm")),
+        _nested_field(row, ("norm_epa", "current")),
+        _field(row, "norm_epa_current"),
+        _field(row, "norm_epa"),
     ]
     for value in candidates:
-        if value is None or str(value).strip() == "":
-            continue
-        try:
-            result = float(value)
-        except (TypeError, ValueError):
-            continue
-        if np.isfinite(result):
+        result = _finite_float(value)
+        if result is not None:
             return result
     return None
 
@@ -444,17 +490,17 @@ def _statbotics_team_number(row: Any) -> int | None:
         return None
 
 
-def collect_prior_season_epa(
+def _collect_statbotics_team_year_rows(
     statbotics_provider: Any,
     source_year: int,
     opts: PriorOpts | None = None,
-) -> dict[int, float]:
-    """Fetch all available prior-season team EPA values from Statbotics."""
+) -> list[dict[str, Any]]:
+    """Fetch all available Statbotics team-year rows for one source year."""
 
     opts = opts or PriorOpts()
     limit = 1_000
     offset = 0
-    output: dict[int, float] = {}
+    output: list[dict[str, Any]] = []
     while True:
         try:
             page = statbotics_provider.get_team_years(
@@ -467,69 +513,192 @@ def collect_prior_season_epa(
             offset = limit
         if not page:
             break
-        for row in page:
-            team_number = _statbotics_team_number(row)
-            if team_number is None or team_number <= 0 or team_number > opts.max_team_number:
-                continue
-            epa = extract_statbotics_total_epa(row)
-            if epa is not None:
-                output[int(team_number)] = float(epa)
+        output.extend(list(page))
         if len(page) < limit:
             break
         offset += limit
     return output
 
 
-def add_epa_targets(
+def norm_epa_source_years(target_season: int, *, year_count: int = 4) -> list[int]:
+    return [int(target_season) - offset for offset in range(year_count, 0, -1)]
+
+
+def collect_norm_epa_trajectory(
+    statbotics_provider: Any,
+    target_season: int,
+    opts: PriorOpts | None = None,
+    *,
+    source_years: Sequence[int] | None = None,
+) -> dict[int, dict[int, float]]:
+    """Fetch Statbotics normalized EPA trajectories keyed by team and source year."""
+
+    opts = opts or PriorOpts()
+    years = list(source_years or norm_epa_source_years(target_season))
+    output: dict[int, dict[int, float]] = {}
+    for source_year in years:
+        for row in _collect_statbotics_team_year_rows(statbotics_provider, source_year, opts):
+            team_number = _statbotics_team_number(row)
+            if team_number is None or team_number <= 0 or team_number > opts.max_team_number:
+                continue
+            norm_epa = extract_statbotics_norm_epa(row)
+            if norm_epa is not None:
+                output.setdefault(int(team_number), {})[int(source_year)] = float(norm_epa)
+    return output
+
+
+def _is_team_recipient_award(award: Any) -> bool:
+    recipients = _field(award, "recipient_list", []) or []
+    if not recipients:
+        return True
+    return any(_field(recipient, "team_key") for recipient in recipients)
+
+
+def _award_name(award: Any) -> str:
+    return str(_field(award, "name", "") or "").lower()
+
+
+def _matches_any_name_pattern(award: Any, patterns: Sequence[str]) -> bool:
+    name = _award_name(award)
+    return any(pattern in name for pattern in patterns)
+
+
+def _is_blue_banner_award(award: Any) -> bool:
+    award_type = _field(award, "award_type")
+    return award_type in BLUE_BANNER_AWARD_TYPES or _matches_any_name_pattern(
+        award, BLUE_BANNER_NAME_PATTERNS
+    )
+
+
+def _is_technical_award(award: Any) -> bool:
+    award_type = _field(award, "award_type")
+    return award_type in TECHNICAL_AWARD_TYPES or _matches_any_name_pattern(
+        award, TECHNICAL_AWARD_NAME_PATTERNS
+    )
+
+
+def _event_by_key(events: Sequence[Any]) -> dict[str, Any]:
+    return {str(_field(event, "key", "")): event for event in events if _field(event, "key")}
+
+
+def _historical_awards(awards: Sequence[Any], target_season: int) -> list[Any]:
+    return [
+        award
+        for award in awards
+        if award_year(award) is not None
+        and int(award_year(award) or 0) < int(target_season)
+        and _is_team_recipient_award(award)
+    ]
+
+
+def _culture_values(
+    record: KnownTeamRecord | None,
+    target_season: int,
+) -> dict[str, float]:
+    if record is None:
+        return {column: 0.0 for column in CULTURE_TARGET_COLUMNS}
+    rookie_year = _finite_float(_field(record.profile, "rookie_year"))
+    rookie_delta = max(float(rookie_year) - FRC_FIRST_SEASON, 0.0) if rookie_year else 0.0
+    historical_years = _historical_years(record.years, target_season)
+    historical_awards = _historical_awards(record.awards, target_season)
+    events_by_key = _event_by_key(record.events)
+    championship_events = [
+        event
+        for event in record.events
+        if event_year(event) is not None
+        and int(event_year(event) or 0) < int(target_season)
+        and _field(event, "event_type") in {3, 4}
+    ]
+    championship_event_keys = {
+        str(_field(event, "key", "")) for event in championship_events if _field(event, "key")
+    }
+    championship_wins = 0
+    for award in historical_awards:
+        if _field(award, "award_type") != 1:
+            continue
+        event_key = str(_field(award, "event_key", "") or "")
+        event = events_by_key.get(event_key)
+        if event_key in championship_event_keys or (
+            event is not None and _field(event, "event_type") in {3, 4}
+        ):
+            championship_wins += 1
+    return {
+        "raw_rookie_year_delta": rookie_delta,
+        "raw_seasons_played": float(len(historical_years)),
+        "raw_total_award_count": float(len(historical_awards)),
+        "raw_blue_banner_count": float(
+            sum(1 for award in historical_awards if _is_blue_banner_award(award))
+        ),
+        "raw_championship_appearance_count": float(
+            len({str(_field(event, "key", "")) for event in championship_events})
+        ),
+        "raw_championship_win_count": float(championship_wins),
+        "raw_technical_award_count": float(
+            sum(1 for award in historical_awards if _is_technical_award(award))
+        ),
+    }
+
+
+def add_culture_targets(
+    table: pd.DataFrame,
+    known: Mapping[int, KnownTeamRecord],
+    target_season: int,
+) -> pd.DataFrame:
+    output = table.copy()
+    values_by_column = {column: [] for column in CULTURE_TARGET_COLUMNS}
+    for value in output["team_number"]:
+        values = _culture_values(known.get(int(value)), target_season)
+        for column in CULTURE_TARGET_COLUMNS:
+            values_by_column[column].append(float(values[column]))
+    for column, values in values_by_column.items():
+        output[column] = values
+    return output
+
+
+def add_norm_epa_trajectory_targets(
     table: pd.DataFrame,
     statbotics_provider: Any,
     target_season: int,
     opts: PriorOpts | None = None,
     *,
-    epa_source_year: int | None = None,
+    source_years: Sequence[int] | None = None,
 ) -> pd.DataFrame:
-    """Add normalized prior-season EPA targets to the V5.6 prior feature table."""
+    """Add Statbotics normalized EPA trajectory targets to the prior feature table."""
 
     opts = opts or PriorOpts()
-    source_year = int(epa_source_year or opts.epa_source_year or int(target_season) - 1)
-    epa_by_team = collect_prior_season_epa(statbotics_provider, source_year, opts)
-    finite_values = np.asarray(
-        [value for team, value in epa_by_team.items() if team > 0 and np.isfinite(value)],
-        dtype=np.float64,
+    years = list(source_years or norm_epa_source_years(target_season))
+    if len(years) != len(NORM_EPA_TARGET_COLUMNS):
+        raise ValueError(
+            f"Expected {len(NORM_EPA_TARGET_COLUMNS)} normalized EPA source years."
+        )
+    norm_epa_by_team = collect_norm_epa_trajectory(
+        statbotics_provider, target_season, opts, source_years=years
     )
-    if finite_values.size:
-        mean = float(np.mean(finite_values))
-        std = float(np.std(finite_values))
-        if not np.isfinite(std) or std <= np.finfo(float).eps:
-            std = 1.0
-    else:
-        mean = 0.0
-        std = 1.0
-    rookie_raw = mean + float(opts.epa_rookie_baseline_z) * std
     output = table.copy()
-    raw_epa: list[float] = []
-    target_epa: list[float] = []
-    imputed: list[bool] = []
-    for value in output["team_number"]:
-        team_number = int(value)
-        if team_number == 0:
-            raw = 0.0
-            is_imputed = False
-        elif team_number in epa_by_team:
-            raw = float(epa_by_team[team_number])
-            is_imputed = False
-        else:
-            raw = float(rookie_raw)
-            is_imputed = True
-        raw_epa.append(raw)
-        target_epa.append((raw - mean) / std)
-        imputed.append(is_imputed)
-    output["raw_epa"] = raw_epa
-    output["target_epa"] = target_epa
-    output["epa_source_year"] = source_year
-    output["epa_is_imputed"] = imputed
-    output["epa_mean"] = mean
-    output["epa_std"] = std
+    for column, observed_column, source_year in zip(
+        NORM_EPA_TARGET_COLUMNS,
+        NORM_EPA_OBSERVED_COLUMNS,
+        years,
+        strict=True,
+    ):
+        values = []
+        observed = []
+        for value in output["team_number"]:
+            team_number = int(value)
+            norm_epa = norm_epa_by_team.get(team_number, {}).get(int(source_year))
+            values.append(float(norm_epa) if norm_epa is not None else np.nan)
+            observed.append(bool(norm_epa is not None))
+        output[column] = values
+        output[observed_column] = observed
+    output["norm_epa_source_years"] = ",".join(str(year) for year in years)
+    observed_count = int(output[list(NORM_EPA_OBSERVED_COLUMNS)].to_numpy(dtype=bool).sum())
+    if observed_count == 0:
+        year_text = ", ".join(str(year) for year in years)
+        raise ValueError(
+            "No Statbotics normalized EPA observations were found for prior source years "
+            f"{year_text}. Expected team-year rows to expose normalized EPA at `epa.norm` "
+            "with fallbacks `norm_epa.current`, `norm_epa_current`, or numeric `norm_epa`."
+        )
     return output
 
 
@@ -735,13 +904,24 @@ def build_prior_feature_table(
 
         statbotics_provider = StatboticsProvider()
     known = known if known is not None else build_known_team_universe(provider, opts)
+    source_years = (
+        [
+            int(epa_source_year) - 3,
+            int(epa_source_year) - 2,
+            int(epa_source_year) - 1,
+            int(epa_source_year),
+        ]
+        if epa_source_year is not None
+        else norm_epa_source_years(target_season)
+    )
     table = build_prior_narratives(known, target_season, opts)
-    table = add_epa_targets(
+    table = add_culture_targets(table, known, target_season)
+    table = add_norm_epa_trajectory_targets(
         table,
         statbotics_provider,
         target_season,
         opts,
-        epa_source_year=epa_source_year,
+        source_years=source_years,
     )
     stats = EmbeddingStats()
     embeddings = embed_narratives(
@@ -763,9 +943,9 @@ def build_prior_feature_table(
         max_team_number=opts.max_team_number,
         embedding_model=opts.embedding_model,
         llm_dim=opts.llm_dim,
-        epa_source_year=int(table["epa_source_year"].iloc[0]),
-        epa_mean=float(table["epa_mean"].iloc[0]),
-        epa_std=float(table["epa_std"].iloc[0]),
+        norm_epa_source_years=source_years,
+        norm_epa_target_names=list(NORM_EPA_TARGET_COLUMNS),
+        culture_target_names=list(CULTURE_TARGET_COLUMNS),
     ).__dict__
     return table
 

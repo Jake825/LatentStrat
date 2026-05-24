@@ -9,6 +9,7 @@ from latentstrat.data import (
     apply_target_stats,
     build_season_alliance_table,
     build_season_match_table,
+    canonical_event_week_table,
     fit_target_stats,
     make_split,
     make_team_index_map,
@@ -121,6 +122,24 @@ def test_build_tables_filters_and_maps_zero_based_indices():
     assert int(match_table["red_team_1_event_idx"].iloc[0]) == 1
     assert not bool(match_table["red_team_1_missing_team_mask"].iloc[0])
     assert str(match_table["red_team_1_idx"].dtype) == "Int64"
+
+
+def test_canonical_event_week_table_bundles_week_zero_and_infers_missing():
+    metadata = pd.DataFrame(
+        {
+            "key": ["2026w0", "2026missing", "2026w2"],
+            "week": [0, np.nan, 2],
+            "start_date": ["2026-03-01", "2026-03-08", "2026-03-15"],
+        }
+    )
+
+    weeks = canonical_event_week_table(metadata)
+
+    by_key = weeks.set_index("event_key")
+    assert int(by_key.loc["2026w0", "event_week"]) == 1
+    assert int(by_key.loc["2026missing", "event_week"]) == 2
+    assert int(by_key.loc["2026w2", "event_week"]) == 3
+    assert int(by_key.loc["2026w0", "raw_event_week"]) == 0
 
 
 def test_v56_team_indexing_uses_numeric_team_number():

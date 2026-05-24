@@ -1,4 +1,21 @@
+---
+tags:
+  - latentstrat
+  - metrics
+  - model-evaluation
+aliases:
+  - "Embedding Inspection"
+  - "Latent Space Inspection"
+related:
+  - "[[metrics-and-artifacts]]"
+  - "[[model-evaluation]]"
+  - "[[prior-training]]"
+  - "[[model-architecture-reference]]"
+---
+
 # Embedding Inspection
+
+For the broader artifact guide, see [Metrics And Artifacts](metrics-and-artifacts.md).
 
 Embedding inspection is the post-training workflow for understanding the durable
 V5 `Z_base` matrix and PMA attention tables. It does not retrain the model.
@@ -11,7 +28,7 @@ controls, and feature availability.
 
 ## Entry Point
 
-For V5.6.1 prior dictionary vectors before match training, run:
+For V5.6.4 prior dictionary vectors before match training, run:
 
 ```bash
 latentstrat inspect-prior --checkpoint data/pretrained_prior_2026.pt \
@@ -19,7 +36,8 @@ latentstrat inspect-prior --checkpoint data/pretrained_prior_2026.pt \
 ```
 
 This writes prior PCA plots, cosine neighbors, sanity checks, norm histograms,
-EPA-colored PCA when prior features are supplied, and training-loss artifacts for the learned `embedding_table` rows
+normalized-EPA and cultural-color PCA views when prior features are supplied,
+and training-loss artifacts for the learned `embedding_table` rows
 `0..max_team_number`, including the learned ghost robot. A production V5.6
 checkpoint is stripped and does not
 carry the sacrificial decoder, so reconstruction MSE is intentionally `NaN`
@@ -80,3 +98,13 @@ explanations.
 Read the PMA outputs against `zero_out_diagnostics.csv`. Representation utility
 is stronger when artificially masking a specific slot to `0.0` causes a measured
 spike in validation RMSE.
+
+## Related
+
+- [Metrics and artifacts](metrics-and-artifacts.md): where embedding
+  inspection outputs fit in the artifact set.
+- [Model evaluation](model-evaluation.md): how to treat embedding evidence
+  alongside metrics and controls.
+- [Prior training](prior-training.md): source of the Day Zero embedding table.
+- [Model architecture reference](model-architecture-reference.md): exact
+  embedding table shape and tensor contracts.

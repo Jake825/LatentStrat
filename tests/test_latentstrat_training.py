@@ -155,6 +155,127 @@ def test_train_model_uses_dataloader_and_returns_diagnostics():
     assert diagnostics.compiled is False
     assert diagnostics.final_loss >= 0
     assert {"train_loss", "validation_loss"}.issubset(history.columns)
+    assert "continuous_loss" in history.columns
+    assert "continuous_precision" in history.columns
+    assert "learning_rate" in history.columns
+
+
+def test_best_validation_restore_works_without_early_stopping():
+    table = _training_table()
+    opts = default_options().model_copy(
+        update={"epochs": 2, "mini_batch_size": 4, "use_early_stopping": False}
+    )
+    split = _split(len(table))
+    stats = fit_target_stats(table, split.train_mask, opts)
+    from latentstrat.data import apply_v57_target_stats, fit_v57_target_stats
+
+    prepared = apply_v57_target_stats(
+        apply_target_stats(table, stats), fit_v57_target_stats(table, split.train_mask, opts)
+    )
+
+    _, history, diagnostics = train_model(prepared, split, opts, verbose=False)
+
+    assert len(history) == 2
+    assert diagnostics.stopped_early is False
+    assert diagnostics.best_epoch is not None
+    assert diagnostics.restored_best_validation_model is True
+
+
+def test_cosine_scheduler_records_decaying_learning_rate():
+    table = _training_table()
+    opts = default_options().model_copy(
+        update={
+            "epochs": 3,
+            "mini_batch_size": 4,
+            "use_early_stopping": False,
+            "restore_best_validation_model": False,
+            "learning_rate": 1e-3,
+            "lr_eta_min": 1e-5,
+        }
+    )
+    split = _split(len(table))
+    stats = fit_target_stats(table, split.train_mask, opts)
+    from latentstrat.data import apply_v57_target_stats, fit_v57_target_stats
+
+    prepared = apply_v57_target_stats(
+        apply_target_stats(table, stats), fit_v57_target_stats(table, split.train_mask, opts)
+    )
+
+    _, history, _ = train_model(prepared, split, opts, verbose=False)
+
+    assert history["learning_rate"].iloc[0] > history["learning_rate"].iloc[-1]
+
+
+def test_loss_log_vars_are_clamped_after_training_step():
+    table = _training_table()
+    opts = default_options().model_copy(
+        update={
+            "epochs": 1,
+            "mini_batch_size": 4,
+            "use_early_stopping": False,
+            "restore_best_validation_model": False,
+            "loss_log_var_min": -5.0,
+            "loss_log_var_max": 5.0,
+        }
+    )
+    split = _split(len(table))
+    stats = fit_target_stats(table, split.train_mask, opts)
+    from latentstrat.data import apply_v57_target_stats, fit_v57_target_stats
+
+    prepared = apply_v57_target_stats(
+        apply_target_stats(table, stats), fit_v57_target_stats(table, split.train_mask, opts)
+    )
+    model = init_model(
+        7,
+        opts.latent_dim,
+        len(opts.continuous_targets),
+        len(opts.binary_targets),
+        opts,
+    )
+    with torch.no_grad():
+        for idx, parameter in enumerate(model.loss_balancer.log_vars.values()):
+            parameter.fill_(-50.0 if idx % 2 == 0 else 50.0)
+
+    trained, _, _ = train_model(prepared, split, opts, initial_model=model, verbose=False)
+
+    for parameter in trained.loss_balancer.log_vars.values():
+        value = float(parameter.detach())
+        assert value >= opts.loss_log_var_min
+        assert value <= opts.loss_log_var_max
+        assert torch.isfinite(torch.exp(-parameter))
+
+
+class _FakeWriter:
+    def __init__(self):
+        self.scalars = []
+
+    def add_scalar(self, tag, value, step):
+        self.scalars.append((tag, float(value), int(step)))
+
+
+def test_train_model_writes_tensorboard_task_scalars():
+    table = _training_table()
+    opts = default_options().model_copy(
+        update={"epochs": 1, "mini_batch_size": 4, "use_early_stopping": False}
+    )
+    split = _split(len(table))
+    stats = fit_target_stats(table, split.train_mask, opts)
+    from latentstrat.data import apply_v57_target_stats, fit_v57_target_stats
+
+    prepared = apply_v57_target_stats(
+        apply_target_stats(table, stats), fit_v57_target_stats(table, split.train_mask, opts)
+    )
+    writer = _FakeWriter()
+
+    train_model(prepared, split, opts, verbose=False, tensorboard_writer=writer)
+
+    tags = {tag for tag, _, _ in writer.scalars}
+    assert "Loss/Train_Total" in tags
+    assert "LossRaw/continuous" in tags
+    assert "LossRaw/atomic" in tags
+    assert "LogVar/continuous" in tags
+    assert "Weights/continuous_precision" in tags
+    assert "LR/base" in tags
 
 
 def test_evaluation_runs_under_inference_mode_without_gradients():

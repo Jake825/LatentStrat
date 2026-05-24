@@ -8,9 +8,12 @@ PMA attention artifacts can help explain which team embeddings influenced pooled
 
 ## Zero-Out Diagnostics
 
-Zero-out diagnostics evaluate how outputs change when one team slot is masked. Use these as sensitivity checks for model behavior and evidence packets.
+Zero-out diagnostics evaluate how outputs change when one team slot is masked.
+Use these as sensitivity checks for model behavior and evidence packets.
 
-Remember that `zero_slot` is diagnostic only. It does not mean the model can train on incomplete alliances.
+Remember that `zero_slot` is diagnostic only. Normal missing robot slots are
+routed through learned ghost base row `0` plus null event row `0`, and those
+slots remain visible to attention.
 
 ## Embeddings
 

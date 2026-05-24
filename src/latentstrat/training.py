@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import math
 import sys
 import warnings
 from copy import deepcopy
 from dataclasses import dataclass
 from itertools import cycle
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -61,6 +63,21 @@ class TrainingDiagnostics:
     device: str
     amp_enabled: bool
     compiled: bool
+
+
+TASK_NAMES = (
+    "continuous",
+    "win",
+    "endgame",
+    "awards",
+    "atomic",
+    "foul",
+    "bonus",
+    "special",
+    "rank",
+    "playoff",
+    "selection",
+)
 
 
 class MatchTensorDataset(Dataset):
@@ -680,6 +697,33 @@ def create_optimizer(model: SetTransformerModel, opts: LatentStratOptions) -> to
     return torch.optim.AdamW(optimizer_parameter_groups(model, opts), lr=opts.learning_rate)
 
 
+def create_lr_scheduler(
+    optimizer: torch.optim.Optimizer, opts: LatentStratOptions
+) -> torch.optim.lr_scheduler.CosineAnnealingLR | None:
+    if not opts.use_lr_scheduler:
+        return None
+    return torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=max(int(opts.epochs), 1),
+        eta_min=float(opts.lr_eta_min),
+    )
+
+
+def clamp_loss_log_vars(model: SetTransformerModel, opts: LatentStratOptions) -> None:
+    model.loss_balancer.clamp_(opts.loss_log_var_min, opts.loss_log_var_max)
+
+
+def create_tensorboard_writer(log_dir: str) -> Any:
+    try:
+        from torch.utils.tensorboard import SummaryWriter
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "TensorBoard logging is enabled, but tensorboard is not installed. "
+            'Run `pip install -e ".[dev]"` or pass `--no-tensorboard`.'
+        ) from exc
+    return SummaryWriter(str(log_dir))
+
+
 def freeze_for_venue_mode(model: SetTransformerModel) -> None:
     for parameter in model.parameters():
         parameter.requires_grad = False
@@ -783,6 +827,73 @@ def _selection_loss_from_batch(
     )
 
 
+def _metrics_to_losses(metrics: LossMetrics) -> dict[str, float]:
+    return {
+        "continuous": metrics.continuous_loss,
+        "win": metrics.binary_loss,
+        "endgame": metrics.endgame_loss,
+        "awards": metrics.award_loss,
+        "atomic": metrics.atomic_loss,
+        "foul": metrics.foul_loss,
+        "bonus": metrics.bonus_loss,
+        "special": metrics.special_loss,
+    }
+
+
+def _empty_epoch_accumulators() -> tuple[dict[str, float], dict[str, float]]:
+    return ({name: 0.0 for name in TASK_NAMES}, {name: 0.0 for name in TASK_NAMES})
+
+
+def _accumulate_loss(
+    sums: dict[str, float],
+    weights: dict[str, float],
+    task_name: str,
+    loss_value: float,
+    weight: float,
+) -> None:
+    if not math.isfinite(loss_value) or weight <= 0:
+        return
+    sums[task_name] += float(loss_value) * float(weight)
+    weights[task_name] += float(weight)
+
+
+def _epoch_task_means(sums: dict[str, float], weights: dict[str, float]) -> dict[str, float]:
+    return {
+        name: (sums[name] / weights[name] if weights[name] > 0 else math.nan)
+        for name in TASK_NAMES
+    }
+
+
+def _write_feature_tensorboard_epoch(
+    writer: Any,
+    *,
+    model: SetTransformerModel,
+    row: dict[str, float | int],
+    task_means: dict[str, float],
+    active_sidecars: set[str],
+) -> None:
+    epoch = int(row["epoch"])
+    writer.add_scalar("Loss/Train_Total", float(row["train_loss"]), epoch)
+    validation = float(row["validation_loss"])
+    if math.isfinite(validation):
+        writer.add_scalar("Loss/Validation_Total", validation, epoch)
+    learning_rate = float(row.get("learning_rate", math.nan))
+    if math.isfinite(learning_rate):
+        writer.add_scalar("LR/base", learning_rate, epoch)
+    for task_name, value in task_means.items():
+        if math.isfinite(value):
+            writer.add_scalar(f"LossRaw/{task_name}", value, epoch)
+        writer.add_scalar(
+            f"Active/{task_name}",
+            1.0 if (math.isfinite(value) or task_name in active_sidecars) else 0.0,
+            epoch,
+        )
+    for task_name, parameter in model.loss_balancer.log_vars.items():
+        log_var = float(parameter.detach().cpu())
+        writer.add_scalar(f"LogVar/{task_name}", log_var, epoch)
+        writer.add_scalar(f"Weights/{task_name}_precision", math.exp(-log_var), epoch)
+
+
 def _sidecar_loader(
     dataset: Dataset | None,
     opts: LatentStratOptions,
@@ -867,6 +978,7 @@ def train_model(
     verbose: bool = True,
     venue_mode: bool = False,
     sidecar_tables: dict[str, pd.DataFrame] | None = None,
+    tensorboard_writer: Any | None = None,
 ) -> tuple[SetTransformerModel, pd.DataFrame, TrainingDiagnostics]:
     opts = opts or default_options()
     device = resolve_device(opts.device)
@@ -896,6 +1008,7 @@ def train_model(
     amp_enabled = resolve_amp_enabled(opts, device)
     forward_model, compiled = compile_forward_model(model, opts, device)
     optimizer = create_optimizer(model, opts)
+    scheduler = create_lr_scheduler(optimizer, opts)
     scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
 
     generator = torch.Generator()
@@ -930,13 +1043,20 @@ def train_model(
     for epoch in range(1, opts.epochs + 1):
         model.train()
         forward_model.train()
+        epoch_learning_rate = float(optimizer.param_groups[0]["lr"])
+        task_sums, task_weights = _empty_epoch_accumulators()
         for batch in train_loader:
             batch = batch_to_device(batch, device)
             optimizer.zero_grad(set_to_none=True)
             with torch.amp.autocast(device_type="cuda", enabled=amp_enabled):
-                loss, _, _ = _loss_from_batch(
+                loss, metrics, _ = _loss_from_batch(
                     model, batch, opts, positive_weights, forward_model
                 )
+                batch_rows = int(batch[0].shape[0])
+                for task_name, loss_value in _metrics_to_losses(metrics).items():
+                    _accumulate_loss(
+                        task_sums, task_weights, task_name, loss_value, batch_rows
+                    )
                 for name, iterator in sidecar_iters.items():
                     sidecar_batch = batch_to_device(next(iterator), device)
                     if name == "rank":
@@ -947,10 +1067,18 @@ def train_model(
                         raw_loss = _selection_loss_from_batch(model, sidecar_batch, opts)
                     else:
                         continue
+                    _accumulate_loss(
+                        task_sums,
+                        task_weights,
+                        name,
+                        float(raw_loss.detach().cpu()),
+                        int(sidecar_batch[0].shape[0]),
+                    )
                     loss = loss + model.balance_loss(name, raw_loss, True)
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
+            clamp_loss_log_vars(model, opts)
             iteration += 1
 
         train_loss = evaluate_loss(
@@ -973,12 +1101,33 @@ def train_model(
                 forward_model=forward_model,
                 amp_enabled=amp_enabled,
             )
-        rows.append({"epoch": epoch, "train_loss": train_loss, "validation_loss": validation_loss})
+        task_means = _epoch_task_means(task_sums, task_weights)
+        row = {
+            "epoch": epoch,
+            "train_loss": train_loss,
+            "validation_loss": validation_loss,
+            "learning_rate": epoch_learning_rate,
+        }
+        for task_name, value in task_means.items():
+            row[f"{task_name}_loss"] = value
+        for task_name, parameter in model.loss_balancer.log_vars.items():
+            log_var = float(parameter.detach().cpu())
+            row[f"{task_name}_log_var"] = log_var
+            row[f"{task_name}_precision"] = math.exp(-log_var)
+        rows.append(row)
+        if tensorboard_writer is not None:
+            _write_feature_tensorboard_epoch(
+                tensorboard_writer,
+                model=model,
+                row=row,
+                task_means=task_means,
+                active_sidecars=set(sidecar_loaders),
+            )
 
         if verbose and (epoch == 1 or epoch == opts.epochs or epoch % 25 == 0):
             print(f"Epoch {epoch}/{opts.epochs}: train loss {train_loss:.4f}")
 
-        if opts.use_early_stopping and len(validation_rows):
+        if len(validation_rows) and np.isfinite(validation_loss):
             if validation_loss < best_validation - opts.early_stopping_min_delta:
                 best_validation = float(validation_loss)
                 best_epoch = epoch
@@ -986,9 +1135,14 @@ def train_model(
                 patience_counter = 0
             else:
                 patience_counter += 1
-                stopped = patience_counter >= opts.early_stopping_patience
+                stopped = (
+                    opts.use_early_stopping
+                    and patience_counter >= opts.early_stopping_patience
+                )
                 if stopped:
                     break
+        if scheduler is not None:
+            scheduler.step()
 
     restored = False
     if opts.restore_best_validation_model and best_model is not None:

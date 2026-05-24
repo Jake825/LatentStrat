@@ -1,4 +1,22 @@
+---
+tags:
+  - latentstrat
+  - model-evaluation
+  - metrics
+aliases:
+  - "Model Evaluation"
+  - "Evaluation Guide"
+related:
+  - "[[metrics-and-artifacts]]"
+  - "[[experiment-ledger]]"
+  - "[[embedding-inspection]]"
+  - "[[model-selection]]"
+---
+
 # Model Evaluation
+
+For a student-friendly guide to the output files, start with
+[Metrics And Artifacts](metrics-and-artifacts.md).
 
 LatentStrat evaluation should answer whether the model produces useful,
 calibrated predictions and interpretable learned representations. Raw accuracy
@@ -73,14 +91,68 @@ Current implemented baselines are:
 - Mean baselines.
 - Ridge match-OPR baselines.
 
+The mean baseline predicts the train-split mean for continuous targets. It is a
+sanity floor: a useful model should beat it on validation rows.
+
+The ridge match-OPR baseline builds a sparse team/alliance design matrix from
+the match table and fits `sklearn.linear_model.Ridge` with no intercept. It is
+a linear team-contribution baseline, not a nonlinear interaction model.
+
 Do not describe Statbotics as an implemented baseline unless runtime code is
 added for that integration. Statbotics can still be used as an external
 comparison if the endpoint, field timing, and join keys are defined explicitly.
 
-Evidence packets also compare the model with controls such as shuffled team
-slots and null-label controls. Treat gains with suspicion if they disappear
-against controls, only appear in tiny slices, or rely on features that were not
-available at prediction time.
+LatentStrat's V5.8 walk-forward reports are designed to speak the same
+bias-variance language used by FRC linear models. OPR is a low-bias,
+high-variance linear estimate; EPA is a historical biased anchor; pRidge is a
+linear prior-regularized compromise. LatentStrat uses the V5.6.4 Day Zero
+embedding as its prior anchor, then learns nonlinear alliance interactions
+through the Set Transformer. The current implementation exports comparable
+LatentStrat metrics, but it does not yet implement Statbotics EPA or pRidge
+baselines inside the repo.
+
+For common next-match reporting, use:
+
+- **Next-match phase score MSE**: MSE over red and blue predicted
+  `auto_pts + teleop_pts`.
+- **Next-match total score MSE**: MSE against FMS totals when total-score and
+  committed-foul targets are available.
+- **Match accuracy**: whether `p_red_win >= 0.5` matches the `red_win` label.
+- **Win Brier score** and **win log loss**: probability-quality metrics for
+  `p_red_win`. Blue win probability is `1 - p_red_win`.
+
+## Evidence Packets And Controls
+
+`build-evidence-packet` groups model metrics, baselines, shuffled controls,
+null-label controls, availability slices, and embedding diagnostics into one
+review packet.
+
+Use controls to catch false progress:
+
+- A shuffled-team control should damage performance if the model is really
+  using team identity.
+- A shuffled-target or null-label control should fail to produce meaningful
+  validation signal.
+- Availability slices should show whether a gain only appears in rows with an
+  optional source such as scouting data.
+
+Treat gains with suspicion if they disappear against controls, only appear in
+tiny slices, or rely on features that were not available at prediction time.
+
+## Calibration Review
+
+Calibration asks whether predicted probabilities match observed frequencies.
+For example, matches predicted around 70 percent red win probability should
+have red win about 70 percent of the time over a sufficiently populated bin.
+
+When reviewing calibration:
+
+- Check Brier score and log loss before celebrating raw accuracy.
+- Inspect calibration bins and bin counts; sparse bins are weak evidence.
+- Watch for long-run overconfidence: accuracy can improve while log loss gets
+  worse.
+- Report probability orientation clearly. LatentStrat reports `p_red_win`; blue
+  win probability is `1 - p_red_win`.
 
 ## Attention And Zero-Out Diagnostics
 
@@ -116,3 +188,13 @@ Before claiming a model or feature change improved LatentStrat:
 - Review shuffled/null controls when available.
 - Check availability slices for optional scouting or enrichment features.
 - Confirm feature timing with the intended prediction point.
+
+## Related
+
+- [Metrics and artifacts](metrics-and-artifacts.md): common metric definitions
+  and local artifact examples.
+- [Experiment ledger](experiment-ledger.md): run-by-run evidence and design
+  lessons.
+- [Embedding inspection](embedding-inspection.md): latent-space diagnostics.
+- [Model selection](model-selection.md): model comparison discipline.
+- [Season training](season-training.md): walk-forward validation context.

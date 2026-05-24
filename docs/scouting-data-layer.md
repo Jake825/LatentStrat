@@ -1,3 +1,16 @@
+---
+tags:
+  - latentstrat
+  - scouting-data
+aliases:
+  - "Scouting Data Layer"
+  - "Scouting SQLite Layer"
+related:
+  - "[[scouting-data-ingestion]]"
+  - "[[feature-pipeline]]"
+  - "[[data-sources]]"
+---
+
 # Scouting Data Layer
 
 LatentStrat uses SQLite and SQLModel for transactional scouting data. This layer
