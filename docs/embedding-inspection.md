@@ -17,14 +17,9 @@ related:
 
 For the broader artifact guide, see [Metrics And Artifacts](metrics-and-artifacts.md).
 
-Embedding inspection is the post-training workflow for understanding the durable
-V5 `Z_base` matrix and PMA attention tables. It does not retrain the model.
-`Z_event` is venue-specific and ephemeral, so event deltas are exported as
-separate diagnostics rather than used for the main PCA/neighbors tables.
+Embedding inspection is the post-training workflow for understanding the durable V5 `Z_base` matrix and PMA attention tables. It does not retrain the model. `Z_event` is venue-specific and ephemeral, so event deltas are exported as separate diagnostics rather than used for the main PCA/neighbors tables.
 
-Read embedding outputs alongside the broader guidance in
-[Model Evaluation](model-evaluation.md), especially calibration, baselines,
-controls, and feature availability.
+Read embedding outputs alongside the broader guidance in [Model Evaluation](model-evaluation.md), especially calibration, baselines, controls, and feature availability.
 
 ## Entry Point
 
@@ -35,13 +30,7 @@ latentstrat inspect-prior --checkpoint data/pretrained_prior_2026.pt \
   --output artifacts/prior_2026
 ```
 
-This writes prior PCA plots, cosine neighbors, sanity checks, norm histograms,
-normalized-EPA and cultural-color PCA views when prior features are supplied,
-and training-loss artifacts for the learned `embedding_table` rows
-`0..max_team_number`, including the learned ghost robot. A production V5.6
-checkpoint is stripped and does not
-carry the sacrificial decoder, so reconstruction MSE is intentionally `NaN`
-unless an older full-model checkpoint is inspected with `--features`.
+This writes prior PCA plots, cosine neighbors, sanity checks, norm histograms, normalized-EPA and cultural-color PCA views when prior features are supplied, and training-loss artifacts for the learned `embedding_table` rows `0..max_team_number`, including the learned ghost robot. A production V5.6 checkpoint is stripped and does not carry the sacrificial decoder, so reconstruction MSE is intentionally `NaN` unless an older full-model checkpoint is inspected with `--features`.
 
 For V5 `Z_base` after match training, run:
 
@@ -53,9 +42,7 @@ Outputs are written as `.csv` files under `artifacts/inspection/`.
 
 ## Team Embedding Table
 
-The `team_embeddings.csv` file extracts raw `Z_base` vectors for real team
-indices starting at `1` and joins them with team-perspective analytics,
-including:
+The `team_embeddings.csv` file extracts raw `Z_base` vectors for real team indices starting at `1` and joins them with team-perspective analytics, including:
 
 - `team_key` and `team_index`.
 - The raw embedding vector and its L2 norm.
@@ -77,34 +64,19 @@ These are quality gates for mathematical interpretation, not validation metrics.
 
 ## Cosine Neighbors And Archetypes
 
-Cosine-neighbor tables (`nearest_neighbors.csv`) calculate the distance between
-normalized embedding rows using dot products. Similar teams should have similar
-observed target profiles more often than random teams with matching match
-counts.
+Cosine-neighbor tables (`nearest_neighbors.csv`) calculate the distance between normalized embedding rows using dot products. Similar teams should have similar observed target profiles more often than random teams with matching match counts.
 
-Archetype reports (`archetype_similarity.csv`) are data-derived. The pipeline
-finds the top teams for statistical metrics such as `high_win_rate`, averages
-their normalized embeddings to create a prototype vector, and reports the cosine
-similarity of all other teams to that prototype. They are not hand-labeled claims
-about team reputation.
+Archetype reports (`archetype_similarity.csv`) are data-derived. The pipeline finds the top teams for statistical metrics such as `high_win_rate`, averages their normalized embeddings to create a prototype vector, and reports the cosine similarity of all other teams to that prototype. They are not hand-labeled claims about team reputation.
 
 ## PMA Attention And Zero-Out Diagnostics
 
-PMA weights describe how the learned pooling seed summarized a contextualized
-alliance block prior to prediction. Missing slots are routed to the learned
-ghost row and remain visible to attention. They are not literal causal
-explanations.
+PMA weights describe how the learned pooling seed summarized a contextualized alliance block prior to prediction. Missing slots are routed to the learned ghost row and remain visible to attention. They are not literal causal explanations.
 
-Read the PMA outputs against `zero_out_diagnostics.csv`. Representation utility
-is stronger when artificially masking a specific slot to `0.0` causes a measured
-spike in validation RMSE.
+Read the PMA outputs against `zero_out_diagnostics.csv`. Representation utility is stronger when artificially masking a specific slot to `0.0` causes a measured spike in validation RMSE.
 
 ## Related
 
-- [Metrics and artifacts](metrics-and-artifacts.md): where embedding
-  inspection outputs fit in the artifact set.
-- [Model evaluation](model-evaluation.md): how to treat embedding evidence
-  alongside metrics and controls.
+- [Metrics and artifacts](metrics-and-artifacts.md): where embedding inspection outputs fit in the artifact set.
+- [Model evaluation](model-evaluation.md): how to treat embedding evidence alongside metrics and controls.
 - [Prior training](prior-training.md): source of the Day Zero embedding table.
-- [Model architecture reference](model-architecture-reference.md): exact
-  embedding table shape and tensor contracts.
+- [Model architecture reference](model-architecture-reference.md): exact embedding table shape and tensor contracts.

@@ -14,12 +14,9 @@ related:
 
 # Rebuild LatentStrat From Scratch
 
-This page is the practical rebuild checklist. It assumes a Windows PowerShell
-environment, but the commands are standard CLI commands where possible.
+This page is the practical rebuild checklist. It assumes a Windows PowerShell environment, but the commands are standard CLI commands where possible.
 
-If you are rebuilding an older experiment state, first check the
-[Changelog](changelog.md) for the nearest Git commit and the
-[Experiment Ledger](experiment-ledger.md) for the artifact-era context.
+If you are rebuilding an older experiment state, first check the [Changelog](changelog.md) for the nearest Git commit and the [Experiment Ledger](experiment-ledger.md) for the artifact-era context.
 
 ## 1. Install
 
@@ -56,8 +53,7 @@ Do not paste real keys into docs, screenshots, commits, or transcripts.
 
 ## 3. Build The Prior Feature Table
 
-The prior feature table is the offline training set for Day Zero team
-identities.
+The prior feature table is the offline training set for Day Zero team identities.
 
 ```powershell
 latentstrat build-prior-features `
@@ -74,9 +70,7 @@ Expected output:
 - Raw cultural target columns.
 - Cached OpenAI embeddings under `data/prior_cache/`.
 
-If the command fails with zero observed normalized EPA values, inspect the
-Statbotics extraction path and rebuild. V5.6.4 training expects usable
-normalized EPA trajectory columns.
+If the command fails with zero observed normalized EPA values, inspect the Statbotics extraction path and rebuild. V5.6.4 training expects usable normalized EPA trajectory columns.
 
 ## 4. Train The Prior
 
@@ -103,8 +97,7 @@ Expected output:
 artifacts/prior_v564_latent16/checkpoint.pt
 ```
 
-The checkpoint should contain a stripped embedding table, not the sacrificial
-decoder.
+The checkpoint should contain a stripped embedding table, not the sacrificial decoder.
 
 ## 5. Inspect The Prior
 
@@ -140,8 +133,7 @@ data/v58_sidecars_2026/selections_2026.parquet
 data/v58_sidecars_2026/playoffs_2026.parquet
 ```
 
-The feature table should include canonical `event_week` values for
-walk-forward validation.
+The feature table should include canonical `event_week` values for walk-forward validation.
 
 ## 7. Train A Full-Season Model
 
@@ -228,8 +220,7 @@ Do not stage:
 
 ### OpenAI Calls Are Slow
 
-The first prior build can take time because uncached narratives need embeddings.
-Reruns should mostly hit the SQLite embedding cache.
+The first prior build can take time because uncached narratives need embeddings. Reruns should mostly hit the SQLite embedding cache.
 
 ### Prior Training Rejects Feature Table
 
@@ -243,15 +234,12 @@ Rebuild prior features if the table is V5.6.1 or older.
 
 ### Team Number Out Of Bounds
 
-If a team number is above the prior checkpoint cap, rebuild the prior with a
-larger `--max-team-number`.
+If a team number is above the prior checkpoint cap, rebuild the prior with a larger `--max-team-number`.
 
 ### Walk-Forward Has No Folds
 
-Check that the feature table has finite canonical `event_week` values and at
-least two distinct weeks.
+Check that the feature table has finite canonical `event_week` values and at least two distinct weeks.
 
 ### Metrics Look Better But Calibration Gets Worse
 
-Check Brier score and log loss, not only accuracy. A model can pick winners
-more often while being too confident when wrong.
+Check Brier score and log loss, not only accuracy. A model can pick winners more often while being too confident when wrong.

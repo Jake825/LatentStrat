@@ -14,11 +14,7 @@ related:
 
 # Model Architecture Reference
 
-This page records the exact V5.6.4/V5.8 model shapes, parameter sizes, and
-loss equations used by the current LatentStrat code. It is intended as the
-technical companion to the more readable [Model Structure](model-structure.md),
-[Prior Training](prior-training.md), and [Season Training](season-training.md)
-pages.
+This page records the exact V5.6.4/V5.8 model shapes, parameter sizes, and loss equations used by the current LatentStrat code. It is intended as the technical companion to the more readable [Model Structure](model-structure.md), [Prior Training](prior-training.md), and [Season Training](season-training.md) pages.
 
 The values below were checked against:
 
@@ -46,15 +42,11 @@ The values below were checked against:
 | Season training epochs | `200` | `LatentStratOptions.epochs` |
 | Loss log-var clamp | `[-5.0, 5.0]` | `LatentStratOptions.loss_log_var_min/max` |
 
-If `latent_dim` changes, every `[16]` latent shape in this page scales with
-that value. The output target dimensions stay fixed unless the feature schema
-changes.
+If `latent_dim` changes, every `[16]` latent shape in this page scales with that value. The output target dimensions stay fixed unless the feature schema changes.
 
 ## V5.6.4 Prior Model
 
-The prior model is a training-only coordinate map. It learns a table of team
-vectors and uses sacrificial decoder heads to force those vectors to explain
-narrative, normalized EPA trajectory, and cultural history targets.
+The prior model is a training-only coordinate map. It learns a table of team vectors and uses sacrificial decoder heads to force those vectors to explain narrative, normalized EPA trajectory, and cultural history targets.
 
 ### Prior Layers
 
@@ -76,15 +68,13 @@ The decoder trunk is:
 16 -> Linear(256) -> GELU -> Linear(512) -> GELU -> Linear(512) -> GELU
 ```
 
-The exported production checkpoint strips every decoder, head, and log-var
-parameter. It keeps only:
+The exported production checkpoint strips every decoder, head, and log-var parameter. It keeps only:
 
 ```text
 embedding_table: [12501, 16]
 ```
 
-That table contains `200,016` FP32 values, or `800,064` bytes, about
-`0.76 MiB` before metadata and serialization overhead.
+That table contains `200,016` FP32 values, or `800,064` bytes, about `0.76 MiB` before metadata and serialization overhead.
 
 ### Prior Forward Shapes
 
@@ -109,44 +99,23 @@ pred_openai, pred_norm_epa, pred_culture, z_latent = model(team_number)
 
 The OpenAI loss is a per-team vector squared distance, not per-element MSE:
 
-$$
-L_{openai} =
-\frac{1}{B}
-\sum_{b=1}^{B}
-\sum_{j=1}^{256}
-(\hat{x}_{b,j} - x_{b,j})^2
-$$
+$$ L_{openai} = \frac{1}{B} \sum_{b=1}^{B} \sum_{j=1}^{256} (\hat{x}_{b,j} - x_{b,j})^2 $$
 
-The normalized EPA trajectory is one grouped 4D task. Missing team-years are
-masked. With observed mask `m` and valid count `C = sum(m)`:
+The normalized EPA trajectory is one grouped 4D task. Missing team-years are masked. With observed mask `m` and valid count `C = sum(m)`:
 
-$$
-L_{epa} =
-\left(
-\frac{\sum m_{b,j}(\hat{e}_{b,j} - e_{b,j})^2}{\max(C, 1)}
-\right) \cdot 4
-$$
+$$ L_{epa} = \left( \frac{\sum m_{b,j}(\hat{e}_{b,j} - e_{b,j})^2}{\max(C, 1)} \right) \cdot 4 $$
 
-If `C == 0` for a batch, the EPA task contributes no loss and no log-var term
-for that batch.
+If `C == 0` for a batch, the EPA task contributes no loss and no log-var term for that batch.
 
 Culture is seven raw, unnormalized scalar targets. Each axis has its own MSE:
 
-$$
-L_{culture,i} =
-\frac{1}{B}
-\sum_{b=1}^{B}
-(\hat{c}_{b,i} - c_{b,i})^2
-$$
+$$ L_{culture,i} = \frac{1}{B} \sum_{b=1}^{B} (\hat{c}_{b,i} - c_{b,i})^2 $$
 
 Homoscedastic balancing is applied as:
 
-$$
-L_t^{balanced} = \exp(-s_t)L_t + s_t
-$$
+$$ L_t^{balanced} = \exp(-s_t)L_t + s_t $$
 
-For prior training, `s_openai` and `s_epa` are scalars. `s_culture` is a
-7-element vector, one value per culture target.
+For prior training, `s_openai` and `s_epa` are scalars. `s_culture` is a 7-element vector, one value per culture target.
 
 ## Season Model Embeddings
 
@@ -167,12 +136,9 @@ With the standard V5.6.4 prior cap, `Z_base` has at least:
 12501 * 16 = 200,016 parameters
 ```
 
-`Z_event` is variable-sized because it depends on the loaded feature table.
-Event row `0` is the null delta. Missing slots still use the learned ghost base
-row `0`, but `Z_event[0]` contributes no event-local movement.
+`Z_event` is variable-sized because it depends on the loaded feature table. Event row `0` is the null delta. Missing slots still use the learned ghost base row `0`, but `Z_event[0]` contributes no event-local movement.
 
-The season non-embedding core is about `9.4k` trainable parameters, plus
-`Z_base` and variable-size `Z_event`.
+The season non-embedding core is about `9.4k` trainable parameters, plus `Z_base` and variable-size `Z_event`.
 
 ## Set Transformer Tensor Shapes
 
@@ -226,9 +192,7 @@ The instantiated blocks are:
 | Cross-alliance `CROSS` | `1,696` |
 | PMA pooling block and seed | `1,712` |
 
-Missing slots and random team dropout route slots to base row `0` and event
-row `0`. The current model does not attention-mask these ghost slots; it keeps
-all three alliance slots visible.
+Missing slots and random team dropout route slots to base row `0` and event row `0`. The current model does not attention-mask these ghost slots; it keeps all three alliance slots visible.
 
 ## Season Model Heads
 
@@ -253,52 +217,35 @@ The continuous phase output order follows the configured continuous targets:
 red_auto_pts, red_teleop_pts, blue_auto_pts, blue_teleop_pts
 ```
 
-The atomic, foul, bonus, and special heads each produce red outputs followed by
-blue outputs for the configured target groups.
+The atomic, foul, bonus, and special heads each produce red outputs followed by blue outputs for the configured target groups.
 
-Binary heads output raw logits. Training uses masked `BCEWithLogitsLoss`; the
-model does not apply sigmoid inside the forward pass.
+Binary heads output raw logits. Training uses masked `BCEWithLogitsLoss`; the model does not apply sigmoid inside the forward pass.
 
 ## Season Loss Math
 
-All match-spine and sidecar task losses pass through the same homoscedastic
-balancer:
+All match-spine and sidecar task losses pass through the same homoscedastic balancer:
 
-$$
-L^{balanced} = \sum_{t \in active}
-\left(\exp(-s_t)L_t + s_t\right)
-$$
+$$ L^{balanced} = \sum_{t \in active} \left(\exp(-s_t)L_t + s_t\right) $$
 
 After each optimizer step, task log variances are clamped:
 
-$$
--5 \le s_t \le 5
-$$
+$$ -5 \le s_t \le 5 $$
 
 The maximum precision weight is therefore:
 
-$$
-\exp(5) \approx 148.4
-$$
+$$ \exp(5) \approx 148.4 $$
 
 ### Continuous And Count Targets
 
-Continuous, atomic, and foul losses are masked MSE losses. Missing target values
-remain `NaN` in the feature table and are ignored at loss time:
+Continuous, atomic, and foul losses are masked MSE losses. Missing target values remain `NaN` in the feature table and are ignored at loss time:
 
-$$
-L_{mse} =
-\frac{\sum m_i(\hat{y}_i - y_i)^2}{\max(\sum m_i, 1)}
-$$
+$$ L_{mse} = \frac{\sum m_i(\hat{y}_i - y_i)^2}{\max(\sum m_i, 1)} $$
 
 ### Binary Targets
 
-Win, bonus, special, and award targets use logits and masked binary
-cross-entropy. Conceptually:
+Win, bonus, special, and award targets use logits and masked binary cross-entropy. Conceptually:
 
-$$
-L_{bce} = BCEWithLogits(\hat{l}, y)
-$$
+$$ L_{bce} = BCEWithLogits(\hat{l}, y) $$
 
 where entries with missing labels are removed before reduction.
 
@@ -320,29 +267,19 @@ With four classes, each slot emits three cumulative logits:
 
 Qualification and playoff ordering use margin ranking losses:
 
-$$
-L_{rank} = \max(0, margin - (score_{better} - score_{worse}))
-$$
+$$ L_{rank} = \max(0, margin - (score_{better} - score_{worse})) $$
 
 Alliance selection uses a triplet loss:
 
-$$
-L_{triplet} =
-\max(0, d(captain, pick) - d(captain, passed\_over) + margin)
-$$
+$$ L_{triplet} = \max(0, d(captain, pick) - d(captain, passed\_over) + margin) $$
 
-Sidecar loaders are optional. Empty or missing sidecars make their task
-inactive instead of producing dummy losses.
+Sidecar loaders are optional. Empty or missing sidecars make their task inactive instead of producing dummy losses.
 
 ### Embedding Regularization
 
-The optimizer excludes embeddings from global AdamW decay. Embeddings use
-active-row L2 penalties instead, so only rows touched by a batch are pulled
-toward zero.
+The optimizer excludes embeddings from global AdamW decay. Embeddings use active-row L2 penalties instead, so only rows touched by a batch are pulled toward zero.
 
-`Z_base` active-row L2 includes row `0`, because the ghost robot is a learned
-live prior row. `Z_event` active-row L2 excludes row `0`, because event row `0`
-is the null delta.
+`Z_base` active-row L2 includes row `0`, because the ghost robot is a learned live prior row. `Z_event` active-row L2 excludes row `0`, because event row `0` is the null delta.
 
 ## Consolidation Math
 
@@ -360,67 +297,40 @@ concat(Z_base, Z_event, delta_weeks): [33]
 MLP: 33 -> 64 -> 16
 ```
 
-`delta_weeks` is included because evidence from a recent event should not
-necessarily be trusted the same way as evidence from an older event.
+`delta_weeks` is included because evidence from a recent event should not necessarily be trusted the same way as evidence from an older event.
 
 ## Reporting Metrics
 
 LatentStrat reports red-win probability:
 
-$$
-p_{red} = sigmoid(red\_win\_logit)
-$$
+$$ p_{red} = sigmoid(red\_win\_logit) $$
 
 Match accuracy:
 
-$$
-accuracy =
-\frac{1}{N}
-\sum_{i=1}^{N}
-1[(p_{red,i} \ge 0.5) = red\_win_i]
-$$
+$$ accuracy = \frac{1}{N} \sum_{i=1}^{N} 1[(p_{red,i} \ge 0.5) = red\_win_i] $$
 
 Brier score:
 
-$$
-Brier =
-\frac{1}{N}
-\sum_{i=1}^{N}
-(p_{red,i} - red\_win_i)^2
-$$
+$$ Brier = \frac{1}{N} \sum_{i=1}^{N} (p_{red,i} - red\_win_i)^2 $$
 
 Binary log loss:
 
-$$
-LogLoss =
--\frac{1}{N}
-\sum_{i=1}^{N}
-\left[
-y_i\log(p_i) + (1-y_i)\log(1-p_i)
-\right]
-$$
+$$ LogLoss = -\frac{1}{N} \sum_{i=1}^{N} \left[ y_i\log(p_i) + (1-y_i)\log(1-p_i) \right] $$
 
-Phase score MSE compares predicted `auto + teleop` points against actual
-`auto + teleop` points for both alliances.
+Phase score MSE compares predicted `auto + teleop` points against actual `auto + teleop` points for both alliances.
 
-Total score MSE uses the V5.7 foul inversion direction. A team's FMS total
-includes points awarded from opponent committed fouls:
+Total score MSE uses the V5.7 foul inversion direction. A team's FMS total includes points awarded from opponent committed fouls:
 
 ```text
 red_total_pred = red_phase_pred + predicted_blue_committed_foul_points
 blue_total_pred = blue_phase_pred + predicted_red_committed_foul_points
 ```
 
-If total score columns or foul statistics are missing, total score MSE is
-reported as `NaN` instead of failing.
+If total score columns or foul statistics are missing, total score MSE is reported as `NaN` instead of failing.
 
 ## Rebuild Notes
 
-- `Z_base` prior handoff requires checkpoint width to match
-  `LatentStratOptions.latent_dim`.
-- Team numbers above the prior row bound require rebuilding the prior with a
-  larger `max_team_number`.
-- `Z_event` size is feature-table dependent and cannot be fully parameter-counted
-  without a concrete dataset.
-- The current architecture assumes the learned ghost team `0` is visible to
-  attention, not masked out.
+- `Z_base` prior handoff requires checkpoint width to match `LatentStratOptions.latent_dim`.
+- Team numbers above the prior row bound require rebuilding the prior with a larger `max_team_number`.
+- `Z_event` size is feature-table dependent and cannot be fully parameter-counted without a concrete dataset.
+- The current architecture assumes the learned ghost team `0` is visible to attention, not masked out.

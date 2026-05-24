@@ -8,6 +8,7 @@ Use the Obsidian CLI as the primary interface to this vault.
 LatentStrat vault contract:
 - The Obsidian vault root is `docs/`.
 - Repo-facing documentation in `docs/*.md` should remain GitHub-readable unless the user explicitly asks for Obsidian-native syntax.
+- Do not hard-wrap prose in Obsidian vault notes. Let Obsidian soft-wrap paragraphs; only use line breaks for Markdown structure such as headings, lists, tables, and code blocks.
 - Before creating or modifying Obsidian-native notes, read `references/latentstrat-vault.md` and `references/obsidian-format-guide.md`.
 - Do not edit or stage `.obsidian/workspace.json`, `graph.json`, appearance, or other local workspace churn unless explicitly requested.
 

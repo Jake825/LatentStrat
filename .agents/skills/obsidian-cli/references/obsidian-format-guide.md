@@ -4,6 +4,21 @@ Use this guide when writing Obsidian-native or hybrid notes in the LatentStrat `
 
 Obsidian supports CommonMark, GitHub Flavored Markdown, LaTeX/MathJax math, and Obsidian-specific extensions. Repo-facing docs should stay GitHub-readable unless the user asks for Obsidian-native behavior.
 
+## Line Wrapping
+
+Do not manually hard-wrap prose in Obsidian vault notes. Write normal paragraphs and let Obsidian soft-wrap text in the editor.
+
+Use explicit line breaks only when Markdown structure requires them:
+
+- headings
+- list items
+- tables
+- code blocks
+- blockquotes and callouts
+- intentional paragraph breaks
+
+When editing an already hard-wrapped paragraph, avoid making the wrapping worse. If a paragraph is being materially edited, prefer leaving it as one logical line unless that would create an unreadable Markdown table, list, or code block.
+
 ## Formatting Modes
 
 | Mode | Use when | Link style | Allowed Obsidian features |

@@ -16,14 +16,11 @@ related:
 
 # Prior Training
 
-Prior training builds the Day Zero team identity table. Day Zero means what the
-model knows before the current target season or event has produced new match
-evidence.
+Prior training builds the Day Zero team identity table. Day Zero means what the model knows before the current target season or event has produced new match evidence.
 
 The current prior design is V5.6.4.
 
-For exact layer dimensions, parameter counts, and loss equations, see the
-[Model Architecture Reference](model-architecture-reference.md).
+For exact layer dimensions, parameter counts, and loss equations, see the [Model Architecture Reference](model-architecture-reference.md).
 
 ## What The Prior Produces
 
@@ -35,9 +32,7 @@ The production output is a stripped checkpoint containing:
 
 The live match model copies that table directly into `Z_base.weight`.
 
-The decoder and prior heads are sacrificial. They exist only to sculpt the
-embedding table during training and are discarded before the checkpoint is used
-by season training.
+The decoder and prior heads are sacrificial. They exist only to sculpt the embedding table during training and are discarded before the checkpoint is used by season training.
 
 ## Team Numbers As Dictionary Rows
 
@@ -66,9 +61,7 @@ Its narrative is:
 This is a null robot. It does not exist on the field. It scores zero points. It has no autonomous routine. It does not play defense.
 ```
 
-The season model can use row `0` when an alliance slot is empty or explicitly
-missing. This keeps the Set Transformer processing a consistent number of
-slots without attention-deleting the missing robot.
+The season model can use row `0` when an alliance slot is empty or explicitly missing. This keeps the Set Transformer processing a consistent number of slots without attention-deleting the missing robot.
 
 ## Prior Feature Rows
 
@@ -96,8 +89,7 @@ The archetypes are:
 
 ## Narrative Targets
 
-Narratives are used as one-time semantic targets. They are not live model
-inputs.
+Narratives are used as one-time semantic targets. They are not live model inputs.
 
 Known team narratives include:
 
@@ -108,40 +100,32 @@ Known team narratives include:
 - Championship appearances.
 - Award chronology.
 
-Performance facts are limited to years before the target season. For
-`target_season=2026`, a 2026 award must not appear in the prior narrative.
+Performance facts are limited to years before the target season. For `target_season=2026`, a 2026 award must not appear in the prior narrative.
 
-Sibling and future rows use generated narratives so the table is complete even
-for unassigned numbers.
+Sibling and future rows use generated narratives so the table is complete even for unassigned numbers.
 
 ## OpenAI Target
 
-The narrative is embedded into a 256-dimensional vector. That vector is the
-OpenAI semantic target.
+The narrative is embedded into a 256-dimensional vector. That vector is the OpenAI semantic target.
 
-V5.6.4 changed the OpenAI loss reduction. Instead of averaging element-wise MSE
-across all 256 dimensions, it sums squared error across the vector and averages
-across teams:
+V5.6.4 changed the OpenAI loss reduction. Instead of averaging element-wise MSE across all 256 dimensions, it sums squared error across the vector and averages across teams:
 
 ```text
 openai_mse = mean(sum((prediction - target) ^ 2 over embedding dimensions))
 ```
 
-This gives the text task enough gradient strength to compete with smaller
-scalar cultural targets.
+This gives the text task enough gradient strength to compete with smaller scalar cultural targets.
 
 ## Statbotics Normalized EPA Trajectory
 
-The prior also predicts a four-year normalized EPA trajectory. For target
-season `2026`, those source years are:
+The prior also predicts a four-year normalized EPA trajectory. For target season `2026`, those source years are:
 
 - `t_minus_4`: 2022
 - `t_minus_3`: 2023
 - `t_minus_2`: 2024
 - `t_minus_1`: 2025
 
-The values are Statbotics normalized EPA values. They are not local z-scores of
-raw EPA.
+The values are Statbotics normalized EPA values. They are not local z-scores of raw EPA.
 
 Missing values stay `NaN` and use observed masks:
 
@@ -150,8 +134,7 @@ Missing values stay `NaN` and use observed masks:
 - `norm_epa_observed_t_minus_2`
 - `norm_epa_observed_t_minus_1`
 
-The EPA trajectory is trained as one grouped 4D task with one homoscedastic
-log variance.
+The EPA trajectory is trained as one grouped 4D task with one homoscedastic log variance.
 
 ## Cultural Targets
 
@@ -165,11 +148,9 @@ V5.6.2 added raw cultural targets:
 - `raw_championship_win_count`
 - `raw_technical_award_count`
 
-They are deliberately raw and unnormalized. The homoscedastic loss balancer
-learns how much each target scale should matter.
+They are deliberately raw and unnormalized. The homoscedastic loss balancer learns how much each target scale should matter.
 
-Culture helps the vector learn institutional signals such as long-term
-experience, technical-award history, and banner history.
+Culture helps the vector learn institutional signals such as long-term experience, technical-award history, and banner history.
 
 ## Model Shape
 
@@ -244,24 +225,17 @@ The prior evolved because several ideas failed in useful ways:
 
 - A text autoencoder was too complex for live use.
 - Direct team-number lookup made the live model simpler.
-- 20,000 rows were unnecessary for the 2026 use case, so the default cap moved
-  to 12,500.
+- 20,000 rows were unnecessary for the 2026 use case, so the default cap moved to 12,500.
 - 8D underperformed 16D in the local walk-forward comparison.
 - V5.6.2 had an EPA masking issue that gave no useful EPA gradient.
 - V5.6.4 changed OpenAI loss reduction to strengthen narrative gradients.
 
-Those results are local project evidence, not proof that the current design is
-final.
+Those results are local project evidence, not proof that the current design is final.
 
 ## Related
 
-- [Ghost robot](ghost%20robot.md): the learned team `0` row used for missing
-  robot slots.
-- [Data sources](data-sources.md): where OpenAI, Statbotics, TBA history, and
-  caches enter the prior feature table.
-- [Model architecture reference](model-architecture-reference.md): exact prior
-  layer sizes, loss equations, and checkpoint shape.
-- [Metrics and artifacts](metrics-and-artifacts.md): how to inspect prior
-  latent tables, PCA plots, and nearest-neighbor outputs.
-- [Experiment ledger](experiment-ledger.md): prior run evidence from V5.6.1
-  through V5.6.4.
+- [Ghost robot](ghost%20robot.md): the learned team `0` row used for missing robot slots.
+- [Data sources](data-sources.md): where OpenAI, Statbotics, TBA history, and caches enter the prior feature table.
+- [Model architecture reference](model-architecture-reference.md): exact prior layer sizes, loss equations, and checkpoint shape.
+- [Metrics and artifacts](metrics-and-artifacts.md): how to inspect prior latent tables, PCA plots, and nearest-neighbor outputs.
+- [Experiment ledger](experiment-ledger.md): prior run evidence from V5.6.1 through V5.6.4.

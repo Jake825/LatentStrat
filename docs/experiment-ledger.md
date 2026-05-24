@@ -15,12 +15,9 @@ related:
 
 # Experiment Ledger
 
-This page records local LatentStrat experiments as engineering evidence. It is
-not a paper, leaderboard, or universal claim. Use it to understand why the
-current design moved in a particular direction.
+This page records local LatentStrat experiments as engineering evidence. It is not a paper, leaderboard, or universal claim. Use it to understand why the current design moved in a particular direction.
 
-For the narrative version of these decisions, see [Project History](project-history.md).
-For the Git and semantic-version timeline, see [Changelog](changelog.md).
+For the narrative version of these decisions, see [Project History](project-history.md). For the Git and semantic-version timeline, see [Changelog](changelog.md).
 
 ## Prior Runs
 
@@ -43,16 +40,11 @@ artifacts/prior_v564_latent16/inspection/v564_vs_v563_prior_summary.csv
 
 Important local findings:
 
-- V5.6.4 future rows had high norm concentration: mean norm about `1.91` with
-  standard deviation about `0.015`.
-- V5.6.4 future/sibling/ghost-token rows still had near-duplicate cosine
-  neighbors at a high rate: `near_duplicate_neighbor_rate_0_999` about `0.997`.
+- V5.6.4 future rows had high norm concentration: mean norm about `1.91` with standard deviation about `0.015`.
+- V5.6.4 future/sibling/ghost-token rows still had near-duplicate cosine neighbors at a high rate: `near_duplicate_neighbor_rate_0_999` about `0.997`.
 - Anchor rows were less collapsed than synthetic future/sibling rows.
 
-Interpretation: feature-summed OpenAI loss improved the training path but did
-not fully solve synthetic-row clustering. Future work should inspect narrative
-diversity, synthetic-row targets, and whether future/sibling rows need distinct
-structural targets.
+Interpretation: feature-summed OpenAI loss improved the training path but did not fully solve synthetic-row clustering. Future work should inspect narrative diversity, synthetic-row targets, and whether future/sibling rows need distinct structural targets.
 
 ## Season And Walk-Forward Runs
 
@@ -78,17 +70,13 @@ structural targets.
 
 Reading:
 
-- V5.6.4 plus longer folded training gave the best local score MSE and match
-  accuracy.
+- V5.6.4 plus longer folded training gave the best local score MSE and match accuracy.
 - The same run did not give the best Brier score or log loss.
-- Future improvements should treat calibration as a first-class acceptance
-  criterion, not a secondary chart.
+- Future improvements should treat calibration as a first-class acceptance criterion, not a secondary chart.
 
 ## Open Follow-Ups
 
-- Add in-repo Statbotics EPA and pRidge baselines only after explicitly
-  designing leakage-safe source timing.
+- Add in-repo Statbotics EPA and pRidge baselines only after explicitly designing leakage-safe source timing.
 - Investigate calibration methods for walk-forward predictions.
 - Review why synthetic future/sibling rows remain near-duplicate in prior space.
-- Add clearer slice reports by week, event type, team archetype, and data
-  availability.
+- Add clearer slice reports by week, event type, team archetype, and data availability.

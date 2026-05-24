@@ -17,11 +17,9 @@ related:
 
 # Season Training
 
-Season training teaches LatentStrat how teams behave in real matches. It starts
-from the Day Zero prior and learns event-specific evidence from the season.
+Season training teaches LatentStrat how teams behave in real matches. It starts from the Day Zero prior and learns event-specific evidence from the season.
 
-For exact tensor shapes, head dimensions, parameter counts, and equations, see
-the [Model Architecture Reference](model-architecture-reference.md).
+For exact tensor shapes, head dimensions, parameter counts, and equations, see the [Model Architecture Reference](model-architecture-reference.md).
 
 ## The Two Team Vectors
 
@@ -60,10 +58,7 @@ For V5.6+ indexing:
 
 ## Set Transformer Role
 
-FRC alliances are unordered groups of robots. Swapping red team 1 and red team 2
-should not fundamentally change the prediction. The Set Transformer is used
-because it can learn interactions inside and across alliances without relying
-on slot order as the main signal.
+FRC alliances are unordered groups of robots. Swapping red team 1 and red team 2 should not fundamentally change the prediction. The Set Transformer is used because it can learn interactions inside and across alliances without relying on slot order as the main signal.
 
 At a high level:
 
@@ -89,44 +84,36 @@ The match spine trains several target groups:
 - V5.7 bonus binary targets.
 - V5.7 special binary targets.
 
-Binary heads output raw logits. Losses use `BCEWithLogitsLoss`, not a separate
-sigmoid followed by BCE.
+Binary heads output raw logits. Losses use `BCEWithLogitsLoss`, not a separate sigmoid followed by BCE.
 
 Missing score-breakdown targets stay `NaN` and are masked at loss time.
 
 ## Sidecar Training
 
-Sidecars are optional post-event labels. They shape the representation but are
-not pre-match input features.
+Sidecars are optional post-event labels. They shape the representation but are not pre-match input features.
 
 The sidecar tasks are:
 
 - Qualification ranking pairs.
 - Playoff alliance ranking pairs.
-- Alliance selection triplets: captain, selected pick, and computed
-  passed-over team.
+- Alliance selection triplets: captain, selected pick, and computed passed-over team.
 
-Sidecar loaders can be much smaller than the match loader. The match loader
-drives the epoch, while non-empty sidecar loaders are cycled.
+Sidecar loaders can be much smaller than the match loader. The match loader drives the epoch, while non-empty sidecar loaders are cycled.
 
 ## Stability Patch
 
-The 100-epoch V5.7 run showed a classic failure mode: training loss kept
-improving while validation exploded. The V5.7.2 stability patch added:
+The 100-epoch V5.7 run showed a classic failure mode: training loss kept improving while validation exploded. The V5.7.2 stability patch added:
 
 - Homoscedastic log-var clamping.
 - Best-validation restoration even when early stopping is disabled.
 - Cosine learning-rate decay.
-- AdamW decay for Set Transformer and head weights while embeddings keep
-  active-row regularization.
+- AdamW decay for Set Transformer and head weights while embeddings keep active-row regularization.
 
-This lets long TensorBoard-monitored runs continue while still saving the best
-validation state.
+This lets long TensorBoard-monitored runs continue while still saving the best validation state.
 
 ## Walk-Forward Validation
 
-Random splits can leak time. Walk-forward validation is the primary V5.8
-validation path.
+Random splits can leak time. Walk-forward validation is the primary V5.8 validation path.
 
 For each fold:
 
@@ -136,8 +123,7 @@ Validate on week N + 1
 Reset model back to the Day Zero prior for the next fold
 ```
 
-Each fold starts fresh from the prior checkpoint. The model does not carry
-weights from one fold to the next.
+Each fold starts fresh from the prior checkpoint. The model does not carry weights from one fold to the next.
 
 ```mermaid
 flowchart LR
@@ -154,8 +140,7 @@ Sidecars are pre-filtered:
 - Training sidecars: `event_week <= train_max_week`.
 - Validation sidecars: `event_week == val_week`.
 
-This prevents future rankings, selections, or playoffs from reaching earlier
-training folds.
+This prevents future rankings, selections, or playoffs from reaching earlier training folds.
 
 ## Training Commands
 
@@ -237,13 +222,8 @@ Read [Metrics and artifacts](metrics-and-artifacts.md) for interpretation.
 
 ## Related
 
-- [Feature pipeline](feature-pipeline.md): how match rows, score breakdowns,
-  canonical weeks, and sidecars are built.
-- [Training and validation](training-and-validation.md): broader training
-  workflow, TensorBoard policy, and validation context.
-- [Model structure](model-structure.md): readable description of the Set
-  Transformer, heads, and team vectors.
-- [Model architecture reference](model-architecture-reference.md): exact tensor
-  shapes and training equations.
-- [Metrics and artifacts](metrics-and-artifacts.md): how to interpret
-  `feature_*` and `walk_forward_*` outputs.
+- [Feature pipeline](feature-pipeline.md): how match rows, score breakdowns, canonical weeks, and sidecars are built.
+- [Training and validation](training-and-validation.md): broader training workflow, TensorBoard policy, and validation context.
+- [Model structure](model-structure.md): readable description of the Set Transformer, heads, and team vectors.
+- [Model architecture reference](model-architecture-reference.md): exact tensor shapes and training equations.
+- [Metrics and artifacts](metrics-and-artifacts.md): how to interpret `feature_*` and `walk_forward_*` outputs.

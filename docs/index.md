@@ -13,10 +13,7 @@ related:
 
 # LatentStrat Documentation Hub
 
-LatentStrat is a scouting and strategy model for FIRST Robotics Competition
-data. It learns a compact mathematical identity for each team, updates that
-identity as a season or event unfolds, and predicts match outcomes and other
-signals that matter to strategy.
+LatentStrat is a scouting and strategy model for FIRST Robotics Competition data. It learns a compact mathematical identity for each team, updates that identity as a season or event unfolds, and predicts match outcomes and other signals that matter to strategy.
 
 This vault is written for two readers:
 
@@ -27,48 +24,33 @@ This vault is written for two readers:
 
 If you are new to the project, read in this order:
 
-1. [Student primer](student-primer.md): plain-language project overview for FRC
-   students.
-2. [Current state](current-state.md): what the current implementation is and
-   which artifacts are recommended.
-3. [Changelog](changelog.md): how semantic versions connect to Git commits and
-   local artifact eras.
+1. [Student primer](student-primer.md): plain-language project overview for FRC students.
+2. [Current state](current-state.md): what the current implementation is and which artifacts are recommended.
+3. [Changelog](changelog.md): how semantic versions connect to Git commits and local artifact eras.
 4. [Data sources](data-sources.md): where the model gets its information.
-5. [Prior training](prior-training.md): how teams get Day Zero identities before
-   matches are played.
-6. [Season training](season-training.md): how the model learns from matches,
-   sidecars, and walk-forward validation.
-7. [Model architecture reference](model-architecture-reference.md): exact
-   tensor shapes, layer sizes, parameter counts, and equations.
+5. [Prior training](prior-training.md): how teams get Day Zero identities before matches are played.
+6. [Season training](season-training.md): how the model learns from matches, sidecars, and walk-forward validation.
+7. [Model architecture reference](model-architecture-reference.md): exact tensor shapes, layer sizes, parameter counts, and equations.
 8. [Metrics and artifacts](metrics-and-artifacts.md): how to read the outputs.
-9. [Project history](project-history.md): what experiments were tried and what
-   changed because of them.
-10. [Experiment ledger](experiment-ledger.md): local run evidence and design
-   lessons.
-11. [Rebuild from scratch](rebuild-from-scratch.md): commands to reproduce the
-   current pipeline.
+9. [Project history](project-history.md): what experiments were tried and what changed because of them.
+10. [Experiment ledger](experiment-ledger.md): local run evidence and design lessons.
+11. [Rebuild from scratch](rebuild-from-scratch.md): commands to reproduce the current pipeline.
 
 ## The Big Idea
 
 Every FRC team has patterns that are visible before a match starts:
 
 - Long-running teams often have durable institutional knowledge.
-- Some teams have a history of strong software, autonomous routines, or build
-  quality.
-- Some rookies or future team numbers have no match history, but they still
-  need a stable placeholder in the model.
-- A team can be different at each event, because robots improve, break, or get
-  driven differently.
+- Some teams have a history of strong software, autonomous routines, or build quality.
+- Some rookies or future team numbers have no match history, but they still need a stable placeholder in the model.
+- A team can be different at each event, because robots improve, break, or get driven differently.
 
 LatentStrat separates those ideas into two learned vectors:
 
-- `Z_base`: the team identity that exists before the event. This is initialized
-  by prior training.
-- `Z_event`: the event-specific adjustment learned from current-season or
-  current-event matches.
+- `Z_base`: the team identity that exists before the event. This is initialized by prior training.
+- `Z_event`: the event-specific adjustment learned from current-season or current-event matches.
 
-The match model then asks: given the three red robots and the three blue
-robots, how do these six learned identities interact?
+The match model then asks: given the three red robots and the three blue robots, how do these six learned identities interact?
 
 ## How The Pipeline Fits Together
 
@@ -95,8 +77,7 @@ Read [Prior training](prior-training.md) if you want to understand:
 
 - Why team `0` is a learned ghost robot.
 - How team numbers map directly into a learned dictionary.
-- How narratives, normalized EPA trajectory, and culture targets shape the
-  Day Zero prior.
+- How narratives, normalized EPA trajectory, and culture targets shape the Day Zero prior.
 - Why the decoder is discarded after prior training.
 
 ### How A Season Is Learned
@@ -110,8 +91,7 @@ Read [Season training](season-training.md) if you want to understand:
 
 ### How To Read Results
 
-Read [Metrics and artifacts](metrics-and-artifacts.md) if you want to
-understand:
+Read [Metrics and artifacts](metrics-and-artifacts.md) if you want to understand:
 
 - Brier score, log loss, match accuracy, and score MSE.
 - Prior inspection files such as PCA plots and nearest-neighbor CSVs.
@@ -120,8 +100,7 @@ understand:
 
 ### How To Rebuild Everything
 
-Read [Rebuild from scratch](rebuild-from-scratch.md) when setting up a new
-machine or reproducing an experiment.
+Read [Rebuild from scratch](rebuild-from-scratch.md) when setting up a new machine or reproducing an experiment.
 
 Read [CLI reference](cli-reference.md) when you need command-by-command details.
 
@@ -139,35 +118,28 @@ Use these grouped links when you already know what kind of question you have.
 
 - [Rebuild from scratch](rebuild-from-scratch.md): end-to-end commands.
 - [CLI reference](cli-reference.md): command-by-command details.
-- [Schemas and artifacts reference](schemas-and-artifacts-reference.md):
-  generated data and output contracts.
+- [Schemas and artifacts reference](schemas-and-artifacts-reference.md): generated data and output contracts.
 
 ### Model Internals
 
 - [Model structure](model-structure.md): readable architecture overview.
-- [Model architecture reference](model-architecture-reference.md): exact
-  tensor shapes, parameter counts, and equations.
+- [Model architecture reference](model-architecture-reference.md): exact tensor shapes, parameter counts, and equations.
 - [Prior training](prior-training.md): Day Zero prior and checkpoint handoff.
-- [Season training](season-training.md): Set Transformer training and
-  walk-forward validation.
+- [Season training](season-training.md): Set Transformer training and walk-forward validation.
 - [V5.7 notes](V5.7.md): sensor-fusion transition notes.
 
 ### Data And Training
 
-- [Data sources](data-sources.md): TBA, Statbotics, OpenAI, scouting, and
-  sidecars.
+- [Data sources](data-sources.md): TBA, Statbotics, OpenAI, scouting, and sidecars.
 - [Feature pipeline](feature-pipeline.md): feature-table construction.
-- [Training and validation](training-and-validation.md): training workflow,
-  TensorBoard, and validation boundaries.
+- [Training and validation](training-and-validation.md): training workflow, TensorBoard, and validation boundaries.
 - [Scouting data layer](scouting-data-layer.md): local SQLite scouting store.
-- [Scouting data ingestion](scouting-data-ingestion.md): importer and CSV
-  guidance.
+- [Scouting data ingestion](scouting-data-ingestion.md): importer and CSV guidance.
 
 ### Metrics And History
 
 - [Metrics and artifacts](metrics-and-artifacts.md): output interpretation.
-- [Model evaluation](model-evaluation.md): baselines, controls, calibration,
-  and evidence packets.
+- [Model evaluation](model-evaluation.md): baselines, controls, calibration, and evidence packets.
 - [Embedding inspection](embedding-inspection.md): latent-space diagnostics.
 - [Project history](project-history.md): narrative experiment history.
 - [Experiment ledger](experiment-ledger.md): run evidence table.

@@ -15,14 +15,11 @@ related:
 
 # Metrics And Artifacts
 
-LatentStrat produces several kinds of outputs. Some are model-quality metrics.
-Some are training diagnostics. Some are interpretation aids.
+LatentStrat produces several kinds of outputs. Some are model-quality metrics. Some are training diagnostics. Some are interpretation aids.
 
 The safest rule is: never trust one number by itself.
 
-For the exact metric formulas and model-output tensor shapes behind these
-reports, see the [Model Architecture Reference](model-architecture-reference.md).
-For run-by-run local evidence, see the [Experiment Ledger](experiment-ledger.md).
+For the exact metric formulas and model-output tensor shapes behind these reports, see the [Model Architecture Reference](model-architecture-reference.md). For run-by-run local evidence, see the [Experiment Ledger](experiment-ledger.md).
 
 ## Common Match Metrics
 
@@ -50,12 +47,9 @@ Blue win probability is:
 
 ## Why Brier And Log Loss Matter
 
-Accuracy treats a 51 percent prediction and a 99 percent prediction the same if
-the predicted team wins. Brier score and log loss care about confidence.
+Accuracy treats a 51 percent prediction and a 99 percent prediction the same if the predicted team wins. Brier score and log loss care about confidence.
 
-For scouting and strategy, confidence matters. A picklist recommendation should
-not only say which alliance is favored; it should also signal how certain the
-model is.
+For scouting and strategy, confidence matters. A picklist recommendation should not only say which alliance is favored; it should also signal how certain the model is.
 
 ## Prior Inspection Artifacts
 
@@ -73,9 +67,7 @@ Important files:
 - `prior_training_history.csv`: copied training curve.
 - PCA and histogram images.
 
-Use these to inspect whether the Day Zero prior has sensible structure. For
-example, if every future team is almost identical to every other future team,
-the prior may not be using narrative information strongly enough.
+Use these to inspect whether the Day Zero prior has sensible structure. For example, if every future team is almost identical to every other future team, the prior may not be using narrative information strongly enough.
 
 ## Feature Training Artifacts
 
@@ -96,8 +88,7 @@ Important files:
 - `feature_set_attention.csv`: attention diagnostics.
 - `feature_zero_out_diagnostics.csv`: prediction response to removing slots.
 
-`feature_history.csv` is a training diagnostic. It tells you whether training
-was stable, not whether the model is strategically useful by itself.
+`feature_history.csv` is a training diagnostic. It tells you whether training was stable, not whether the model is strategically useful by itself.
 
 ## Walk-Forward Artifacts
 
@@ -107,12 +98,9 @@ was stable, not whether the model is strategically useful by itself.
 - `walk_forward_history.csv`
 - TensorBoard fold runs.
 
-`walk_forward_metrics.csv` contains one row per fold plus an `AVERAGE` row. The
-common metrics in the `AVERAGE` row are row-weighted season aggregates, not
-simple unweighted means of fold means.
+`walk_forward_metrics.csv` contains one row per fold plus an `AVERAGE` row. The common metrics in the `AVERAGE` row are row-weighted season aggregates, not simple unweighted means of fold means.
 
-This is the most important validation file for season-level claims because it
-simulates training on earlier weeks and predicting later weeks.
+This is the most important validation file for season-level claims because it simulates training on earlier weeks and predicting later weeks.
 
 ## Local Experiment Snapshot
 
@@ -129,8 +117,7 @@ Interpretation:
 
 - The 8D prior underperformed 16D in the local comparison.
 - The V5.6.4 50-epoch run improved score MSE and accuracy.
-- The same run worsened log loss and Brier relative to the earlier V5.6.1 16D
-  run, so calibration needs more investigation.
+- The same run worsened log loss and Brier relative to the earlier V5.6.1 16D run, so calibration needs more investigation.
 
 These are local experiment results, not permanent claims about the model.
 
@@ -150,8 +137,7 @@ Useful curves:
 - Precision weights.
 - OpenAI, EPA, culture, match-spine, and sidecar losses.
 
-If training loss keeps improving while validation gets worse, the model is
-overfitting or the loss balancer is overconfident.
+If training loss keeps improving while validation gets worse, the model is overfitting or the loss balancer is overconfident.
 
 ## What Counts As An Improvement
 
@@ -164,17 +150,12 @@ A model change is stronger evidence if it:
 - Does not rely on future information.
 - Looks reasonable in artifact slices and diagnostics.
 
-Embedding plots and attention tables are useful evidence, but they are not
-proof by themselves.
+Embedding plots and attention tables are useful evidence, but they are not proof by themselves.
 
 ## Related
 
-- [Model evaluation](model-evaluation.md): calibration, baselines, controls,
-  evidence packets, and review discipline.
-- [Experiment ledger](experiment-ledger.md): run-by-run local evidence and
-  artifact paths.
+- [Model evaluation](model-evaluation.md): calibration, baselines, controls, evidence packets, and review discipline.
+- [Experiment ledger](experiment-ledger.md): run-by-run local evidence and artifact paths.
 - [Current state](current-state.md): promoted artifacts and current caveats.
-- [Model architecture reference](model-architecture-reference.md): metric
-  formulas and loss equations.
-- [Embedding inspection](embedding-inspection.md): latent-space diagnostics and
-  nearest-neighbor interpretation.
+- [Model architecture reference](model-architecture-reference.md): metric formulas and loss equations.
+- [Embedding inspection](embedding-inspection.md): latent-space diagnostics and nearest-neighbor interpretation.

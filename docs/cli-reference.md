@@ -13,23 +13,19 @@ related:
 
 # CLI Reference
 
-This page explains the current `latentstrat` command surface. For the exact
-runtime help, run:
+This page explains the current `latentstrat` command surface. For the exact runtime help, run:
 
 ```bash
 latentstrat --help
 ```
 
-Examples use current V5.6.4/V5.8 paths where possible. Older artifact names in
-local folders are historical.
+Examples use current V5.6.4/V5.8 paths where possible. Older artifact names in local folders are historical.
 
 ## Primary Pipeline Commands
 
 ### `build-prior-features`
 
-Builds the transductive prior feature table for team numbers `0..max_team_number`.
-It pulls TBA team history, Statbotics normalized EPA trajectory, and OpenAI
-narrative embeddings.
+Builds the transductive prior feature table for team numbers `0..max_team_number`. It pulls TBA team history, Statbotics normalized EPA trajectory, and OpenAI narrative embeddings.
 
 ```bash
 latentstrat build-prior-features \
@@ -38,13 +34,11 @@ latentstrat build-prior-features \
   --output data/prior_features_v563_2026.parquet
 ```
 
-Use cached embeddings whenever possible. Rebuild when narrative logic, EPA
-extraction, culture targets, or team cap changes.
+Use cached embeddings whenever possible. Rebuild when narrative logic, EPA extraction, culture targets, or team cap changes.
 
 ### `train-prior`
 
-Trains the sacrificial prior distiller and writes a stripped checkpoint
-containing only `embedding_table`, metadata, and history.
+Trains the sacrificial prior distiller and writes a stripped checkpoint containing only `embedding_table`, metadata, and history.
 
 ```bash
 latentstrat train-prior \
@@ -57,13 +51,11 @@ latentstrat train-prior \
   --tensorboard-run-name v564_prior_latent16_2026
 ```
 
-V5.6.4 is a training-loss update over the V5.6.3 prior feature schema, so this
-command can legitimately use `prior_features_v563_2026.parquet`.
+V5.6.4 is a training-loss update over the V5.6.3 prior feature schema, so this command can legitimately use `prior_features_v563_2026.parquet`.
 
 ### `inspect-prior`
 
-Writes prior latent-space diagnostics such as PCA plots, norm histograms,
-nearest neighbors, sanity checks, and copied training history.
+Writes prior latent-space diagnostics such as PCA plots, norm histograms, nearest neighbors, sanity checks, and copied training history.
 
 ```bash
 latentstrat inspect-prior \
@@ -74,9 +66,7 @@ latentstrat inspect-prior \
 
 ### `build-features`
 
-Builds the match-grain Parquet feature table from TBA and optional scouting
-data. With `--sidecar-output-dir`, it also writes rankings, selections, and
-playoffs sidecars.
+Builds the match-grain Parquet feature table from TBA and optional scouting data. With `--sidecar-output-dir`, it also writes rankings, selections, and playoffs sidecars.
 
 ```bash
 latentstrat build-features \
@@ -95,8 +85,7 @@ latentstrat build-features \
 
 ### `train-features`
 
-Trains the Set Transformer from a feature Parquet file. It can load a stripped
-prior checkpoint into `Z_base` and optional sidecars for heterogeneous training.
+Trains the Set Transformer from a feature Parquet file. It can load a stripped prior checkpoint into `Z_base` and optional sidecars for heterogeneous training.
 
 ```bash
 latentstrat train-features data/features_v58_2026.parquet \
@@ -114,8 +103,7 @@ latentstrat train-features data/features_v58_2026.parquet \
 
 ### `validate-walk-forward`
 
-Runs V5.8 temporal validation. Each fold trains on weeks `<= N`, validates on
-week `N + 1`, and resets from the prior checkpoint before the next fold.
+Runs V5.8 temporal validation. Each fold trains on weeks `<= N`, validates on week `N + 1`, and resets from the prior checkpoint before the next fold.
 
 ```bash
 latentstrat validate-walk-forward \
@@ -149,9 +137,7 @@ latentstrat run-prior-grid \
 
 ### `inspect-embeddings`
 
-Runs a small training/inspection path and writes embedding diagnostics. Use it
-for exploratory embedding tables, PCA, neighbor checks, attention, and zero-out
-diagnostics. For the prior-only coordinate map, prefer `inspect-prior`.
+Runs a small training/inspection path and writes embedding diagnostics. Use it for exploratory embedding tables, PCA, neighbor checks, attention, and zero-out diagnostics. For the prior-only coordinate map, prefer `inspect-prior`.
 
 ```bash
 latentstrat inspect-embeddings --event-key 2026ilch
@@ -159,9 +145,7 @@ latentstrat inspect-embeddings --event-key 2026ilch
 
 ### `build-evidence-packet`
 
-Runs evidence experiments and writes a scoreboard/diagnostic packet. This is
-where shuffled controls, null controls, baseline comparisons, and embedding
-diagnostics are grouped for review.
+Runs evidence experiments and writes a scoreboard/diagnostic packet. This is where shuffled controls, null controls, baseline comparisons, and embedding diagnostics are grouped for review.
 
 ```bash
 latentstrat build-evidence-packet --event-key 2026ilch
@@ -169,10 +153,7 @@ latentstrat build-evidence-packet --event-key 2026ilch
 
 ### `full-season-offline`
 
-Convenience command that imports a season, trains the model, and writes core
-artifacts. Use it for rough offline checks. For repeatable research runs, prefer
-explicit `build-features`, `train-features`, and `validate-walk-forward`
-commands.
+Convenience command that imports a season, trains the model, and writes core artifacts. Use it for rough offline checks. For repeatable research runs, prefer explicit `build-features`, `train-features`, and `validate-walk-forward` commands.
 
 ```bash
 latentstrat full-season-offline --season 2026
@@ -182,8 +163,7 @@ latentstrat full-season-offline --season 2026
 
 ### `train-features --venue-mode`
 
-Venue mode fine-tunes selected parts of a checkpoint for a specific event. It is
-intended for live-event adaptation experiments, not season-level validation.
+Venue mode fine-tunes selected parts of a checkpoint for a specific event. It is intended for live-event adaptation experiments, not season-level validation.
 
 ```bash
 latentstrat train-features data/features_2026ilch.parquet \
@@ -195,8 +175,7 @@ latentstrat train-features data/features_2026ilch.parquet \
 
 ### `consolidate-event`
 
-Folds event deltas back into durable base embeddings using the offline
-consolidation gate.
+Folds event deltas back into durable base embeddings using the offline consolidation gate.
 
 ```bash
 latentstrat consolidate-event \
@@ -206,8 +185,7 @@ latentstrat consolidate-event \
   --delta-weeks 1.0
 ```
 
-Consolidation is an offline step. It is not part of the main V5.8
-walk-forward metric path.
+Consolidation is an offline step. It is not part of the main V5.8 walk-forward metric path.
 
 ## Setup, Smoke, And Cache Commands
 
@@ -237,8 +215,7 @@ latentstrat init-scouting-db --path data/scouting.db
 
 ### `clear-cache`
 
-Removes Python provider caches. Use this when cached TBA or Statbotics payloads
-are stale or when debugging provider behavior.
+Removes Python provider caches. Use this when cached TBA or Statbotics payloads are stale or when debugging provider behavior.
 
 ```bash
 latentstrat clear-cache
@@ -252,5 +229,4 @@ Training commands should support local TensorBoard logging:
 tensorboard --logdir=runs
 ```
 
-Use `--no-tensorboard` for quiet batch or test runs when the command exposes
-that option.
+Use `--no-tensorboard` for quiet batch or test runs when the command exposes that option.

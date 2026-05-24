@@ -14,23 +14,16 @@ related:
 
 # Changelog
 
-This changelog connects LatentStrat's research version names, Git commits, and
-local artifact eras. It is meant to help an FRC student understand the project
-timeline and help an agent find the closest code snapshot for an older design.
+This changelog connects LatentStrat's research version names, Git commits, and local artifact eras. It is meant to help an FRC student understand the project timeline and help an agent find the closest code snapshot for an older design.
 
 ## How To Use This Changelog
 
-- **Semantic versions** such as V5.6.4 or V5.8 are research milestones. They
-  describe modeling ideas and experiment phases, not packaged software releases.
-- **Git commits** are code-state anchors. If a row has a commit hash, an agent
-  can inspect or check out that exact code state.
-- **Artifacts** are local evidence for experiment outcomes. They may not exist
-  in a fresh clone unless they are rebuilt.
-- **Unreleased** or **Working tree** rows describe the current local state after
-  the latest commit. They cannot be checked out by hash until committed.
+- **Semantic versions** such as V5.6.4 or V5.8 are research milestones. They describe modeling ideas and experiment phases, not packaged software releases.
+- **Git commits** are code-state anchors. If a row has a commit hash, an agent can inspect or check out that exact code state.
+- **Artifacts** are local evidence for experiment outcomes. They may not exist in a fresh clone unless they are rebuilt.
+- **Unreleased** or **Working tree** rows describe the current local state after the latest commit. They cannot be checked out by hash until committed.
 
-There are currently no Git tags. Use commit hashes and this file as the version
-map until formal tags exist.
+There are currently no Git tags. Use commit hashes and this file as the version map until formal tags exist.
 
 To inspect a committed code state without disturbing the working tree:
 
@@ -56,8 +49,7 @@ git switch --detach <commit>
 | Current docs added after `cc58c31` | current state, architecture reference, experiment ledger, CLI reference, schema/artifact reference, student primer, changelog |
 | State note | This row should be replaced with a real commit hash after the documentation/current-state work is committed |
 
-Read [Current State](current-state.md) for the current recommended artifacts,
-caveats, and validation status.
+Read [Current State](current-state.md) for the current recommended artifacts, caveats, and validation status.
 
 ## Commit Timeline
 
@@ -93,13 +85,9 @@ caveats, and validation status.
 
 ## Maintenance Rule
 
-When a commit changes a named version, public CLI, model behavior, training
-default, promoted artifact, or experiment conclusion:
+When a commit changes a named version, public CLI, model behavior, training default, promoted artifact, or experiment conclusion:
 
 1. Add or update a row in this changelog.
-2. Update [Current State](current-state.md) if the recommended stack or caveats
-   changed.
-3. Update [Experiment Ledger](experiment-ledger.md) if a run result or artifact
-   changed.
-4. Use `Unreleased` or `Pending commit` until the work has a real commit hash,
-   then replace it with the hash.
+2. Update [Current State](current-state.md) if the recommended stack or caveats changed.
+3. Update [Experiment Ledger](experiment-ledger.md) if a run result or artifact changed.
+4. Use `Unreleased` or `Pending commit` until the work has a real commit hash, then replace it with the hash.

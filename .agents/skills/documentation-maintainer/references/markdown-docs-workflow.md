@@ -16,6 +16,7 @@ Inspect the source of truth:
 
 - Keep headings short and specific.
 - Prefer direct prose and compact lists.
+- For notes under `docs/`, do not manually hard-wrap prose. Let Obsidian soft-wrap paragraphs, and use explicit line breaks only for Markdown structure.
 - Use fenced code blocks with language tags.
 - Use `powershell` for Windows-specific local commands and `bash` only for portable shell examples.
 - Keep examples runnable from the repo root.

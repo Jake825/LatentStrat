@@ -13,13 +13,9 @@ related:
 
 # Scouting Data Layer
 
-LatentStrat uses SQLite and SQLModel for transactional scouting data. This layer
-is separate from PyTorch training: scouting applications write normalized rows to
-SQLite, then `build-features` merges those rows into a flat Parquet feature file.
-Training reads only Parquet.
+LatentStrat uses SQLite and SQLModel for transactional scouting data. This layer is separate from PyTorch training: scouting applications write normalized rows to SQLite, then `build-features` merges those rows into a flat Parquet feature file. Training reads only Parquet.
 
-For importer examples and key-normalization rules, see
-[Scouting Data Ingestion Guide](scouting-data-ingestion.md).
+For importer examples and key-normalization rules, see [Scouting Data Ingestion Guide](scouting-data-ingestion.md).
 
 ## Schema
 
@@ -42,16 +38,13 @@ latentstrat init-scouting-db --path data/scouting.db
 
 ## Feature Merge
 
-When `build-features` runs, it looks for `data/scouting.db` by default. If the
-database exists, available scouting rows are left-joined into the TBA match table
-before Parquet is written:
+When `build-features` runs, it looks for `data/scouting.db` by default. If the database exists, available scouting rows are left-joined into the TBA match table before Parquet is written:
 
 ```bash
 latentstrat build-features --event-key 2026ilch --output data/features_2026ilch.parquet
 ```
 
-If the database is missing, LatentStrat prints a message and writes TBA-only
-features. Use `--no-scouting` to disable scouting lookup explicitly.
+If the database is missing, LatentStrat prints a message and writes TBA-only features. Use `--no-scouting` to disable scouting lookup explicitly.
 
 Merged columns are prefixed by scope, for example:
 
@@ -64,9 +57,6 @@ Merged columns are prefixed by scope, for example:
 
 ## Leakage Discipline
 
-Static data, such as pit scouting or team-event status, can become model inputs
-in a future model version.
+Static data, such as pit scouting or team-event status, can become model inputs in a future model version.
 
-Dynamic match scouting metrics, such as teleop pieces scored, are post-match
-observations. They are safe to store in Parquet and can become auxiliary targets,
-but they should not be used as pre-match inputs.
+Dynamic match scouting metrics, such as teleop pieces scored, are post-match observations. They are safe to store in Parquet and can become auxiliary targets, but they should not be used as pre-match inputs.

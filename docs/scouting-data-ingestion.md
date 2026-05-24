@@ -14,16 +14,13 @@ related:
 
 # Scouting Data Ingestion Guide
 
-This guide defines the standard pattern for writing custom importers that move
-raw human-scouted data from CSVs or spreadsheets into LatentStrat's SQLModel
-scouting database.
+This guide defines the standard pattern for writing custom importers that move raw human-scouted data from CSVs or spreadsheets into LatentStrat's SQLModel scouting database.
 
 LatentStrat uses a data lake workflow:
 
 1. Raw scouting files are imported into `data/scouting.db`.
 2. `build-features` merges scouting rows with TBA match data.
-3. PyTorch training reads the resulting Parquet file and never queries SQLite
-   during the training loop.
+3. PyTorch training reads the resulting Parquet file and never queries SQLite during the training loop.
 
 ## Setup
 
@@ -47,14 +44,11 @@ with Session(engine) as session:
     session.commit()
 ```
 
-Use `session.merge(...)` instead of `session.add(...)`. Re-running an importer
-after fixing a CSV should update existing primary keys instead of failing on
-duplicate rows.
+Use `session.merge(...)` instead of `session.add(...)`. Re-running an importer after fixing a CSV should update existing primary keys instead of failing on duplicate rows.
 
 ## Key Normalization
 
-Every importer must normalize raw scouting identifiers into TBA keys before
-writing database records. Most merge failures come from mismatched keys.
+Every importer must normalize raw scouting identifiers into TBA keys before writing database records. Most merge failures come from mismatched keys.
 
 ```python
 from typing import Any
@@ -100,15 +94,11 @@ def normalize_qm_match_key(event_key: str, value: Any) -> str:
     return f"{event_key}_qm{int(float(value))}"
 ```
 
-Qualification matches use keys like `2026ilch_qm12`. Playoff importers must
-use the real TBA match key format for the competition level they import, such as
-`sf` and `f` keys. If the raw file already contains TBA match keys, prefer those
-over rebuilding them.
+Qualification matches use keys like `2026ilch_qm12`. Playoff importers must use the real TBA match key format for the competition level they import, such as `sf` and `f` keys. If the raw file already contains TBA match keys, prefer those over rebuilding them.
 
 ## Static Pit Data
 
-Use `TeamScouting` for global pit data that is not tied to a specific event or
-match.
+Use `TeamScouting` for global pit data that is not tied to a specific event or match.
 
 ```python
 import pandas as pd
@@ -134,8 +124,7 @@ def ingest_pit_data(csv_path: str, db_path: str = "data/scouting.db") -> None:
         session.commit()
 ```
 
-Merged feature columns will use prefixes such as
-`red_team_1_pit_drive_base` and `blue_team_3_pit_robot_weight_lbs`.
+Merged feature columns will use prefixes such as `red_team_1_pit_drive_base` and `blue_team_3_pit_robot_weight_lbs`.
 
 ## Event Context
 
@@ -202,8 +191,7 @@ Merged feature columns use the `match_scout_` prefix.
 
 ## Team Event Status
 
-Use `TeamEventScouting` for team state at a specific event, such as inspection
-or robot functionality.
+Use `TeamEventScouting` for team state at a specific event, such as inspection or robot functionality.
 
 ```python
 import pandas as pd
@@ -233,13 +221,11 @@ def ingest_team_event_status(
         session.commit()
 ```
 
-Merged feature columns use slot-specific prefixes such as
-`red_team_1_event_scout_passed_inspection`.
+Merged feature columns use slot-specific prefixes such as `red_team_1_event_scout_passed_inspection`.
 
 ## Alliance Strategy
 
-Use `MatchAllianceScouting` for data that belongs to one alliance in one match.
-The `alliance_color` value must be exactly `"red"` or `"blue"`.
+Use `MatchAllianceScouting` for data that belongs to one alliance in one match. The `alliance_color` value must be exactly `"red"` or `"blue"`.
 
 ```python
 import pandas as pd
@@ -273,19 +259,13 @@ def ingest_alliance_strategy(
         session.commit()
 ```
 
-Merged feature columns use `red_alliance_scout_` and
-`blue_alliance_scout_` prefixes.
+Merged feature columns use `red_alliance_scout_` and `blue_alliance_scout_` prefixes.
 
 ## Team Match Scouting
 
-Use `TeamMatchScouting` for one row per team per match. These are dynamic
-post-match observations, so they are safe to store in Parquet but should not be
-used as default pre-match inputs.
+Use `TeamMatchScouting` for one row per team per match. These are dynamic post-match observations, so they are safe to store in Parquet but should not be used as default pre-match inputs.
 
-The current feature merge attaches these rows to robot slots by filtering on
-`alliance_color`. Do not insert `"unknown"` if you expect the row to merge into
-features. If the raw file does not include alliance color, resolve it from TBA
-match data before writing, or reject the row with a clear error.
+The current feature merge attaches these rows to robot slots by filtering on `alliance_color`. Do not insert `"unknown"` if you expect the row to merge into features. If the raw file does not include alliance color, resolve it from TBA match data before writing, or reject the row with a clear error.
 
 ```python
 import pandas as pd
@@ -328,21 +308,16 @@ def ingest_team_match_data(
         session.commit()
 ```
 
-Merged feature columns use slot-specific prefixes such as
-`red_team_2_match_scout_teleop_pieces_scored`.
+Merged feature columns use slot-specific prefixes such as `red_team_2_match_scout_teleop_pieces_scored`.
 
 ## Leakage Discipline
 
 Scouting data falls into two groups:
 
-- Static or pre-match data: pit scouting, event context, and team-event status.
-  These can become model inputs in a future model version.
-- Dynamic match data: auto pieces, teleop pieces, defense, endgame, and driver
-  ratings recorded during or after a match. These should be treated as future
-  auxiliary targets or diagnostics, not default pre-match inputs.
+- Static or pre-match data: pit scouting, event context, and team-event status. These can become model inputs in a future model version.
+- Dynamic match data: auto pieces, teleop pieces, defense, endgame, and driver ratings recorded during or after a match. These should be treated as future auxiliary targets or diagnostics, not default pre-match inputs.
 
-The current default training workflow stores scouting columns in Parquet but
-does not add them to the default target map or model inputs.
+The current default training workflow stores scouting columns in Parquet but does not add them to the default target map or model inputs.
 
 ## Validation
 
