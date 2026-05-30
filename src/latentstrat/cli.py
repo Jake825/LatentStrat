@@ -41,6 +41,24 @@ from latentstrat.features import (
     write_feature_table,
 )
 from latentstrat.inspection import inspect_embeddings
+from latentstrat.paths import (
+    CACHE_ROOT,
+    EMBEDDING_DB_PATH,
+    EVIDENCE_ARTIFACT_ROOT,
+    INSPECTION_ARTIFACT_ROOT,
+    OPENAI_EMBEDDING_CACHE_PATH,
+    PRIOR_ARTIFACT_ROOT,
+    PRIOR_GRID_ARTIFACT_ROOT,
+    SCOUTING_DB_PATH,
+    SEASON_ARTIFACT_ROOT,
+    SMOKE_ARTIFACT_ROOT,
+    STATBOTICS_CACHE_PATH,
+    TBA_CACHE_BASE,
+    WALK_FORWARD_ARTIFACT_ROOT,
+    event_features_path,
+    prior_features_path,
+    season_features_path,
+)
 from latentstrat.pretrain_features import (
     build_prior_feature_table,
     write_prior_feature_table,
@@ -55,12 +73,12 @@ from latentstrat.walk_forward import run_walk_forward_validation
 app = typer.Typer(help="LatentStrat Python CLI")
 
 
-def _provider(cache_name: str = "tba_cache") -> TbaProvider:
-    return TbaProvider(cache_name=cache_name)
+def _provider(cache_name: str | Path = TBA_CACHE_BASE) -> TbaProvider:
+    return TbaProvider(cache_name=str(cache_name))
 
 
-def _statbotics_provider(cache_dir: str = "statbotics_offline_cache") -> StatboticsProvider:
-    return StatboticsProvider(cache_dir=cache_dir)
+def _statbotics_provider(cache_path: str | Path = STATBOTICS_CACHE_PATH) -> StatboticsProvider:
+    return StatboticsProvider(cache_path=cache_path)
 
 
 def _parse_int_csv(value: str, *, option_name: str) -> tuple[int, ...]:
@@ -109,7 +127,7 @@ def smoke_test(event_key: str | None = None) -> None:
     baselines = fit_baselines(prepared, split, opts)
     model, history, diagnostics = train_model(prepared, split, opts)
     report = evaluate_model(model, prepared, split, stats, opts, baselines)
-    out = Path("artifacts")
+    out = SMOKE_ARTIFACT_ROOT
     out.mkdir(exist_ok=True)
     prepared.to_csv(out / "smoke_match_table.csv", index=False)
     history.to_csv(out / "smoke_history.csv", index=False)
@@ -135,7 +153,7 @@ def build_features(
     ] = None,
     scouting_db: Annotated[
         Path, typer.Option("--scouting-db", help="Optional SQLite scouting database.")
-    ] = Path("data/scouting.db"),
+    ] = SCOUTING_DB_PATH,
     include_scouting: Annotated[
         bool,
         typer.Option(
@@ -161,7 +179,7 @@ def build_features(
         table = build_event_feature_table(
             event_key, opts, provider=provider, scouting_db_path=scouting_path
         )
-        output_path = output or Path(f"data/features_{event_key}.parquet")
+        output_path = output or event_features_path(event_key)
         sidecar_event_keys = [event_key]
     else:
         table = build_season_feature_table(
@@ -171,7 +189,7 @@ def build_features(
             event_limit=event_limit,
             scouting_db_path=scouting_path,
         )
-        output_path = output or Path(f"data/features_{season}.parquet")
+        output_path = output or season_features_path(season)
         sidecar_event_keys = sorted(table["event_key"].astype(str).unique())
     path = write_feature_table(table, output_path)
     if sidecar_output_dir is not None:
@@ -193,7 +211,7 @@ def build_features(
 def init_scouting_db(
     path: Annotated[
         Path, typer.Option("--path", help="SQLite scouting database path.")
-    ] = Path("data/scouting.db"),
+    ] = SCOUTING_DB_PATH,
 ) -> None:
     """Create the local SQLite scouting database schema."""
     db_path = create_db_and_tables(path)
@@ -205,7 +223,7 @@ def train_features(
     input_path: Annotated[Path, typer.Argument(help="Input Parquet feature file.")],
     output: Annotated[
         Path, typer.Option("--output", help="Directory for training artifacts.")
-    ] = Path("artifacts/features_run"),
+    ] = SEASON_ARTIFACT_ROOT / "features_run",
     epochs: Annotated[
         int | None, typer.Option("--epochs", help="Override training epochs.")
     ] = None,
@@ -371,7 +389,7 @@ def validate_walk_forward(
     ],
     output: Annotated[
         Path, typer.Option("--output", help="Directory for walk-forward artifacts.")
-    ] = Path("artifacts/v58_walk_forward"),
+    ] = WALK_FORWARD_ARTIFACT_ROOT / "v58_walk_forward",
     epochs: Annotated[int, typer.Option("--epochs", help="Training epochs per fold.")] = 5,
     mini_batch_size: Annotated[
         int | None, typer.Option("--mini-batch-size", help="Override mini-batch size.")
@@ -467,7 +485,7 @@ def build_prior_features(
     cache_path: Annotated[
         Path,
         typer.Option("--cache-path", help="SQLite cache for OpenAI text embeddings."),
-    ] = Path("data/prior_cache/openai_embeddings.sqlite"),
+    ] = OPENAI_EMBEDDING_CACHE_PATH,
     max_team_number: Annotated[
         int,
         typer.Option("--max-team-number", help="Largest team number to include."),
@@ -481,7 +499,7 @@ def build_prior_features(
     ] = None,
 ) -> None:
     """Build the full V5.6 transductive prior feature table."""
-    output_path = output or Path(f"data/prior_features_{target_season}.parquet")
+    output_path = output or prior_features_path(target_season)
     opts = PriorOpts(
         cache_path=str(cache_path),
         max_team_number=max_team_number,
@@ -554,7 +572,7 @@ def train_prior(
     if max_team_number is not None:
         updates["max_team_number"] = max_team_number
     opts = PriorOpts(**updates)
-    output_path = output or Path("data") / f"pretrained_prior_{pd.Timestamp.utcnow().year}.pt"
+    output_path = output or PRIOR_ARTIFACT_ROOT / f"pretrained_prior_{pd.Timestamp.utcnow().year}"
     result = train_prior_file(
         features,
         output_path,
@@ -582,7 +600,7 @@ def inspect_prior(
     output: Annotated[
         Path,
         typer.Option("--output", help="Directory for prior latent-space diagnostics."),
-    ] = Path("artifacts/prior_2026"),
+    ] = PRIOR_ARTIFACT_ROOT / "prior_2026",
     top_k: Annotated[
         int, typer.Option("--top-k", help="Nearest neighbors per team.")
     ] = 10,
@@ -601,7 +619,7 @@ def run_prior_grid_command(
     features: Annotated[Path, typer.Option("--features", help="V5.6 prior feature Parquet.")],
     output: Annotated[
         Path, typer.Option("--output", help="Directory for prior-grid artifacts.")
-    ] = Path("artifacts/prior_grid_2026"),
+    ] = PRIOR_GRID_ARTIFACT_ROOT / "prior_grid_2026",
     epochs: Annotated[int, typer.Option("--epochs", help="Epochs per grid run.")] = 500,
     batch_size: Annotated[
         int, typer.Option("--batch-size", help="Training batch size for each grid run.")
@@ -645,7 +663,7 @@ def consolidate_event(
     embedding_db: Annotated[
         Path,
         typer.Option("--embedding-db", help="SQLite store for durable base embeddings."),
-    ] = Path("data/latentstrat_embeddings.sqlite"),
+    ] = EMBEDDING_DB_PATH,
     delta_weeks: Annotated[
         float,
         typer.Option("--delta-weeks", help="Calendar weeks since this team's previous event."),
@@ -678,7 +696,7 @@ def full_season_offline(season: int = 2026, event_limit: int | None = None) -> N
     baselines = fit_baselines(prepared, split, opts)
     model, history, diagnostics = train_model(prepared, split, opts)
     report = evaluate_model(model, prepared, split, stats, opts, baselines)
-    out = Path("artifacts")
+    out = SEASON_ARTIFACT_ROOT / "full-season-offline"
     out.mkdir(exist_ok=True)
     prepared.to_csv(out / "full_season_match_table.csv", index=False)
     history.to_csv(out / "full_season_history.csv", index=False)
@@ -702,7 +720,7 @@ def inspect_embeddings_command(event_key: str | None = None) -> None:
     baselines = fit_baselines(prepared, split, opts)
     model, _, _ = train_model(prepared, split, opts, verbose=False)
     inspection = inspect_embeddings(model, prepared, team_map, opts, baselines)
-    out = Path("artifacts/inspection")
+    out = INSPECTION_ARTIFACT_ROOT / "embeddings"
     out.mkdir(parents=True, exist_ok=True)
     inspection.team_embedding_table.to_csv(out / "team_embeddings.csv", index=False)
     inspection.nearest_neighbors.to_csv(out / "nearest_neighbors.csv", index=False)
@@ -718,7 +736,7 @@ def build_evidence_packet_command(event_key: str | None = None) -> None:
         event_key = opts.smoke_event_key
     table, team_map = _load_event_table(event_key, opts)
     build_evidence_packet(table, team_map, opts)
-    typer.echo("Evidence packet written to artifacts/evidence_packet")
+    typer.echo(f"Evidence packet written to {EVIDENCE_ARTIFACT_ROOT / 'evidence_packet'}")
 
 
 @app.command("clear-cache")
@@ -726,13 +744,32 @@ def clear_cache() -> None:
     """Remove Python provider caches."""
     import shutil
 
-    for path in ("tba_cache.sqlite", "statbotics_offline_cache"):
-        target = Path(path)
-        if target.is_dir():
-            shutil.rmtree(target)
-        elif target.exists():
-            target.unlink()
-    typer.echo("Caches cleared.")
+    targets = [
+        TBA_CACHE_BASE.with_suffix(".sqlite"),
+        STATBOTICS_CACHE_PATH,
+        OPENAI_EMBEDDING_CACHE_PATH,
+        Path("data/prior_cache/openai_embeddings.sqlite"),
+        Path("tba_cache.sqlite"),
+        Path("statbotics_offline_cache"),
+    ]
+    removed = 0
+    for path in targets:
+        for target in (path, Path(f"{path}-shm"), Path(f"{path}-wal")):
+            if target.is_dir():
+                shutil.rmtree(target)
+                removed += 1
+            elif target.exists():
+                target.unlink()
+                removed += 1
+    if CACHE_ROOT.exists():
+        for sidecar in CACHE_ROOT.glob("*.sqlite-*"):
+            sidecar.unlink()
+            removed += 1
+    for legacy_sidecar in Path(".").glob("tba_cache.sqlite-*"):
+        if legacy_sidecar.exists():
+            legacy_sidecar.unlink()
+            removed += 1
+    typer.echo(f"Caches cleared. removed={removed}")
 
 
 if __name__ == "__main__":

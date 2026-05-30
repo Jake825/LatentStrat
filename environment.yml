@@ -17,7 +17,6 @@ dependencies:
       - tbapy==1.3.2
       - statbotics==3.0.0
       - requests-cache
-      - diskcache
       - openai>=1
       - pydantic>=2
       - python-dotenv

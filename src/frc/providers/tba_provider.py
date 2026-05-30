@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 
 from frc.models import Match, TbaAward, TbaEvent, TbaMatch, TbaTeam, _as_plain_data
@@ -15,7 +16,7 @@ class TbaProvider:
         self,
         api_key: str | None = None,
         *,
-        cache_name: str | None = "tba_cache",
+        cache_name: str | None = "data/cache/tba",
         backend: str = "sqlite",
         request_timeout: float = 30.0,
     ) -> None:
@@ -28,6 +29,7 @@ class TbaProvider:
         if cache_name:
             import requests_cache
 
+            Path(cache_name).parent.mkdir(parents=True, exist_ok=True)
             requests_cache.install_cache(cache_name, backend=backend)
 
         import tbapy

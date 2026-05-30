@@ -180,11 +180,11 @@ Recommended current command:
 ```bash
 latentstrat build-prior-features --target-season 2026 \
   --max-team-number 12500 \
-  --output data/prior_features_v564_2026.parquet
+  --output data/features/prior/prior_features_v564_2026.parquet
 
 latentstrat train-prior \
-  --features data/prior_features_v564_2026.parquet \
-  --output artifacts/prior_v564_latent16 \
+  --features data/features/prior/prior_features_v564_2026.parquet \
+  --output artifacts/prior/prior_v564_latent16 \
   --epochs 1000 \
   --latent-dim 16 \
   --max-team-number 12500 \
@@ -196,9 +196,9 @@ Inspect with:
 
 ```bash
 latentstrat inspect-prior \
-  --checkpoint artifacts/prior_v564_latent16/checkpoint.pt \
-  --features data/prior_features_v564_2026.parquet \
-  --output artifacts/prior_v564_latent16/inspection
+  --checkpoint artifacts/prior/prior_v564_latent16/checkpoint.pt \
+  --features data/features/prior/prior_features_v564_2026.parquet \
+  --output artifacts/prior/prior_v564_latent16/inspection
 ```
 
 ## Inspection Outputs

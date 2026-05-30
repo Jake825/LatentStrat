@@ -58,7 +58,7 @@ def ingest_csv(
     csv_path: str | Path,
     *,
     event_key: str,
-    db_path: str | Path = "data/scouting.db",
+    db_path: str | Path = "data/scouting/scouting.db",
 ) -> int:
     df = pd.read_csv(csv_path)
     engine = create_scouting_engine(db_path)

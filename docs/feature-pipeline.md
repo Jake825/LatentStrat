@@ -57,7 +57,7 @@ Declines are intentionally not modeled because TBA does not reliably populate th
 
 ## Scouting Joins
 
-Optional scouting data lives in `data/scouting.db`. When present, `build-features` joins SQLModel scouting tables onto the TBA spine and writes prefixed columns to Parquet:
+Optional scouting data lives in `data/scouting/scouting.db`. When present, `build-features` joins SQLModel scouting tables onto the TBA spine and writes prefixed columns to Parquet:
 
 - `event_scout_` for event context.
 - `match_scout_` for match context.
@@ -143,29 +143,29 @@ V5.6 represents explicit missing team slots with the learned ghost base row and 
 Build a season feature table:
 
 ```bash
-latentstrat build-features --season 2026 --output data/features_2026.parquet
+latentstrat build-features --season 2026 --output data/features/season/features_2026.parquet
 ```
 
 Build the same table with V5.7 sidecars:
 
 ```bash
-latentstrat build-features --season 2026 --output data/features_2026.parquet \
-  --sidecar-output-dir data/v57_sidecars
+latentstrat build-features --season 2026 --output data/features/season/features_2026.parquet \
+  --sidecar-output-dir data/sidecars/v58_2026
 ```
 
 Train from that local Parquet file:
 
 ```bash
-latentstrat train-features data/features_2026.parquet --output artifacts/features_run
+latentstrat train-features data/features/season/features_2026.parquet --output artifacts/season/features_run
 ```
 
 Train with optional V5.7 sidecar losses:
 
 ```bash
-latentstrat train-features data/features_2026.parquet \
-  --rankings-sidecar data/v57_sidecars/rankings_2026.parquet \
-  --selections-sidecar data/v57_sidecars/selections_2026.parquet \
-  --playoffs-sidecar data/v57_sidecars/playoffs_2026.parquet
+latentstrat train-features data/features/season/features_2026.parquet \
+  --rankings-sidecar data/sidecars/v58_2026/rankings_2026.parquet \
+  --selections-sidecar data/sidecars/v58_2026/selections_2026.parquet \
+  --playoffs-sidecar data/sidecars/v58_2026/playoffs_2026.parquet
 ```
 
 ## Related

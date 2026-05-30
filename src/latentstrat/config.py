@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
+from latentstrat.paths import OPENAI_EMBEDDING_CACHE_PATH
+
 
 class TargetMapping(BaseModel):
     target_name: str
@@ -129,7 +131,7 @@ class PriorOpts(BaseModel):
     future_growth_per_year: int = 800
     epa_source_year: int | None = None
     epa_rookie_baseline_z: float = -0.2
-    cache_path: str = "data/prior_cache/openai_embeddings.sqlite"
+    cache_path: str = str(OPENAI_EMBEDDING_CACHE_PATH)
     device: str = "auto"
     random_seed: int = 2026
 

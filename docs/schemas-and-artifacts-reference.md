@@ -24,8 +24,10 @@ This page documents the generated data contracts and output files used by the cu
 `train-prior` expects one row per prior team number. Current local V5.6.4 training uses:
 
 ```text
-data/prior_features_v563_2026.parquet
+data/features/prior/prior_features_v563_2026.parquet
 ```
+
+Older local artifacts may still exist at root-level `data/prior_features_*.parquet` paths. Those are historical explicit outputs; new defaults write under `data/features/prior/`.
 
 Required groups:
 
@@ -47,7 +49,7 @@ Local row counts:
 | `data/prior_features_v56_2026.parquet` | `20001` | historical 20,000-row experiment table |
 | `data/prior_features_v561_2026.parquet` | `12501` | text plus single EPA target generation |
 | `data/prior_features_v562_2026.parquet` | `12501` | cultural target attempt with broken EPA masks |
-| `data/prior_features_v563_2026.parquet` | `12501` | current V5.6.4 prior-training input |
+| `data/prior_features_v563_2026.parquet` | `12501` | current local V5.6.4 prior-training input; new rebuilds should use `data/features/prior/` |
 
 ## Match Feature Table
 
@@ -70,8 +72,8 @@ Current local files:
 
 | File | Rows | Columns | Notes |
 |---|---:|---:|---|
-| `data/features_v57_2026.parquet` | `18195` | `165` | V5.7 full-season feature table |
-| `data/features_v58_2026.parquet` | `18195` | `166` | V5.8 canonical week table |
+| `data/features_v57_2026.parquet` | `18195` | `165` | V5.7 full-season feature table, historical path |
+| `data/features_v58_2026.parquet` | `18195` | `166` | V5.8 canonical week table, historical path; new rebuilds should use `data/features/season/` |
 
 The exact number of columns can change as optional scouting or target columns are added. Required schema checks should focus on named column groups, not raw column count.
 
@@ -151,11 +153,37 @@ The `AVERAGE` row uses row-weighted validation aggregates for common metrics. Do
 
 ## Artifact Naming Convention
 
-Use versioned artifact directories for experiments:
+New defaults group artifacts by run type. Use versioned artifact directories for experiments:
 
 ```text
-artifacts/prior_v564_latent16/
-artifacts/v58_walk_forward_v564_latent16_50ep_2026/
+artifacts/prior/prior_v564_latent16/
+artifacts/walk-forward/v58_walk_forward_v564_latent16_50ep_2026/
 ```
 
 Do not overwrite old experiment folders when comparing model changes. The experiment ledger depends on stable paths.
+
+## Canonical Generated Storage
+
+The canonical generated-file layout is:
+
+```text
+data/cache/tba.sqlite
+data/cache/statbotics.sqlite
+data/cache/openai_embeddings.sqlite
+data/scouting/scouting.db
+data/embeddings/latentstrat_embeddings.sqlite
+data/features/prior/
+data/features/season/
+data/features/event/
+data/sidecars/
+artifacts/prior/
+artifacts/prior-grid/
+artifacts/season/
+artifacts/walk-forward/
+artifacts/smoke/
+artifacts/evidence/
+artifacts/inspection/
+runs/
+```
+
+Parquet feature tables remain file artifacts. Provider caches, scouting rows, and durable embedding stores use SQLite. The local organizer script `scripts/organize_local_outputs.ps1` can dry-run moves from legacy paths into this layout.

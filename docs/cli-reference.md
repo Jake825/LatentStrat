@@ -21,6 +21,10 @@ latentstrat --help
 
 Examples use current V5.6.4/V5.8 paths where possible. Older artifact names in local folders are historical.
 
+## Default Local Storage Layout
+
+When paths are omitted, CLI defaults use the canonical generated-file layout: `data/cache/` for TBA, Statbotics, and OpenAI SQLite caches; `data/scouting/scouting.db` for scouting; `data/embeddings/latentstrat_embeddings.sqlite` for durable consolidated embeddings; `data/features/prior/`, `data/features/season/`, and `data/features/event/` for Parquet feature tables; `data/sidecars/` for relational sidecars; grouped `artifacts/` subdirectories for model outputs; and `runs/` for TensorBoard. Explicit older paths still work when provided.
+
 ## Primary Pipeline Commands
 
 ### `build-prior-features`
@@ -31,7 +35,7 @@ Builds the transductive prior feature table for team numbers `0..max_team_number
 latentstrat build-prior-features \
   --target-season 2026 \
   --max-team-number 12500 \
-  --output data/prior_features_v563_2026.parquet
+  --output data/features/prior/prior_features_v563_2026.parquet
 ```
 
 Use cached embeddings whenever possible. Rebuild when narrative logic, EPA extraction, culture targets, or team cap changes.
@@ -42,8 +46,8 @@ Trains the sacrificial prior distiller and writes a stripped checkpoint containi
 
 ```bash
 latentstrat train-prior \
-  --features data/prior_features_v563_2026.parquet \
-  --output artifacts/prior_v564_latent16 \
+  --features data/features/prior/prior_features_v563_2026.parquet \
+  --output artifacts/prior/prior_v564_latent16 \
   --epochs 1000 \
   --latent-dim 16 \
   --max-team-number 12500 \
@@ -59,9 +63,9 @@ Writes prior latent-space diagnostics such as PCA plots, norm histograms, neares
 
 ```bash
 latentstrat inspect-prior \
-  --checkpoint artifacts/prior_v564_latent16/checkpoint.pt \
-  --features data/prior_features_v563_2026.parquet \
-  --output artifacts/prior_v564_latent16/inspection
+  --checkpoint artifacts/prior/prior_v564_latent16/checkpoint.pt \
+  --features data/features/prior/prior_features_v563_2026.parquet \
+  --output artifacts/prior/prior_v564_latent16/inspection
 ```
 
 ### `build-features`
@@ -71,8 +75,8 @@ Builds the match-grain Parquet feature table from TBA and optional scouting data
 ```bash
 latentstrat build-features \
   --season 2026 \
-  --output data/features_v58_2026.parquet \
-  --sidecar-output-dir data/v58_sidecars_2026
+  --output data/features/season/features_v58_2026.parquet \
+  --sidecar-output-dir data/sidecars/v58_2026
 ```
 
 For a single event:
@@ -80,7 +84,7 @@ For a single event:
 ```bash
 latentstrat build-features \
   --event-key 2026ilch \
-  --output data/features_2026ilch.parquet
+  --output data/features/event/features_2026ilch.parquet
 ```
 
 ### `train-features`
@@ -88,14 +92,14 @@ latentstrat build-features \
 Trains the Set Transformer from a feature Parquet file. It can load a stripped prior checkpoint into `Z_base` and optional sidecars for heterogeneous training.
 
 ```bash
-latentstrat train-features data/features_v58_2026.parquet \
-  --output artifacts/v58_full_season_common_metrics_100 \
+latentstrat train-features data/features/season/features_v58_2026.parquet \
+  --output artifacts/season/v58_full_season_common_metrics_100 \
   --epochs 100 \
   --mini-batch-size 256 \
-  --prior-checkpoint artifacts/prior_v564_latent16/checkpoint.pt \
-  --rankings-sidecar data/v58_sidecars_2026/rankings_2026.parquet \
-  --selections-sidecar data/v58_sidecars_2026/selections_2026.parquet \
-  --playoffs-sidecar data/v58_sidecars_2026/playoffs_2026.parquet \
+  --prior-checkpoint artifacts/prior/prior_v564_latent16/checkpoint.pt \
+  --rankings-sidecar data/sidecars/v58_2026/rankings_2026.parquet \
+  --selections-sidecar data/sidecars/v58_2026/selections_2026.parquet \
+  --playoffs-sidecar data/sidecars/v58_2026/playoffs_2026.parquet \
   --no-early-stopping \
   --restore-best \
   --tensorboard
@@ -107,12 +111,12 @@ Runs V5.8 temporal validation. Each fold trains on weeks `<= N`, validates on we
 
 ```bash
 latentstrat validate-walk-forward \
-  --features data/features_v58_2026.parquet \
-  --prior-checkpoint artifacts/prior_v564_latent16/checkpoint.pt \
-  --rankings-sidecar data/v58_sidecars_2026/rankings_2026.parquet \
-  --selections-sidecar data/v58_sidecars_2026/selections_2026.parquet \
-  --playoffs-sidecar data/v58_sidecars_2026/playoffs_2026.parquet \
-  --output artifacts/v58_walk_forward_v564_latent16_50ep_2026 \
+  --features data/features/season/features_v58_2026.parquet \
+  --prior-checkpoint artifacts/prior/prior_v564_latent16/checkpoint.pt \
+  --rankings-sidecar data/sidecars/v58_2026/rankings_2026.parquet \
+  --selections-sidecar data/sidecars/v58_2026/selections_2026.parquet \
+  --playoffs-sidecar data/sidecars/v58_2026/playoffs_2026.parquet \
+  --output artifacts/walk-forward/v58_walk_forward_v564_latent16_50ep_2026 \
   --epochs 50 \
   --mini-batch-size 256 \
   --latent-dim 16 \
@@ -129,8 +133,8 @@ Runs the latent-dimension elbow experiment over the production prior distiller.
 
 ```bash
 latentstrat run-prior-grid \
-  --features data/prior_features_v563_2026.parquet \
-  --output artifacts/prior_elbow_grid \
+  --features data/features/prior/prior_features_v563_2026.parquet \
+  --output artifacts/prior-grid/prior_elbow_grid \
   --epochs 500 \
   --latent-dims 2,4,8,16,32,64,128,256
 ```
@@ -166,11 +170,11 @@ latentstrat full-season-offline --season 2026
 Venue mode fine-tunes selected parts of a checkpoint for a specific event. It is intended for live-event adaptation experiments, not season-level validation.
 
 ```bash
-latentstrat train-features data/features_2026ilch.parquet \
+latentstrat train-features data/features/event/features_2026ilch.parquet \
   --venue-mode \
   --event-key 2026ilch \
-  --checkpoint artifacts/features_run/v5_checkpoint.pt \
-  --output artifacts/venue_2026ilch
+  --checkpoint artifacts/season/features_run/v5_checkpoint.pt \
+  --output artifacts/season/venue_2026ilch
 ```
 
 ### `consolidate-event`
@@ -179,9 +183,9 @@ Folds event deltas back into durable base embeddings using the offline consolida
 
 ```bash
 latentstrat consolidate-event \
-  artifacts/features_run/v5_checkpoint.pt \
+  artifacts/season/features_run/v5_checkpoint.pt \
   --event-key 2026ilch \
-  --embedding-db data/team_embeddings.db \
+  --embedding-db data/embeddings/latentstrat_embeddings.sqlite \
   --delta-weeks 1.0
 ```
 
@@ -210,15 +214,24 @@ latentstrat smoke-test --event-key 2026ilch
 Creates the local SQLite scouting database schema.
 
 ```bash
-latentstrat init-scouting-db --path data/scouting.db
+latentstrat init-scouting-db --path data/scouting/scouting.db
 ```
 
 ### `clear-cache`
 
-Removes Python provider caches. Use this when cached TBA or Statbotics payloads are stale or when debugging provider behavior.
+Removes Python provider caches under `data/cache/` and legacy transition caches such as `tba_cache.sqlite` and `statbotics_offline_cache/`. It does not remove feature tables, scouting databases, artifacts, or TensorBoard runs. Use this when cached TBA, Statbotics, or OpenAI embedding payloads are stale or when debugging provider behavior.
 
 ```bash
 latentstrat clear-cache
+```
+
+## Local Output Organizer
+
+The helper script `scripts/organize_local_outputs.ps1` can dry-run moves from legacy generated paths into the canonical storage layout. It never deletes files and skips existing destinations.
+
+```powershell
+scripts/organize_local_outputs.ps1
+scripts/organize_local_outputs.ps1 -Apply
 ```
 
 ## TensorBoard

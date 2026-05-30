@@ -7,11 +7,17 @@ venv/
 artifacts/
 runs/
 data/*.parquet
+data/**/*.parquet
 data/*.db
+data/**/*.db
 data/*.sqlite
+data/**/*.sqlite
 data/*.sqlite-shm
+data/**/*.sqlite-shm
 data/*.sqlite-wal
+data/**/*.sqlite-wal
 data/*.pt
+data/**/*.pt
 .env
 .env.local
 *.sqlite

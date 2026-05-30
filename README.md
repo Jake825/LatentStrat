@@ -38,22 +38,22 @@ For a complete command-by-command reference, see
 
 ```bash
 latentstrat api-smoke
-latentstrat init-scouting-db --path data/scouting.db
-latentstrat build-features --event-key 2026ilch --output data/features_2026ilch.parquet
-latentstrat build-features --season 2026 --output data/features_2026.parquet --sidecar-output-dir data/v57_sidecars
-latentstrat build-prior-features --target-season 2026 --output data/prior_features_2026.parquet
-latentstrat train-prior --features data/prior_features_2026.parquet --output artifacts/prior_v564_latent16 --epochs 1000 --latent-dim 16 --tensorboard
+latentstrat init-scouting-db --path data/scouting/scouting.db
+latentstrat build-features --event-key 2026ilch --output data/features/event/features_2026ilch.parquet
+latentstrat build-features --season 2026 --output data/features/season/features_2026.parquet --sidecar-output-dir data/sidecars/v58_2026
+latentstrat build-prior-features --target-season 2026 --output data/features/prior/prior_features_2026.parquet
+latentstrat train-prior --features data/features/prior/prior_features_2026.parquet --output artifacts/prior/prior_v564_latent16 --epochs 1000 --latent-dim 16 --tensorboard
 tensorboard --logdir=runs
-latentstrat inspect-prior --checkpoint artifacts/prior_v564_latent16/checkpoint.pt --output artifacts/prior_v564_latent16/inspection
-latentstrat run-prior-grid --features data/prior_features_2026.parquet --output artifacts/prior_elbow_grid --epochs 500 --latent-dims 2,4,8,16,32,64,128,256
-latentstrat train-features data/features_2026.parquet --prior-checkpoint artifacts/prior_v564_latent16/checkpoint.pt
-latentstrat train-features data/features_2026.parquet --rankings-sidecar data/v57_sidecars/rankings_2026.parquet --selections-sidecar data/v57_sidecars/selections_2026.parquet --playoffs-sidecar data/v57_sidecars/playoffs_2026.parquet
-latentstrat train-features data/features_2026.parquet --epochs 100 --no-early-stopping --restore-best
+latentstrat inspect-prior --checkpoint artifacts/prior/prior_v564_latent16/checkpoint.pt --output artifacts/prior/prior_v564_latent16/inspection
+latentstrat run-prior-grid --features data/features/prior/prior_features_2026.parquet --output artifacts/prior-grid/prior_elbow_grid --epochs 500 --latent-dims 2,4,8,16,32,64,128,256
+latentstrat train-features data/features/season/features_2026.parquet --prior-checkpoint artifacts/prior/prior_v564_latent16/checkpoint.pt
+latentstrat train-features data/features/season/features_2026.parquet --rankings-sidecar data/sidecars/v58_2026/rankings_2026.parquet --selections-sidecar data/sidecars/v58_2026/selections_2026.parquet --playoffs-sidecar data/sidecars/v58_2026/playoffs_2026.parquet
+latentstrat train-features data/features/season/features_2026.parquet --epochs 100 --no-early-stopping --restore-best
 tensorboard --logdir=runs
-latentstrat validate-walk-forward --features data/features_2026.parquet --prior-checkpoint artifacts/prior_v564_latent16/checkpoint.pt --rankings-sidecar data/v57_sidecars/rankings_2026.parquet --selections-sidecar data/v57_sidecars/selections_2026.parquet --playoffs-sidecar data/v57_sidecars/playoffs_2026.parquet --output artifacts/v58_walk_forward_2026 --epochs 5 --latent-dim 16
-latentstrat train-features data/features_2026ilch.parquet --output artifacts/features_run
-latentstrat train-features data/features_2026ilch.parquet --venue-mode --event-key 2026ilch --checkpoint artifacts/features_run/v5_checkpoint.pt
-latentstrat consolidate-event artifacts/features_run/v5_checkpoint.pt --event-key 2026ilch
+latentstrat validate-walk-forward --features data/features/season/features_2026.parquet --prior-checkpoint artifacts/prior/prior_v564_latent16/checkpoint.pt --rankings-sidecar data/sidecars/v58_2026/rankings_2026.parquet --selections-sidecar data/sidecars/v58_2026/selections_2026.parquet --playoffs-sidecar data/sidecars/v58_2026/playoffs_2026.parquet --output artifacts/walk-forward/v58_walk_forward_2026 --epochs 5 --latent-dim 16
+latentstrat train-features data/features/event/features_2026ilch.parquet --output artifacts/season/features_run
+latentstrat train-features data/features/event/features_2026ilch.parquet --venue-mode --event-key 2026ilch --checkpoint artifacts/season/features_run/v5_checkpoint.pt
+latentstrat consolidate-event artifacts/season/features_run/v5_checkpoint.pt --event-key 2026ilch
 latentstrat smoke-test
 latentstrat full-season-offline --season 2026
 latentstrat inspect-embeddings
@@ -61,8 +61,8 @@ latentstrat build-evidence-packet
 ```
 
 The preferred ML loop is to run `build-features` after data changes, then run
-`train-features` repeatedly from the local Parquet file. Python also keeps
-SQLite/disk caches for raw provider calls.
+`train-features` repeatedly from the local Parquet file. Provider and embedding
+caches use local SQLite files under `data/cache/`.
 
 All LatentStrat training CLI entrypoints should support local TensorBoard logs
 under `runs/` by default, with `--no-tensorboard` available for quiet batch or
@@ -71,9 +71,15 @@ The `runs/` directory is ignored by Git. See
 [Training and validation](docs/training-and-validation.md) for the logging
 policy expected of future training scripts.
 
-Optional scouting data lives in `data/scouting.db`. `build-features` merges it
+Optional scouting data lives in `data/scouting/scouting.db`. `build-features` merges it
 into Parquet when the database exists; training still reads only the Parquet
 feature file.
+
+## Local Storage Layout
+
+Generated local files are organized by purpose. Provider caches live under `data/cache/`: TBA uses `data/cache/tba.sqlite`, Statbotics uses `data/cache/statbotics.sqlite`, and OpenAI embeddings use `data/cache/openai_embeddings.sqlite`. Scouting uses `data/scouting/scouting.db`, durable consolidated embeddings use `data/embeddings/latentstrat_embeddings.sqlite`, Parquet feature tables live under `data/features/`, sidecars live under `data/sidecars/`, model artifacts live under grouped `artifacts/` subdirectories, and TensorBoard runs stay under `runs/`. Legacy explicit paths still work, but new commands and docs should prefer the canonical layout.
+
+Use `scripts/organize_local_outputs.ps1` to preview local generated-file moves into this layout. The default mode is a dry run; pass `-Apply` only after reviewing the planned moves.
 
 V5.7 match features include generic score-breakdown targets for atomic scoring
 counts, committed fouls, bonus ranking-point thresholds, and special penalties.

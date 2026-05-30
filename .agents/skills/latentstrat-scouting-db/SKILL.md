@@ -13,7 +13,7 @@ Use this skill for repo-specific knowledge about LatentStrat's scouting database
 
 - Scouting data is transactional SQLite via SQLModel.
 - Training reads Parquet, not SQLite.
-- `build-features` left-joins scouting tables into the TBA-derived match table when `data/scouting.db` exists.
+- `build-features` left-joins scouting tables into the TBA-derived match table when `data/scouting/scouting.db` exists.
 - Current schema lives in `src/frc/scouting.py`.
 - Feature merge logic lives in `src/latentstrat/features.py`.
 

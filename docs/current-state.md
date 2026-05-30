@@ -58,12 +58,12 @@ Use these as the current known-good reference artifacts unless a newer run is ex
 
 | Purpose | Path |
 |---|---|
-| Current prior checkpoint | `artifacts/prior_v564_latent16/checkpoint.pt` |
-| Current prior inspection | `artifacts/prior_v564_latent16/inspection/` |
-| Current walk-forward run | `artifacts/v58_walk_forward_v564_latent16_50ep_2026/` |
-| Current prior features used for V5.6.4 training | `data/prior_features_v563_2026.parquet` |
-| Current season features | `data/features_v58_2026.parquet` |
-| Current sidecars | `data/v58_sidecars_2026/` |
+| Current prior checkpoint | `artifacts/prior_v564_latent16/checkpoint.pt` local historical path; new default equivalent is `artifacts/prior/prior_v564_latent16/checkpoint.pt` |
+| Current prior inspection | `artifacts/prior_v564_latent16/inspection/` local historical path; new default equivalent is `artifacts/prior/prior_v564_latent16/inspection/` |
+| Current walk-forward run | `artifacts/v58_walk_forward_v564_latent16_50ep_2026/` local historical path; new default equivalent is `artifacts/walk-forward/v58_walk_forward_v564_latent16_50ep_2026/` |
+| Current prior features used for V5.6.4 training | `data/prior_features_v563_2026.parquet` local historical path; new default equivalent is `data/features/prior/prior_features_v563_2026.parquet` |
+| Current season features | `data/features_v58_2026.parquet` local historical path; new default equivalent is `data/features/season/features_v58_2026.parquet` |
+| Current sidecars | `data/v58_sidecars_2026/` local historical path; new default equivalent is `data/sidecars/v58_2026/` |
 
 V5.6.4 is a training-loss/model update over the V5.6.3 prior feature schema. That is why the local V5.6.4 prior run uses `data/prior_features_v563_2026.parquet`.
 

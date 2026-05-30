@@ -13,6 +13,7 @@ from latentstrat.config import LatentStratOptions, default_options
 from latentstrat.data import Split, TargetStats, apply_target_stats, fit_target_stats, make_split
 from latentstrat.evaluation import EvaluationReport, evaluate_model
 from latentstrat.inspection import inspect_embeddings
+from latentstrat.paths import EVIDENCE_ARTIFACT_ROOT
 from latentstrat.training import TrainingDiagnostics, train_model
 
 
@@ -305,7 +306,7 @@ def build_evidence_packet(
     team_index_map: dict[str, int],
     opts: LatentStratOptions | None = None,
     *,
-    output_dir: str | Path = "artifacts/evidence_packet",
+    output_dir: str | Path = EVIDENCE_ARTIFACT_ROOT / "evidence_packet",
     write_files: bool = True,
     verbose: bool = True,
     seeds: tuple[int, ...] | None = None,

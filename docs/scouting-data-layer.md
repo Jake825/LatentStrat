@@ -31,17 +31,17 @@ The scouting schema mirrors TBA's key hierarchy:
 Initialize the local database with:
 
 ```bash
-latentstrat init-scouting-db --path data/scouting.db
+latentstrat init-scouting-db --path data/scouting/scouting.db
 ```
 
 `data/*.db` and SQLite sidecar files are ignored by Git.
 
 ## Feature Merge
 
-When `build-features` runs, it looks for `data/scouting.db` by default. If the database exists, available scouting rows are left-joined into the TBA match table before Parquet is written:
+When `build-features` runs, it looks for `data/scouting/scouting.db` by default. If the database exists, available scouting rows are left-joined into the TBA match table before Parquet is written:
 
 ```bash
-latentstrat build-features --event-key 2026ilch --output data/features_2026ilch.parquet
+latentstrat build-features --event-key 2026ilch --output data/features/event/features_2026ilch.parquet
 ```
 
 If the database is missing, LatentStrat prints a message and writes TBA-only features. Use `--no-scouting` to disable scouting lookup explicitly.

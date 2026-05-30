@@ -9,7 +9,7 @@ In LatentStrat code, prefer the local wrapper because it centralizes caching and
 ```python
 from frc.providers.statbotics_provider import StatboticsProvider
 
-provider = StatboticsProvider()  # uses statbotics_offline_cache by default
+provider = StatboticsProvider()  # uses data/cache/statbotics.sqlite by default
 matches = provider.get_matches(year=2024, limit=10000)
 ```
 

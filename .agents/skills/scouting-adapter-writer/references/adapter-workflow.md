@@ -46,7 +46,7 @@ After implementation, run targeted tests first, then rebuild a small feature fil
 
 ```powershell
 pytest tests/test_latentstrat_features.py
-python -m latentstrat.cli build-features --event-key 2026ilch --output data/features_2026ilch.parquet
+python -m latentstrat.cli build-features --event-key 2026ilch --output data/features/event/features_2026ilch.parquet
 ```
 
 If live TBA access is unavailable, use focused unit tests with a synthetic feature table and temporary SQLite database.

@@ -90,10 +90,10 @@ Embeddings are cached by a stable hash of the model, dimensions, and narrative t
 
 ## Scouting SQLite
 
-Local scouting data is optional. It lives in `data/scouting.db` and is created with:
+Local scouting data is optional. It lives in `data/scouting/scouting.db` by default and is created with:
 
 ```bash
-latentstrat init-scouting-db --path data/scouting.db
+latentstrat init-scouting-db --path data/scouting/scouting.db
 ```
 
 When the database exists, `build-features` can merge scouting rows into the Parquet feature table. Training still reads only the Parquet file.
@@ -128,14 +128,19 @@ OPENAI_API_KEY=...
 
 Never copy real keys into docs, logs, screenshots, or committed files.
 
-Common local caches include:
+Common local storage paths include:
 
-- HTTP/provider caches for TBA calls.
-- OpenAI embedding cache under `data/prior_cache/`.
-- Generated Parquet under `data/`.
+- TBA request cache at `data/cache/tba.sqlite`.
+- Statbotics response cache at `data/cache/statbotics.sqlite`.
+- OpenAI embedding cache at `data/cache/openai_embeddings.sqlite`.
+- Scouting database at `data/scouting/scouting.db`.
+- Durable consolidated embeddings at `data/embeddings/latentstrat_embeddings.sqlite`.
+- Generated Parquet features under `data/features/`.
+- Sidecar Parquet files under `data/sidecars/`.
+- Model and run artifacts under grouped `artifacts/` subdirectories.
 - TensorBoard logs under `runs/`.
 
-The cache files are local development artifacts, not model design.
+The cache files are local development artifacts, not model design. Parquet feature tables remain file artifacts; provider caches and scouting stores use SQLite.
 
 ## Related
 

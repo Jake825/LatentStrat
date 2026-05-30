@@ -18,7 +18,7 @@ This guide defines the standard pattern for writing custom importers that move r
 
 LatentStrat uses a data lake workflow:
 
-1. Raw scouting files are imported into `data/scouting.db`.
+1. Raw scouting files are imported into `data/scouting/scouting.db`.
 2. `build-features` merges scouting rows with TBA match data.
 3. PyTorch training reads the resulting Parquet file and never queries SQLite during the training loop.
 
@@ -27,7 +27,7 @@ LatentStrat uses a data lake workflow:
 Initialize the local scouting database before running importer scripts:
 
 ```powershell
-python -m latentstrat.cli init-scouting-db --path data/scouting.db
+python -m latentstrat.cli init-scouting-db --path data/scouting/scouting.db
 ```
 
 Importer scripts should use the current scouting API:
@@ -37,7 +37,7 @@ from sqlmodel import Session
 
 from frc.scouting import TeamScouting, create_scouting_engine
 
-engine = create_scouting_engine("data/scouting.db")
+engine = create_scouting_engine("data/scouting/scouting.db")
 
 with Session(engine) as session:
     session.merge(TeamScouting(team_key="frc254", drive_base="Swerve"))
@@ -107,7 +107,7 @@ from sqlmodel import Session
 from frc.scouting import TeamScouting, create_scouting_engine
 
 
-def ingest_pit_data(csv_path: str, db_path: str = "data/scouting.db") -> None:
+def ingest_pit_data(csv_path: str, db_path: str = "data/scouting/scouting.db") -> None:
     df = pd.read_csv(csv_path)
     engine = create_scouting_engine(db_path)
 
@@ -137,7 +137,7 @@ from sqlmodel import Session
 from frc.scouting import EventScouting, create_scouting_engine
 
 
-def ingest_event_context(csv_path: str, db_path: str = "data/scouting.db") -> None:
+def ingest_event_context(csv_path: str, db_path: str = "data/scouting/scouting.db") -> None:
     df = pd.read_csv(csv_path)
     engine = create_scouting_engine(db_path)
 
@@ -168,7 +168,7 @@ from frc.scouting import MatchScouting, create_scouting_engine
 def ingest_match_context(
     csv_path: str,
     event_key: str,
-    db_path: str = "data/scouting.db",
+    db_path: str = "data/scouting/scouting.db",
 ) -> None:
     df = pd.read_csv(csv_path)
     engine = create_scouting_engine(db_path)
@@ -203,7 +203,7 @@ from frc.scouting import TeamEventScouting, create_scouting_engine
 def ingest_team_event_status(
     csv_path: str,
     event_key: str,
-    db_path: str = "data/scouting.db",
+    db_path: str = "data/scouting/scouting.db",
 ) -> None:
     df = pd.read_csv(csv_path)
     engine = create_scouting_engine(db_path)
@@ -237,7 +237,7 @@ from frc.scouting import MatchAllianceScouting, create_scouting_engine
 def ingest_alliance_strategy(
     csv_path: str,
     event_key: str,
-    db_path: str = "data/scouting.db",
+    db_path: str = "data/scouting/scouting.db",
 ) -> None:
     df = pd.read_csv(csv_path)
     engine = create_scouting_engine(db_path)
@@ -277,7 +277,7 @@ from frc.scouting import TeamMatchScouting, create_scouting_engine
 def ingest_team_match_data(
     csv_path: str,
     event_key: str,
-    db_path: str = "data/scouting.db",
+    db_path: str = "data/scouting/scouting.db",
 ) -> None:
     df = pd.read_csv(csv_path)
     engine = create_scouting_engine(db_path)
@@ -324,13 +324,13 @@ The current default training workflow stores scouting columns in Parquet but doe
 After ingestion, rebuild the feature store:
 
 ```powershell
-python -m latentstrat.cli build-features --event-key 2026ilch --output data/features_2026ilch.parquet
+python -m latentstrat.cli build-features --event-key 2026ilch --output data/features/event/features_2026ilch.parquet
 ```
 
 Inspect the merged scouting columns:
 
 ```powershell
-python -c "import pandas as pd; df=pd.read_parquet('data/features_2026ilch.parquet', engine='pyarrow'); print([c for c in df.columns if 'scout' in c])"
+python -c "import pandas as pd; df=pd.read_parquet('data/features/event/features_2026ilch.parquet', engine='pyarrow'); print([c for c in df.columns if 'scout' in c])"
 ```
 
 You can also query the SQLite database directly:
@@ -340,7 +340,7 @@ from sqlmodel import Session, select
 
 from frc.scouting import TeamMatchScouting, create_scouting_engine
 
-engine = create_scouting_engine("data/scouting.db")
+engine = create_scouting_engine("data/scouting/scouting.db")
 
 with Session(engine) as session:
     rows = session.exec(select(TeamMatchScouting)).all()

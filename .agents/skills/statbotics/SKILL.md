@@ -9,7 +9,7 @@ description: Use when working with the Statbotics FRC analytics platform, the st
 
 Use this skill for Statbotics workflows in FIRST Robotics Competition analytics, especially when building prediction features, comparing team strength, simulating events, or using EPA alongside The Blue Alliance data.
 
-LatentStrat already depends on `statbotics==3.0.0` and provides `frc.providers.statbotics_provider.StatboticsProvider`, a diskcache-backed wrapper around `statbotics.Statbotics` using `statbotics_offline_cache`.
+LatentStrat already depends on `statbotics==3.0.0` and provides `frc.providers.statbotics_provider.StatboticsProvider`, a SQLite-backed wrapper around `statbotics.Statbotics` using `data/cache/statbotics.sqlite` by default.
 
 ## Core Directives
 

@@ -147,24 +147,24 @@ This prevents future rankings, selections, or playoffs from reaching earlier tra
 Standard feature training:
 
 ```bash
-latentstrat train-features data/features_v58_2026.parquet \
-  --output artifacts/features_run \
-  --prior-checkpoint artifacts/prior_v564_latent16/checkpoint.pt \
+latentstrat train-features data/features/season/features_v58_2026.parquet \
+  --output artifacts/season/features_run \
+  --prior-checkpoint artifacts/prior/prior_v564_latent16/checkpoint.pt \
   --tensorboard
 ```
 
 With sidecars:
 
 ```bash
-latentstrat train-features data/features_v58_2026.parquet \
-  --output artifacts/v58_full_season_common_metrics_100 \
+latentstrat train-features data/features/season/features_v58_2026.parquet \
+  --output artifacts/season/v58_full_season_common_metrics_100 \
   --epochs 100 \
   --no-early-stopping \
   --restore-best \
-  --prior-checkpoint artifacts/prior_v564_latent16/checkpoint.pt \
-  --rankings-sidecar data/v58_sidecars_2026/rankings_2026.parquet \
-  --selections-sidecar data/v58_sidecars_2026/selections_2026.parquet \
-  --playoffs-sidecar data/v58_sidecars_2026/playoffs_2026.parquet \
+  --prior-checkpoint artifacts/prior/prior_v564_latent16/checkpoint.pt \
+  --rankings-sidecar data/sidecars/v58_2026/rankings_2026.parquet \
+  --selections-sidecar data/sidecars/v58_2026/selections_2026.parquet \
+  --playoffs-sidecar data/sidecars/v58_2026/playoffs_2026.parquet \
   --tensorboard
 ```
 
@@ -172,12 +172,12 @@ Walk-forward:
 
 ```bash
 latentstrat validate-walk-forward \
-  --features data/features_v58_2026.parquet \
-  --prior-checkpoint artifacts/prior_v564_latent16/checkpoint.pt \
-  --rankings-sidecar data/v58_sidecars_2026/rankings_2026.parquet \
-  --selections-sidecar data/v58_sidecars_2026/selections_2026.parquet \
-  --playoffs-sidecar data/v58_sidecars_2026/playoffs_2026.parquet \
-  --output artifacts/v58_walk_forward_v564_latent16_50ep_2026 \
+  --features data/features/season/features_v58_2026.parquet \
+  --prior-checkpoint artifacts/prior/prior_v564_latent16/checkpoint.pt \
+  --rankings-sidecar data/sidecars/v58_2026/rankings_2026.parquet \
+  --selections-sidecar data/sidecars/v58_2026/selections_2026.parquet \
+  --playoffs-sidecar data/sidecars/v58_2026/playoffs_2026.parquet \
+  --output artifacts/walk-forward/v58_walk_forward_v564_latent16_50ep_2026 \
   --epochs 50 \
   --mini-batch-size 256 \
   --latent-dim 16 \

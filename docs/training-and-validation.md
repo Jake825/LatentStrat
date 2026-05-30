@@ -27,11 +27,11 @@ Detailed feature construction, scouting merge prefixes, Parquet dtype behavior, 
 Run:
 
 ```bash
-latentstrat build-features --season 2026 --output data/features_2026.parquet
+latentstrat build-features --season 2026 --output data/features/season/features_2026.parquet
 ```
 
 1. **Extract**: `tbapy` pulls TBA data. Network calls are cached locally via `requests-cache`.
-2. **Transform**: Pandas builds a flat match table with string team keys such as `frc254`, V5 match targets, endgame labels, and post-event award auxiliary labels. If `data/scouting.db` exists, SQLModel scouting rows are left-joined into the same flat table.
+2. **Transform**: Pandas builds a flat match table with string team keys such as `frc254`, V5 match targets, endgame labels, and post-event award auxiliary labels. If `data/scouting/scouting.db` exists, SQLModel scouting rows are left-joined into the same flat table.
 3. **Load**: The CLI saves the typed Pandas DataFrame to Parquet with the explicit `pyarrow` engine.
 
 Parquet is used because CSV cannot reliably preserve nullable integer and timestamp dtypes across the feature boundary. Tensor-bound values are converted deliberately when `MatchTensorDataset` builds PyTorch tensors; Parquet columns are not blanket-cast to `float32`.
@@ -46,18 +46,18 @@ Run:
 
 ```bash
 latentstrat build-prior-features --target-season 2026 \
-  --output data/prior_features_2026.parquet
-latentstrat train-prior --features data/prior_features_2026.parquet \
-  --output artifacts/prior_v564_latent16 \
+  --output data/features/prior/prior_features_2026.parquet
+latentstrat train-prior --features data/features/prior/prior_features_2026.parquet \
+  --output artifacts/prior/prior_v564_latent16 \
   --epochs 1000 \
   --latent-dim 16 \
   --tensorboard
 tensorboard --logdir=runs
 latentstrat inspect-prior \
-  --checkpoint artifacts/prior_v564_latent16/checkpoint.pt \
-  --output artifacts/prior_v564_latent16/inspection
-latentstrat train-features data/features_2026.parquet \
-  --prior-checkpoint artifacts/prior_v564_latent16/checkpoint.pt
+  --checkpoint artifacts/prior/prior_v564_latent16/checkpoint.pt \
+  --output artifacts/prior/prior_v564_latent16/inspection
+latentstrat train-features data/features/season/features_2026.parquet \
+  --prior-checkpoint artifacts/prior/prior_v564_latent16/checkpoint.pt
 ```
 
 `build-prior-features` pages the TBA team universe and writes exactly one row per team number from `0` through `max_team_number`. Row `0` uses a fixed learned ghost robot narrative. Known teams active in the target season become Anchors; known inactive teams become Ghosts; unknown historical gaps become Siblings using nearby team-number context; unknown future numbers become Future rookies using the projected registration formula. Performance facts in narrative text are limited to `year < target_season`; target-season and future results or awards are excluded.
@@ -88,8 +88,8 @@ team_number -> Embedding(max_team_number + 1, latent_dim)
 Smoke run:
 
 ```bash
-latentstrat run-prior-grid --features data/prior_features_2026.parquet \
-  --output artifacts/prior_grid_smoke \
+latentstrat run-prior-grid --features data/features/prior/prior_features_2026.parquet \
+  --output artifacts/prior-grid/prior_grid_smoke \
   --epochs 1 \
   --latent-dims 2,4,8
 ```
@@ -97,8 +97,8 @@ latentstrat run-prior-grid --features data/prior_features_2026.parquet \
 Full elbow sweep:
 
 ```bash
-latentstrat run-prior-grid --features data/prior_features_2026.parquet \
-  --output artifacts/prior_elbow_grid \
+latentstrat run-prior-grid --features data/features/prior/prior_features_2026.parquet \
+  --output artifacts/prior-grid/prior_elbow_grid \
   --epochs 500 \
   --latent-dims 2,4,8,16,32,64,128,256
 ```
@@ -118,7 +118,7 @@ To map string FRC team keys to tensors, `make_v5_team_index_maps` runs in memory
 Run:
 
 ```bash
-latentstrat train-features data/features_2026.parquet
+latentstrat train-features data/features/season/features_2026.parquet
 tensorboard --logdir=runs
 ```
 
@@ -140,10 +140,10 @@ Training loops should log total train/validation loss, primary task losses, lear
 Optional sidecar losses can be supplied at training time:
 
 ```bash
-latentstrat train-features data/features_2026.parquet \
-  --rankings-sidecar data/v57_sidecars/rankings_2026.parquet \
-  --selections-sidecar data/v57_sidecars/selections_2026.parquet \
-  --playoffs-sidecar data/v57_sidecars/playoffs_2026.parquet
+latentstrat train-features data/features/season/features_2026.parquet \
+  --rankings-sidecar data/sidecars/v58_2026/rankings_2026.parquet \
+  --selections-sidecar data/sidecars/v58_2026/selections_2026.parquet \
+  --playoffs-sidecar data/sidecars/v58_2026/playoffs_2026.parquet
 ```
 
 The match loader drives each epoch. Non-empty sidecar loaders are cycled so short selection or playoff datasets do not stop the match epoch early. Empty sidecars are skipped.
@@ -151,25 +151,25 @@ The match loader drives each epoch. Non-empty sidecar loaders are cycled so shor
 For long monitored runs, keep TensorBoard live while disabling early stopping:
 
 ```bash
-latentstrat train-features data/features_2026.parquet \
+latentstrat train-features data/features/season/features_2026.parquet \
   --epochs 100 \
   --no-early-stopping \
   --restore-best \
-  --rankings-sidecar data/v57_sidecars/rankings_2026.parquet \
-  --selections-sidecar data/v57_sidecars/selections_2026.parquet \
-  --playoffs-sidecar data/v57_sidecars/playoffs_2026.parquet
+  --rankings-sidecar data/sidecars/v58_2026/rankings_2026.parquet \
+  --selections-sidecar data/sidecars/v58_2026/selections_2026.parquet \
+  --playoffs-sidecar data/sidecars/v58_2026/playoffs_2026.parquet
 ```
 
 V5.8 walk-forward validation uses canonical `event_week` values. TBA Week 0 is bundled into model-facing Week 1, and missing TBA weeks fall back to dense chronological event order. Each fold starts from the Day Zero prior, trains on weeks `<= N`, validates on week `N + 1`, and pre-filters sidecars to prevent future rankings, selections, or playoff labels from reaching training. `walk_forward_metrics.csv` includes row-weighted next-match phase score MSE, total score MSE when available, red-win accuracy, Brier score, and log loss. LatentStrat reports `p_red_win`; blue win probability is `1 - p_red_win`. The command also writes TensorBoard by default: a summary run tracks fold-level metrics, while one sub-run per fold tracks epoch-level training curves.
 
 ```bash
 latentstrat validate-walk-forward \
-  --features data/features_2026.parquet \
-  --prior-checkpoint artifacts/prior_v564_latent16/checkpoint.pt \
-  --rankings-sidecar data/v57_sidecars/rankings_2026.parquet \
-  --selections-sidecar data/v57_sidecars/selections_2026.parquet \
-  --playoffs-sidecar data/v57_sidecars/playoffs_2026.parquet \
-  --output artifacts/v58_walk_forward_2026 \
+  --features data/features/season/features_2026.parquet \
+  --prior-checkpoint artifacts/prior/prior_v564_latent16/checkpoint.pt \
+  --rankings-sidecar data/sidecars/v58_2026/rankings_2026.parquet \
+  --selections-sidecar data/sidecars/v58_2026/selections_2026.parquet \
+  --playoffs-sidecar data/sidecars/v58_2026/playoffs_2026.parquet \
+  --output artifacts/walk-forward/v58_walk_forward_2026 \
   --epochs 5 \
   --latent-dim 16 \
   --tensorboard
@@ -198,14 +198,14 @@ During evaluation, the model runs under `torch.inference_mode()` with `model.eva
 Venue mode fine-tunes only `Z_event` for a supplied event:
 
 ```bash
-latentstrat train-features data/features_2026.parquet --venue-mode --event-key 2026ilch \
-  --checkpoint artifacts/features_run/v5_checkpoint.pt
+latentstrat train-features data/features/season/features_2026.parquet --venue-mode --event-key 2026ilch \
+  --checkpoint artifacts/season/features_run/v5_checkpoint.pt
 ```
 
-After the event, `consolidate-event` folds event deltas into durable base embeddings using `DeltaIntegrationGate(Z_base, Z_event, delta_weeks)` and writes the result to `data/latentstrat_embeddings.sqlite`:
+After the event, `consolidate-event` folds event deltas into durable base embeddings using `DeltaIntegrationGate(Z_base, Z_event, delta_weeks)` and writes the result to `data/embeddings/latentstrat_embeddings.sqlite`:
 
 ```bash
-latentstrat consolidate-event artifacts/features_run/v5_checkpoint.pt --event-key 2026ilch
+latentstrat consolidate-event artifacts/season/features_run/v5_checkpoint.pt --event-key 2026ilch
 ```
 
 ## Related

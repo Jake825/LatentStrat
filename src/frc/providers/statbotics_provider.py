@@ -2,24 +2,73 @@
 
 from __future__ import annotations
 
+import json
+import sqlite3
+from pathlib import Path
 from typing import Any
 
 
 class StatboticsProvider:
     """Stable LatentStrat-facing wrapper around `statbotics.Statbotics`."""
 
-    def __init__(self, *, cache_dir: str = "statbotics_offline_cache") -> None:
+    def __init__(
+        self,
+        *,
+        cache_path: str | Path = "data/cache/statbotics.sqlite",
+        cache_dir: str | Path | None = None,
+    ) -> None:
         import statbotics
-        from diskcache import Cache
 
         self.client = statbotics.Statbotics()
-        self.cache = Cache(cache_dir)
+        if cache_dir is not None:
+            cache_path = Path(cache_dir) / "statbotics.sqlite"
+        self.cache_path = Path(cache_path)
+        if self.cache_path.exists() and self.cache_path.is_dir():
+            self.cache_path = self.cache_path / "statbotics.sqlite"
+        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_cache()
+
+    def _connect(self) -> sqlite3.Connection:
+        return sqlite3.connect(self.cache_path)
+
+    def _init_cache(self) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                create table if not exists statbotics_cache (
+                    cache_key text primary key,
+                    payload_json text not null
+                )
+                """
+            )
+
+    def _cache_key(self, key: tuple[Any, ...]) -> str:
+        return json.dumps(key, sort_keys=True, separators=(",", ":"), default=str)
 
     def _memoized(self, key: tuple[Any, ...], fetcher: Any) -> Any:
-        if key in self.cache:
-            return self.cache[key]
+        cache_key = self._cache_key(key)
+        with self._connect() as connection:
+            row = connection.execute(
+                "select payload_json from statbotics_cache where cache_key = ?",
+                (cache_key,),
+            ).fetchone()
+            if row is not None:
+                return json.loads(row[0])
         value = fetcher()
-        self.cache[key] = value
+        try:
+            payload_json = json.dumps(value, sort_keys=True)
+        except TypeError as exc:
+            raise TypeError(
+                f"Statbotics response for cache key {cache_key} is not JSON-serializable."
+            ) from exc
+        with self._connect() as connection:
+            connection.execute(
+                """
+                insert or replace into statbotics_cache (cache_key, payload_json)
+                values (?, ?)
+                """,
+                (cache_key, payload_json),
+            )
         return value
 
     def get_team(self, team: int) -> dict[str, Any]:

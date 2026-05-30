@@ -53,19 +53,19 @@ Use `$latentstrat-feature-pipeline` for the broader feature-table contract and `
 Initialize the database:
 
 ```powershell
-python -m latentstrat.cli init-scouting-db --path data/scouting.db
+python -m latentstrat.cli init-scouting-db --path data/scouting/scouting.db
 ```
 
 Build features with scouting data:
 
 ```powershell
-python -m latentstrat.cli build-features --event-key 2026ilch --output data/features_2026ilch.parquet
+python -m latentstrat.cli build-features --event-key 2026ilch --output data/features/event/features_2026ilch.parquet
 ```
 
 Build features without scouting data:
 
 ```powershell
-python -m latentstrat.cli build-features --event-key 2026ilch --no-scouting --output data/features_2026ilch.parquet
+python -m latentstrat.cli build-features --event-key 2026ilch --no-scouting --output data/features/event/features_2026ilch.parquet
 ```
 
 ## Leakage Boundaries

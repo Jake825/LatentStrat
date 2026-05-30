@@ -44,8 +44,8 @@ git switch --detach <commit>
 |---|---|
 | Status | `Unreleased / current working tree after cc58c31` |
 | Current stack | V5.6.4 prior, V5.7.2 stable season training, V5.8 walk-forward validation |
-| Current recommended prior | `artifacts/prior_v564_latent16/checkpoint.pt` |
-| Current recommended walk-forward run | `artifacts/v58_walk_forward_v564_latent16_50ep_2026/` |
+| Current recommended prior | `artifacts/prior_v564_latent16/checkpoint.pt` local historical path; new default equivalent is `artifacts/prior/prior_v564_latent16/checkpoint.pt` |
+| Current recommended walk-forward run | `artifacts/v58_walk_forward_v564_latent16_50ep_2026/` local historical path; new default equivalent is `artifacts/walk-forward/v58_walk_forward_v564_latent16_50ep_2026/` |
 | Current docs added after `cc58c31` | current state, architecture reference, experiment ledger, CLI reference, schema/artifact reference, student primer, changelog |
 | State note | This row should be replaced with a real commit hash after the documentation/current-state work is committed |
 

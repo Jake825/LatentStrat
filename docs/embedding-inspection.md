@@ -27,7 +27,7 @@ For V5.6.4 prior dictionary vectors before match training, run:
 
 ```bash
 latentstrat inspect-prior --checkpoint data/pretrained_prior_2026.pt \
-  --output artifacts/prior_2026
+  --output artifacts/prior/prior_2026
 ```
 
 This writes prior PCA plots, cosine neighbors, sanity checks, norm histograms, normalized-EPA and cultural-color PCA views when prior features are supplied, and training-loss artifacts for the learned `embedding_table` rows `0..max_team_number`, including the learned ghost robot. A production V5.6 checkpoint is stripped and does not carry the sacrificial decoder, so reconstruction MSE is intentionally `NaN` unless an older full-model checkpoint is inspected with `--features`.

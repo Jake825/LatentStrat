@@ -81,13 +81,13 @@ SCOUTING_MODELS = (
 )
 
 
-def create_scouting_engine(path: str | Path = "data/scouting.db") -> Engine:
+def create_scouting_engine(path: str | Path = "data/scouting/scouting.db") -> Engine:
     db_path = Path(path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     return create_engine(f"sqlite:///{db_path}", echo=False)
 
 
-def create_db_and_tables(path: str | Path = "data/scouting.db") -> Path:
+def create_db_and_tables(path: str | Path = "data/scouting/scouting.db") -> Path:
     db_path = Path(path)
     engine = create_scouting_engine(db_path)
     SQLModel.metadata.create_all(engine)

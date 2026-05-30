@@ -51,6 +51,10 @@ OPENAI_API_KEY=your_openai_key_here
 
 Do not paste real keys into docs, screenshots, commits, or transcripts.
 
+## Local Storage Layout
+
+New default paths keep generated outputs grouped by purpose. Provider caches live under `data/cache/`, scouting lives under `data/scouting/scouting.db`, durable consolidated embeddings live under `data/embeddings/latentstrat_embeddings.sqlite`, prior/season/event feature tables live under `data/features/`, sidecars live under `data/sidecars/`, artifacts live under grouped `artifacts/` subdirectories, and TensorBoard runs live under `runs/`. Explicit legacy paths still work when passed on the CLI, but new rebuilds should use the canonical layout.
+
 ## 3. Build The Prior Feature Table
 
 The prior feature table is the offline training set for Day Zero team identities.
@@ -59,7 +63,7 @@ The prior feature table is the offline training set for Day Zero team identities
 latentstrat build-prior-features `
   --target-season 2026 `
   --max-team-number 12500 `
-  --output data/prior_features_v564_2026.parquet
+  --output data/features/prior/prior_features_v564_2026.parquet
 ```
 
 Expected output:
@@ -68,7 +72,7 @@ Expected output:
 - OpenAI narrative vectors.
 - Statbotics normalized EPA trajectory columns.
 - Raw cultural target columns.
-- Cached OpenAI embeddings under `data/prior_cache/`.
+- Cached OpenAI embeddings under `data/cache/openai_embeddings.sqlite`.
 
 If the command fails with zero observed normalized EPA values, inspect the Statbotics extraction path and rebuild. V5.6.4 training expects usable normalized EPA trajectory columns.
 
@@ -76,8 +80,8 @@ If the command fails with zero observed normalized EPA values, inspect the Statb
 
 ```powershell
 latentstrat train-prior `
-  --features data/prior_features_v564_2026.parquet `
-  --output artifacts/prior_v564_latent16 `
+  --features data/features/prior/prior_features_v564_2026.parquet `
+  --output artifacts/prior/prior_v564_latent16 `
   --epochs 1000 `
   --latent-dim 16 `
   --max-team-number 12500 `
@@ -94,7 +98,7 @@ tensorboard --logdir=runs
 Expected output:
 
 ```text
-artifacts/prior_v564_latent16/checkpoint.pt
+artifacts/prior/prior_v564_latent16/checkpoint.pt
 ```
 
 The checkpoint should contain a stripped embedding table, not the sacrificial decoder.
@@ -103,9 +107,9 @@ The checkpoint should contain a stripped embedding table, not the sacrificial de
 
 ```powershell
 latentstrat inspect-prior `
-  --checkpoint artifacts/prior_v564_latent16/checkpoint.pt `
-  --features data/prior_features_v564_2026.parquet `
-  --output artifacts/prior_v564_latent16/inspection
+  --checkpoint artifacts/prior/prior_v564_latent16/checkpoint.pt `
+  --features data/features/prior/prior_features_v564_2026.parquet `
+  --output artifacts/prior/prior_v564_latent16/inspection
 ```
 
 Review:
@@ -120,17 +124,17 @@ Review:
 ```powershell
 latentstrat build-features `
   --season 2026 `
-  --output data/features_v58_2026.parquet `
-  --sidecar-output-dir data/v58_sidecars_2026
+  --output data/features/season/features_v58_2026.parquet `
+  --sidecar-output-dir data/sidecars/v58_2026
 ```
 
 Expected outputs:
 
 ```text
-data/features_v58_2026.parquet
-data/v58_sidecars_2026/rankings_2026.parquet
-data/v58_sidecars_2026/selections_2026.parquet
-data/v58_sidecars_2026/playoffs_2026.parquet
+data/features/season/features_v58_2026.parquet
+data/sidecars/v58_2026/rankings_2026.parquet
+data/sidecars/v58_2026/selections_2026.parquet
+data/sidecars/v58_2026/playoffs_2026.parquet
 ```
 
 The feature table should include canonical `event_week` values for walk-forward validation.
@@ -140,14 +144,14 @@ The feature table should include canonical `event_week` values for walk-forward 
 Use this when you want a conventional train/validation split:
 
 ```powershell
-latentstrat train-features data/features_v58_2026.parquet `
-  --output artifacts/v58_full_season_run `
+latentstrat train-features data/features/season/features_v58_2026.parquet `
+  --output artifacts/season/v58_full_season_run `
   --epochs 100 `
   --mini-batch-size 256 `
-  --prior-checkpoint artifacts/prior_v564_latent16/checkpoint.pt `
-  --rankings-sidecar data/v58_sidecars_2026/rankings_2026.parquet `
-  --selections-sidecar data/v58_sidecars_2026/selections_2026.parquet `
-  --playoffs-sidecar data/v58_sidecars_2026/playoffs_2026.parquet `
+  --prior-checkpoint artifacts/prior/prior_v564_latent16/checkpoint.pt `
+  --rankings-sidecar data/sidecars/v58_2026/rankings_2026.parquet `
+  --selections-sidecar data/sidecars/v58_2026/selections_2026.parquet `
+  --playoffs-sidecar data/sidecars/v58_2026/playoffs_2026.parquet `
   --no-early-stopping `
   --restore-best `
   --tensorboard `
@@ -168,12 +172,12 @@ Use this as the main season validation path:
 
 ```powershell
 latentstrat validate-walk-forward `
-  --features data/features_v58_2026.parquet `
-  --prior-checkpoint artifacts/prior_v564_latent16/checkpoint.pt `
-  --rankings-sidecar data/v58_sidecars_2026/rankings_2026.parquet `
-  --selections-sidecar data/v58_sidecars_2026/selections_2026.parquet `
-  --playoffs-sidecar data/v58_sidecars_2026/playoffs_2026.parquet `
-  --output artifacts/v58_walk_forward_v564_latent16_50ep_2026 `
+  --features data/features/season/features_v58_2026.parquet `
+  --prior-checkpoint artifacts/prior/prior_v564_latent16/checkpoint.pt `
+  --rankings-sidecar data/sidecars/v58_2026/rankings_2026.parquet `
+  --selections-sidecar data/sidecars/v58_2026/selections_2026.parquet `
+  --playoffs-sidecar data/sidecars/v58_2026/playoffs_2026.parquet `
+  --output artifacts/walk-forward/v58_walk_forward_v564_latent16_50ep_2026 `
   --epochs 50 `
   --mini-batch-size 256 `
   --latent-dim 16 `
