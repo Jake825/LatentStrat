@@ -153,6 +153,21 @@ latentstrat train-features data/features/season/features_v58_2026.parquet \
   --tensorboard
 ```
 
+Frozen-prior transformer warmup trains the Set Transformer blocks, prediction heads, ranking/playoff sidecar heads, and loss balancer while keeping both `Z_base` and `Z_event` fixed. Use it after building a prior checkpoint when you want match-dynamics layers to warm up before full-network fine-tuning:
+
+```bash
+latentstrat train-features data/features/season/features_v58_2026.parquet \
+  --output artifacts/season/frozen_prior_warmup_sidecars \
+  --prior-checkpoint artifacts/prior/prior_v564_latent16/checkpoint.pt \
+  --split-policy stratified-event-comp \
+  --freeze-team-embeddings \
+  --rankings-sidecar data/sidecars/v58_2026/rankings_2026.parquet \
+  --playoffs-sidecar data/sidecars/v58_2026/playoffs_2026.parquet \
+  --tensorboard
+```
+
+`--freeze-team-embeddings` requires either `--prior-checkpoint` or `--checkpoint` so random team embeddings are not frozen by accident. It cannot be combined with venue mode, because venue mode intentionally trains `Z_event`. Keep selection sidecars for the later full-network fine-tune unless a trainable selection projection/head is added; the current selection triplet loss acts directly on frozen team/event latents during this warmup.
+
 With sidecars:
 
 ```bash
@@ -206,10 +221,28 @@ Season training writes files such as:
 - `feature_common_metrics.csv`
 - `feature_binary_metrics.csv`
 - `feature_continuous_metrics.csv`
+- `feature_calibration.csv`
+- `feature_availability_slices.csv`
 - `feature_endgame_metrics.csv`
 - `feature_award_metrics.csv`
 - `feature_set_attention.csv`
 - `feature_zero_out_diagnostics.csv`
+- `feature_team_attention_summary.csv`
+- `feature_team_zero_out_sensitivity.csv`
+- `feature_embedding_drift.csv`
+- `feature_event_delta_summary.csv`
+- `feature_selection_value.csv`
+- `feature_training_loss.png`
+- `feature_task_losses.png`
+- `feature_task_precision_evolution.png`
+- `feature_win_calibration.png`
+- `feature_attention_entropy.png`
+- `feature_zero_out_delta_rmse.png`
+- `feature_pma_carry_support.png`
+- `feature_zero_out_war.png`
+- `feature_embedding_drift_quiver.png`
+- `feature_event_delta_by_week.png`
+- `feature_team_value_vs_draft_pick.png`
 - `v5_checkpoint.pt`
 
 Walk-forward writes:

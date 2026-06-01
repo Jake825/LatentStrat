@@ -65,7 +65,9 @@ Important files:
 - `prior_nearest_neighbors.csv`: cosine neighbors in latent space.
 - `prior_sanity_checks.csv`: basic checks on the embedding table.
 - `prior_training_history.csv`: copied training curve.
-- PCA and histogram images.
+- `prior_tsne_coordinates.csv`: deterministic t-SNE coordinates for the Day Zero team galaxy.
+- `prior_latent_stat_correlations.csv`: Pearson correlations between latent dimensions and available prior stats.
+- PCA, t-SNE, correlation-heatmap, and histogram images.
 
 Use these to inspect whether the Day Zero prior has sensible structure. For example, if every future team is almost identical to every other future team, the prior may not be using narrative information strongly enough.
 
@@ -83,12 +85,22 @@ Important files:
 - `feature_common_metrics.csv`: common next-match metrics by split.
 - `feature_binary_metrics.csv`: Brier and log loss for binary outputs.
 - `feature_continuous_metrics.csv`: RMSE and MAE for continuous outputs.
+- `feature_calibration.csv`: calibration bins for binary probabilities.
+- `feature_availability_slices.csv`: validation slices for unseen and low-data teams.
 - `feature_endgame_metrics.csv`: ordinal endgame metrics.
 - `feature_award_metrics.csv`: award auxiliary-label metrics.
 - `feature_set_attention.csv`: attention diagnostics.
 - `feature_zero_out_diagnostics.csv`: prediction response to removing slots.
+- `feature_team_attention_summary.csv`: team-level PMA attention aggregates.
+- `feature_team_zero_out_sensitivity.csv`: per-team validation sensitivity when a visible slot is zeroed.
+- `feature_embedding_drift.csv`: prior-to-final vector displacement when a prior checkpoint is supplied.
+- `feature_event_delta_summary.csv`: `Z_event` L2 magnitudes by team-event row.
+- `feature_selection_value.csv`: TeamValueHead scores for actual selection-sidecar picks.
+- PNG plots for training loss, raw task losses, task precision, win calibration, attention entropy, carry/support, zero-out WAR, embedding drift, event deltas, and selection value when inputs are available.
 
 `feature_history.csv` is a training diagnostic. It tells you whether training was stable, not whether the model is strategically useful by itself.
+
+Attention, zero-out, t-SNE, and drift visuals are diagnostic evidence. Use them to form scouting questions, then check calibration, common metrics, sidecar labels, and validation slices before making quality claims.
 
 ## Walk-Forward Artifacts
 

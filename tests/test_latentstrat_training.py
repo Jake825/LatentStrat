@@ -160,6 +160,55 @@ def test_train_model_uses_dataloader_and_returns_diagnostics():
     assert "learning_rate" in history.columns
 
 
+def test_train_model_can_freeze_embeddings_while_training_heads():
+    table = _training_table()
+    opts = default_options().model_copy(
+        update={
+            "epochs": 2,
+            "mini_batch_size": 4,
+            "use_early_stopping": False,
+            "restore_best_validation_model": False,
+            "learning_rate": 1e-2,
+            "team_dropout_rate": 0.0,
+        }
+    )
+    split = _split(len(table))
+    stats = fit_target_stats(table, split.train_mask, opts)
+    from latentstrat.data import apply_v57_target_stats, fit_v57_target_stats
+
+    prepared = apply_v57_target_stats(
+        apply_target_stats(table, stats), fit_v57_target_stats(table, split.train_mask, opts)
+    )
+    model = init_model(
+        7,
+        opts.latent_dim,
+        len(opts.continuous_targets),
+        len(opts.binary_targets),
+        opts,
+        num_event_teams=7,
+        num_endgame_classes=len(opts.endgame_class_order),
+        num_awards=len(opts.award_targets),
+    )
+    base_before = model.Z_base.weight.detach().clone()
+    event_before = model.Z_event.weight.detach().clone()
+    head_before = model.cont_head.weight.detach().clone()
+
+    trained, _, _ = train_model(
+        prepared,
+        split,
+        opts,
+        initial_model=model,
+        freeze_team_embeddings=True,
+        verbose=False,
+    )
+
+    assert torch.allclose(trained.Z_base.weight, base_before)
+    assert torch.allclose(trained.Z_event.weight, event_before)
+    assert not torch.allclose(trained.cont_head.weight, head_before)
+    assert trained.Z_base.weight.requires_grad is False
+    assert trained.Z_event.weight.requires_grad is False
+
+
 def test_best_validation_restore_works_without_early_stopping():
     table = _training_table()
     opts = default_options().model_copy(

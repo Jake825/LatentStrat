@@ -20,6 +20,7 @@ from latentstrat.pretrain_features import (
 )
 from latentstrat.pretrain_loop import PriorTensorDataset
 from latentstrat.prior_model import TeamPriorDistiller
+from latentstrat.visualizations import write_prior_phase_visuals
 
 
 @dataclass
@@ -29,6 +30,7 @@ class PriorInspection:
     training_history: pd.DataFrame
     sanity_checks: pd.DataFrame
     pca_model: dict[str, np.ndarray]
+    random_seed: int = 2026
 
 
 def _checkpoint(path: str | Path) -> dict[str, Any]:
@@ -226,6 +228,7 @@ def inspect_prior_checkpoint(
         training_history=history,
         sanity_checks=_sanity_checks(vector_matrix, latent_table),
         pca_model=pca_model,
+        random_seed=int(opts.random_seed),
     )
 
 
@@ -389,4 +392,9 @@ def write_prior_inspection_artifacts(
             )
     _plot_norm_hist(inspection.latent_table, out / "prior_embedding_norm_hist.png")
     _plot_training_loss(inspection.training_history, out / "prior_training_loss.png")
+    write_prior_phase_visuals(
+        inspection.latent_table,
+        out,
+        random_seed=inspection.random_seed,
+    )
     return out

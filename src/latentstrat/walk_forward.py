@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,7 +17,12 @@ import torch.nn.functional as F
 
 from latentstrat.config import LatentStratOptions, default_options
 from latentstrat.data import Split, TargetStats, optional_target_matrix
-from latentstrat.evaluation import _predict_batched
+from latentstrat.evaluation import (
+    _phase_score_predictions,
+    _predict_batched,
+    _total_score_predictions,
+    sigmoid,
+)
 from latentstrat.features import (
     FeatureTrainingResult,
     enrich_sidecars_with_event_weeks,
@@ -37,7 +45,128 @@ class WalkForwardResult:
     output_dir: Path
     metrics: pd.DataFrame
     history: pd.DataFrame
+    predictions: pd.DataFrame
+    config: dict[str, Any]
     tensorboard_logdir: Path | None = None
+
+
+def sha256_file(path: str | Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _git_head_commit() -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return None
+    return result.stdout.strip() or None
+
+
+def _source_record(path: str | Path) -> dict[str, str]:
+    source = Path(path)
+    return {"path": str(source), "sha256": sha256_file(source)}
+
+
+def _walk_forward_config(
+    *,
+    features_path: str | Path,
+    prior_checkpoint: str | Path,
+    opts: LatentStratOptions,
+    min_train_week: int,
+    max_validation_week: int | None,
+    save_fold_checkpoints: bool,
+    source_paths: dict[str, str | Path] | None,
+) -> dict[str, Any]:
+    sources = {
+        "features": _source_record(features_path),
+        "prior_checkpoint": _source_record(prior_checkpoint),
+    }
+    for name, path in sorted((source_paths or {}).items()):
+        sources[name] = _source_record(path)
+    return {
+        "schema_version": 1,
+        "workflow": "v5.8-walk-forward",
+        "git_commit": _git_head_commit(),
+        "options": opts.model_dump(mode="json"),
+        "min_train_week": min_train_week,
+        "max_validation_week": max_validation_week,
+        "save_fold_checkpoints": save_fold_checkpoints,
+        "sources": sources,
+    }
+
+
+def _validation_prediction_table(
+    result: FeatureTrainingResult,
+    split: Split,
+    opts: LatentStratOptions,
+    *,
+    fold_number: int,
+    train_max_week: int,
+    val_week: int,
+) -> pd.DataFrame:
+    red, blue, red_event, blue_event, red_missing, blue_missing = match_v5_matrices(
+        result.prepared
+    )
+    pred = _predict_batched(
+        result.model,
+        red,
+        blue,
+        opts,
+        red_event=red_event,
+        blue_event=blue_event,
+        red_missing=red_missing,
+        blue_missing=blue_missing,
+        return_aux=True,
+    )
+    pred_phase, actual_phase = _phase_score_predictions(
+        result.prepared, pred["cont"], result.target_stats
+    )
+    pred_total, actual_total = _total_score_predictions(
+        result.prepared,
+        pred_phase,
+        pred["foul"],
+        result.v57_target_stats,
+        opts,
+    )
+    actual_win = optional_target_matrix(result.prepared, ["red_win"])[:, 0]
+    pred_win = sigmoid(pred["bin"][:, 0])
+    clamped_win = np.clip(pred_win, np.finfo(float).eps, 1 - np.finfo(float).eps)
+    win_log_loss = -(
+        actual_win * np.log(clamped_win) + (1 - actual_win) * np.log(1 - clamped_win)
+    )
+    validation_rows = np.flatnonzero(split.validation_mask)
+    table = result.prepared.iloc[validation_rows]
+    return pd.DataFrame(
+        {
+            "fold_number": fold_number,
+            "train_max_week": train_max_week,
+            "val_week": val_week,
+            "row_index": validation_rows,
+            "event_key": table["event_key"].astype(str).to_numpy(),
+            "match_key": table["match_key"].astype(str).to_numpy(),
+            "pred_red_phase_score": pred_phase[validation_rows, 0],
+            "actual_red_phase_score": actual_phase[validation_rows, 0],
+            "pred_blue_phase_score": pred_phase[validation_rows, 1],
+            "actual_blue_phase_score": actual_phase[validation_rows, 1],
+            "pred_red_total_score": pred_total[validation_rows, 0],
+            "actual_red_total_score": actual_total[validation_rows, 0],
+            "pred_blue_total_score": pred_total[validation_rows, 1],
+            "actual_blue_total_score": actual_total[validation_rows, 1],
+            "pred_red_win_probability": pred_win[validation_rows],
+            "actual_red_win": actual_win[validation_rows],
+            "win_brier": (pred_win[validation_rows] - actual_win[validation_rows]) ** 2,
+            "win_log_loss": win_log_loss[validation_rows],
+        }
+    )
 
 
 def _usable_week_series(table: pd.DataFrame) -> pd.Series:
@@ -370,6 +499,7 @@ def run_walk_forward_validation(
     save_fold_checkpoints: bool = False,
     tensorboard_logdir: str | Path | None = None,
     tensorboard_run_name: str | None = None,
+    source_paths: dict[str, str | Path] | None = None,
     verbose: bool = True,
 ) -> WalkForwardResult:
     opts = opts or default_options()
@@ -394,6 +524,7 @@ def run_walk_forward_validation(
 
     metric_rows = []
     history_rows = []
+    prediction_rows = []
     fold_number = 0
     try:
         for train_week in finite_weeks:
@@ -463,6 +594,16 @@ def run_walk_forward_validation(
             history.insert(1, "train_max_week", train_week)
             history.insert(2, "val_week", val_week)
             history_rows.append(history)
+            prediction_rows.append(
+                _validation_prediction_table(
+                    result,
+                    split,
+                    fold_opts,
+                    fold_number=fold_number,
+                    train_max_week=train_week,
+                    val_week=val_week,
+                )
+            )
             sidecar_metrics = _sidecar_validation_metrics(result, validation_sidecars, fold_opts)
             common_metrics = _validation_common_metrics(result.report.common_metrics)
             row = {
@@ -491,8 +632,29 @@ def run_walk_forward_validation(
     metrics = pd.DataFrame(metric_rows)
     metrics = pd.concat([metrics, _average_row(metrics)], ignore_index=True)
     history = pd.concat(history_rows, ignore_index=True) if history_rows else pd.DataFrame()
+    predictions = (
+        pd.concat(prediction_rows, ignore_index=True) if prediction_rows else pd.DataFrame()
+    )
+    config = _walk_forward_config(
+        features_path=features_path,
+        prior_checkpoint=prior_checkpoint,
+        opts=opts,
+        min_train_week=min_train_week,
+        max_validation_week=max_validation_week,
+        save_fold_checkpoints=save_fold_checkpoints,
+        source_paths=source_paths,
+    )
+    config["fold_count"] = fold_number
+    config["prediction_rows"] = len(predictions)
     metrics.to_csv(out / "walk_forward_metrics.csv", index=False)
     history.to_csv(out / "walk_forward_history.csv", index=False)
+    predictions.to_parquet(out / "walk_forward_predictions.parquet", engine="pyarrow", index=False)
+    (out / "config.json").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
     return WalkForwardResult(
-        output_dir=out, metrics=metrics, history=history, tensorboard_logdir=run_logdir
+        output_dir=out,
+        metrics=metrics,
+        history=history,
+        predictions=predictions,
+        config=config,
+        tensorboard_logdir=run_logdir,
     )

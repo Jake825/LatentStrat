@@ -844,14 +844,22 @@ def test_prior_inspection_exports_tables_and_pngs(tmp_path):
         "prior_nearest_neighbors.csv",
         "prior_training_history.csv",
         "prior_sanity_checks.csv",
+        "prior_tsne_coordinates.csv",
+        "prior_latent_stat_correlations.csv",
         "prior_pca_pc1_pc2.png",
         "prior_pca_pc1_pc3.png",
+        "prior_tsne_team_galaxy.png",
+        "prior_latent_stat_correlation_heatmap.png",
         "prior_embedding_norm_hist.png",
         "prior_training_loss.png",
     ):
         path = artifact_dir / name
         assert path.exists()
         assert path.stat().st_size > 0
+    tsne = pd.read_csv(artifact_dir / "prior_tsne_coordinates.csv")
+    assert {"team_key", "tsne_x", "tsne_y"}.issubset(tsne.columns)
+    correlations = pd.read_csv(artifact_dir / "prior_latent_stat_correlations.csv")
+    assert {"stat", "latent_dim", "correlation", "count"}.issubset(correlations.columns)
 
 
 def test_prior_inspection_accepts_stripped_checkpoint_without_features(tmp_path):

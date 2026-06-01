@@ -644,6 +644,37 @@ def bounded_holdout_count(num_items: int, fraction: float) -> int:
     return min(count, num_items - 1)
 
 
+def _stratified_event_comp_validation_mask(
+    table: pd.DataFrame,
+    *,
+    validation_fraction: float,
+    random_seed: int,
+) -> np.ndarray:
+    missing = [column for column in ("event_key", "comp_level") if column not in table.columns]
+    if missing:
+        raise KeyError(
+            "stratified-event-comp split requires columns: " + ", ".join(missing)
+        )
+    strata = pd.DataFrame(
+        {
+            "row_index": np.arange(len(table)),
+            "event_key": table["event_key"].astype(str).to_numpy(),
+            "comp_bucket": np.where(
+                table["comp_level"].astype(str).to_numpy() == "qm", "qm", "elim"
+            ),
+        }
+    )
+    rng = np.random.default_rng(random_seed)
+    validation_mask = np.zeros(len(table), dtype=bool)
+    for _, rows in strata.groupby(["event_key", "comp_bucket"], sort=True):
+        indices = rows["row_index"].to_numpy(dtype=int)
+        if len(indices) < 2:
+            continue
+        holdout = bounded_holdout_count(len(indices), validation_fraction)
+        validation_mask[rng.permutation(indices)[:holdout]] = True
+    return validation_mask
+
+
 def make_split(
     table: pd.DataFrame,
     opts: LatentStratOptions | None = None,
@@ -664,6 +695,7 @@ def make_split(
     if n_rows < 2:
         raise ValueError("At least two rows are required to make a split.")
     validation_mask = np.zeros(n_rows, dtype=bool)
+    fallback_reason = None
     if policy == "chronological-holdout":
         holdout = bounded_holdout_count(n_rows, validation_fraction)
         order = np.argsort(table["sort_ordinal"].to_numpy())
@@ -680,6 +712,17 @@ def make_split(
         rng = np.random.default_rng(random_seed)
         held_out = events[rng.permutation(len(events))[:holdout]]
         validation_mask = table["event_key"].astype(str).isin(held_out).to_numpy()
+    elif policy == "stratified-event-comp":
+        validation_mask = _stratified_event_comp_validation_mask(
+            table,
+            validation_fraction=validation_fraction,
+            random_seed=random_seed,
+        )
+        if not np.any(validation_mask):
+            fallback_reason = "no_stratifiable_event_comp_strata"
+            holdout = bounded_holdout_count(n_rows, validation_fraction)
+            order = np.argsort(table["sort_ordinal"].to_numpy())
+            validation_mask[order[-holdout:]] = True
     else:
         raise ValueError(f"Unknown split policy {policy!r}.")
     train_mask = ~validation_mask
@@ -688,6 +731,8 @@ def make_split(
         validation_mask=validation_mask,
         test_mask=np.zeros(n_rows, dtype=bool),
         policy=policy,
+        seed=random_seed if policy in ("event-held-out", "stratified-event-comp") else None,
+        fallback_reason=fallback_reason,
     )
 
 

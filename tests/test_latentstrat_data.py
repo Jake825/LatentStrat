@@ -217,6 +217,97 @@ def test_split_and_target_stats_do_not_leak_validation_rows():
     np.testing.assert_allclose(after.sigma, before.sigma)
 
 
+def _event_comp_table(groups: list[tuple[str, str, int]]) -> pd.DataFrame:
+    rows = []
+    ordinal = 1
+    for event_key, comp_level, count in groups:
+        for idx in range(count):
+            rows.append(
+                {
+                    "event_key": event_key,
+                    "match_key": f"{event_key}_{comp_level}{idx + 1}",
+                    "comp_level": comp_level,
+                    "sort_ordinal": ordinal,
+                    "red_total_score": 10 + ordinal,
+                    "blue_total_score": 20 + ordinal,
+                    "win_margin": -10,
+                    "fouls_drawn": 0,
+                }
+            )
+            ordinal += 1
+    return pd.DataFrame(rows)
+
+
+def test_stratified_event_comp_split_balances_events_and_match_types():
+    table = _event_comp_table(
+        [
+            ("2026a", "qm", 4),
+            ("2026a", "sf", 2),
+            ("2026b", "qm", 4),
+            ("2026b", "f", 2),
+        ]
+    )
+
+    split = make_split(
+        table,
+        default_options(),
+        policy="stratified-event-comp",
+        validation_fraction=0.5,
+        random_seed=7,
+    )
+
+    validation = table[split.validation_mask].copy()
+    validation["comp_bucket"] = np.where(validation["comp_level"] == "qm", "qm", "elim")
+    assert not np.any(split.train_mask & split.validation_mask)
+    assert set(validation["event_key"]) == {"2026a", "2026b"}
+    assert set(validation["comp_bucket"]) == {"qm", "elim"}
+    for _, rows in table.groupby(["event_key", table["comp_level"].eq("qm")], sort=True):
+        val_count = int(np.sum(split.validation_mask[rows.index]))
+        assert 0 < val_count < len(rows)
+
+
+def test_stratified_event_comp_split_keeps_singletons_in_training():
+    table = _event_comp_table([("2026a", "qm", 3), ("2026b", "sf", 1)])
+
+    split = make_split(
+        table,
+        default_options(),
+        policy="stratified-event-comp",
+        validation_fraction=0.5,
+        random_seed=1,
+    )
+
+    singleton_index = table.index[table["event_key"] == "2026b"][0]
+    assert split.train_mask[singleton_index]
+    assert not split.validation_mask[singleton_index]
+    assert np.any(split.validation_mask)
+
+
+def test_stratified_event_comp_split_is_seed_deterministic():
+    table = _event_comp_table([("2026a", "qm", 8), ("2026a", "sf", 6)])
+
+    first = make_split(table, policy="stratified-event-comp", random_seed=2026)
+    second = make_split(table, policy="stratified-event-comp", random_seed=2026)
+
+    np.testing.assert_array_equal(first.validation_mask, second.validation_mask)
+
+
+def test_stratified_event_comp_split_falls_back_when_no_strata_can_split():
+    table = _event_comp_table([("2026a", "qm", 1), ("2026b", "sf", 1)])
+
+    split = make_split(
+        table,
+        default_options(),
+        policy="stratified-event-comp",
+        validation_fraction=0.5,
+        random_seed=1,
+    )
+
+    assert split.policy == "stratified-event-comp"
+    assert split.fallback_reason == "no_stratifiable_event_comp_strata"
+    assert split.validation_mask.tolist() == [False, True]
+
+
 def test_apply_target_stats_adds_z_columns():
     opts = default_options()
     table = pd.DataFrame(

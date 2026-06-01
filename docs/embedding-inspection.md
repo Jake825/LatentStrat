@@ -30,7 +30,7 @@ latentstrat inspect-prior --checkpoint data/pretrained_prior_2026.pt \
   --output artifacts/prior/prior_2026
 ```
 
-This writes prior PCA plots, cosine neighbors, sanity checks, norm histograms, normalized-EPA and cultural-color PCA views when prior features are supplied, and training-loss artifacts for the learned `embedding_table` rows `0..max_team_number`, including the learned ghost robot. A production V5.6 checkpoint is stripped and does not carry the sacrificial decoder, so reconstruction MSE is intentionally `NaN` unless an older full-model checkpoint is inspected with `--features`.
+This writes prior PCA plots, t-SNE team-galaxy plots, latent/stat correlation heatmaps, cosine neighbors, sanity checks, norm histograms, normalized-EPA and cultural-color PCA views when prior features are supplied, and training-loss artifacts for the learned `embedding_table` rows `0..max_team_number`, including the learned ghost robot. A production V5.6 checkpoint is stripped and does not carry the sacrificial decoder, so reconstruction MSE is intentionally `NaN` unless an older full-model checkpoint is inspected with `--features`.
 
 For V5 `Z_base` after match training, run:
 
@@ -71,6 +71,8 @@ Archetype reports (`archetype_similarity.csv`) are data-derived. The pipeline fi
 ## PMA Attention And Zero-Out Diagnostics
 
 PMA weights describe how the learned pooling seed summarized a contextualized alliance block prior to prediction. Missing slots are routed to the learned ghost row and remain visible to attention. They are not literal causal explanations.
+
+Feature training artifacts include PMA carry/support summaries, per-team zero-out sensitivity, task precision evolution, event-delta magnitudes, embedding-drift arrows, and selection-value plots when the needed prior checkpoint or sidecar tables were supplied. Read these as model-behavior diagnostics alongside calibration, score metrics, and validation slices.
 
 Read the PMA outputs against `zero_out_diagnostics.csv`. Representation utility is stronger when artificially masking a specific slot to `0.0` causes a measured spike in validation RMSE.
 

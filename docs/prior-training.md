@@ -208,7 +208,10 @@ Prior inspection writes artifacts such as:
 - `prior_latent_table.csv`
 - `prior_nearest_neighbors.csv`
 - `prior_sanity_checks.csv`
-- PCA plots.
+- `prior_tsne_coordinates.csv`
+- `prior_latent_stat_correlations.csv`
+- PCA and t-SNE plots.
+- Latent/stat correlation heatmaps.
 - Norm histograms.
 - Training history copies.
 
@@ -217,7 +220,11 @@ Use these to look for:
 - Future or sibling rows collapsing into near duplicates.
 - Strange norm distributions.
 - Whether EPA and culture targets are visible in PCA colorings.
+- Whether local t-SNE neighborhoods separate anchor, sibling, future, and ghost rows.
+- Whether individual latent dimensions correlate with EPA, season experience, or award/culture targets.
 - Whether row `0` has a distinct learned ghost position.
+
+t-SNE, PCA, and correlation heatmaps are inspection aids. They can suggest hypotheses about what the prior learned, but they are not standalone validation metrics.
 
 ## Important Lessons From The Prior Experiments
 

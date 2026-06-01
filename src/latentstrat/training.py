@@ -479,7 +479,7 @@ def _active_embedding_l2(
     *,
     include_zero: bool = False,
 ) -> Tensor:
-    if coefficient == 0:
+    if coefficient == 0 or not embedding.weight.requires_grad:
         return torch.zeros((), dtype=embedding.weight.dtype, device=indices.device)
     active = torch.unique(indices.flatten())
     active = active[active >= 0] if include_zero else active[active > 0]
@@ -730,6 +730,11 @@ def freeze_for_venue_mode(model: SetTransformerModel) -> None:
     model.Z_event.weight.requires_grad = True
 
 
+def freeze_team_embedding_tables(model: SetTransformerModel) -> None:
+    model.Z_base.weight.requires_grad = False
+    model.Z_event.weight.requires_grad = False
+
+
 def _make_loader(
     dataset: MatchTensorDataset,
     indices: np.ndarray,
@@ -977,6 +982,7 @@ def train_model(
     initial_model: SetTransformerModel | None = None,
     verbose: bool = True,
     venue_mode: bool = False,
+    freeze_team_embeddings: bool = False,
     sidecar_tables: dict[str, pd.DataFrame] | None = None,
     tensorboard_writer: Any | None = None,
 ) -> tuple[SetTransformerModel, pd.DataFrame, TrainingDiagnostics]:
@@ -1002,8 +1008,12 @@ def train_model(
         num_endgame_classes=len(opts.endgame_class_order),
         num_awards=len(opts.award_targets),
     )
+    if venue_mode and freeze_team_embeddings:
+        raise ValueError("venue_mode and freeze_team_embeddings cannot be used together.")
     if venue_mode:
         freeze_for_venue_mode(model)
+    elif freeze_team_embeddings:
+        freeze_team_embedding_tables(model)
     model.to(device)
     amp_enabled = resolve_amp_enabled(opts, device)
     forward_model, compiled = compile_forward_model(model, opts, device)

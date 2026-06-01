@@ -59,7 +59,7 @@ V5.6.4 is a training-loss update over the V5.6.3 prior feature schema, so this c
 
 ### `inspect-prior`
 
-Writes prior latent-space diagnostics such as PCA plots, norm histograms, nearest neighbors, sanity checks, and copied training history.
+Writes prior latent-space diagnostics such as PCA plots, t-SNE team-galaxy views, latent/stat correlation heatmaps, norm histograms, nearest neighbors, sanity checks, and copied training history.
 
 ```bash
 latentstrat inspect-prior \
@@ -89,7 +89,7 @@ latentstrat build-features \
 
 ### `train-features`
 
-Trains the Set Transformer from a feature Parquet file. It can load a stripped prior checkpoint into `Z_base` and optional sidecars for heterogeneous training.
+Trains the Set Transformer from a feature Parquet file. It can load a stripped prior checkpoint into `Z_base` and optional sidecars for heterogeneous training. Feature runs also write static diagnostic visuals for PMA attention, zero-out sensitivity, task precision, embedding drift, event deltas, and selection value when the needed prior or sidecar inputs are available.
 
 ```bash
 latentstrat train-features data/features/season/features_v58_2026.parquet \
@@ -104,6 +104,19 @@ latentstrat train-features data/features/season/features_v58_2026.parquet \
   --restore-best \
   --tensorboard
 ```
+
+For frozen-prior transformer warmup, keep `Z_base` and `Z_event` fixed while training the Set Transformer and heads:
+
+```bash
+latentstrat train-features data/features/season/features_v58_2026.parquet \
+  --output artifacts/season/frozen_prior_warmup \
+  --prior-checkpoint artifacts/prior/prior_v564_latent16/checkpoint.pt \
+  --split-policy stratified-event-comp \
+  --freeze-team-embeddings \
+  --tensorboard
+```
+
+`--split-policy` accepts `chronological-holdout`, `week-held-out`, `event-held-out`, or `stratified-event-comp`. `--freeze-team-embeddings` requires `--prior-checkpoint` or `--checkpoint` and cannot be combined with `--venue-mode`.
 
 ### `validate-walk-forward`
 

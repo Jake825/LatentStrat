@@ -35,6 +35,7 @@ class EvaluationReport:
     slices: dict[str, pd.DataFrame]
     set_attention: pd.DataFrame
     zero_out_diagnostics: pd.DataFrame
+    team_zero_out_sensitivity: pd.DataFrame
     baselines: Baselines | None = None
 
 
@@ -675,6 +676,137 @@ def zero_out_diagnostics(
     return pd.DataFrame(rows, columns=columns)
 
 
+def _team_zero_out_columns() -> list[str]:
+    return [
+        "team_key",
+        "team_base_idx",
+        "target",
+        "appearance_count",
+        "event_count",
+        "baseline_rmse",
+        "zeroed_rmse",
+        "delta_rmse",
+    ]
+
+
+def _phase_target_indices(target_names: list[str], color: str) -> list[int]:
+    wanted = [f"{color}_auto_pts", f"{color}_teleop_pts"]
+    return [target_names.index(name) for name in wanted if name in target_names]
+
+
+def team_zero_out_sensitivity(
+    model: SetTransformerModel,
+    table: pd.DataFrame,
+    split: Split,
+    target_stats: TargetStats,
+    opts: LatentStratOptions,
+) -> pd.DataFrame:
+    """Aggregate validation sensitivity when each visible team slot is zeroed."""
+
+    columns = _team_zero_out_columns()
+    if not np.any(split.validation_mask):
+        return pd.DataFrame(columns=columns)
+    red, blue, red_event, blue_event, red_missing, blue_missing = match_v5_matrices(table)
+    target_names = list(target_stats.target_names)
+    actual = target_matrix(table, target_names)
+    baseline = _predict_cont(
+        model,
+        red,
+        blue,
+        target_stats,
+        opts,
+        red_event=red_event,
+        blue_event=blue_event,
+        red_missing=red_missing,
+        blue_missing=blue_missing,
+    )
+    rows = []
+    for color, team_idx, missing, zero_kwargs in (
+        ("red", red, red_missing, {"red_zero_slot": 0, "blue_zero_slot": 0}),
+        ("blue", blue, blue_missing, {"red_zero_slot": 0, "blue_zero_slot": 0}),
+    ):
+        color_target_indices = [
+            idx for idx, name in enumerate(target_names) if name.startswith(f"{color}_")
+        ]
+        phase_indices = _phase_target_indices(target_names, color)
+        for slot in (1, 2, 3):
+            kwargs = dict(zero_kwargs)
+            kwargs[f"{color}_zero_slot"] = slot
+            scenario = _predict_cont(
+                model,
+                red,
+                blue,
+                target_stats,
+                opts,
+                red_event=red_event,
+                blue_event=blue_event,
+                red_missing=red_missing,
+                blue_missing=blue_missing,
+                **kwargs,
+            )
+            slot_idx = slot - 1
+            valid_rows = np.flatnonzero(
+                split.validation_mask & ~missing[:, slot_idx] & (team_idx[:, slot_idx] > 0)
+            )
+            if not len(valid_rows):
+                continue
+            team_keys = table[f"{color}_team_{slot}_key"].astype(str).to_numpy()
+            for row_idx in valid_rows:
+                base_team_idx = int(team_idx[row_idx, slot_idx])
+                for target_idx in color_target_indices:
+                    actual_value = actual[row_idx, target_idx]
+                    if not np.isfinite(actual_value):
+                        continue
+                    rows.append(
+                        {
+                            "team_key": team_keys[row_idx],
+                            "team_base_idx": base_team_idx,
+                            "event_key": str(table["event_key"].iloc[row_idx]),
+                            "target": target_names[target_idx],
+                            "baseline_squared_error": float(
+                                (baseline[row_idx, target_idx] - actual_value) ** 2
+                            ),
+                            "zeroed_squared_error": float(
+                                (scenario[row_idx, target_idx] - actual_value) ** 2
+                            ),
+                        }
+                    )
+                if len(phase_indices) >= 2:
+                    actual_phase = float(np.sum(actual[row_idx, phase_indices]))
+                    if np.isfinite(actual_phase):
+                        rows.append(
+                            {
+                                "team_key": team_keys[row_idx],
+                                "team_base_idx": base_team_idx,
+                                "event_key": str(table["event_key"].iloc[row_idx]),
+                                "target": "alliance_phase_score",
+                                "baseline_squared_error": float(
+                                    (np.sum(baseline[row_idx, phase_indices]) - actual_phase) ** 2
+                                ),
+                                "zeroed_squared_error": float(
+                                    (np.sum(scenario[row_idx, phase_indices]) - actual_phase) ** 2
+                                ),
+                            }
+                        )
+    if not rows:
+        return pd.DataFrame(columns=columns)
+    frame = pd.DataFrame(rows)
+    grouped = (
+        frame.groupby(["team_key", "team_base_idx", "target"], as_index=False)
+        .agg(
+            appearance_count=("baseline_squared_error", "size"),
+            event_count=("event_key", "nunique"),
+            baseline_mse=("baseline_squared_error", "mean"),
+            zeroed_mse=("zeroed_squared_error", "mean"),
+        )
+    )
+    grouped["baseline_rmse"] = np.sqrt(grouped.pop("baseline_mse"))
+    grouped["zeroed_rmse"] = np.sqrt(grouped.pop("zeroed_mse"))
+    grouped["delta_rmse"] = grouped["zeroed_rmse"] - grouped["baseline_rmse"]
+    grouped = grouped.sort_values(["target", "delta_rmse"], ascending=[True, False])
+    return grouped[columns]
+
+
 def evaluate_model(
     model: SetTransformerModel,
     table: pd.DataFrame,
@@ -737,5 +869,8 @@ def evaluate_model(
             table, split, red_weights, blue_weights, pred["red_missing"], pred["blue_missing"]
         ),
         zero_out_diagnostics=zero_out_diagnostics(model, table, split, target_stats, opts),
+        team_zero_out_sensitivity=team_zero_out_sensitivity(
+            model, table, split, target_stats, opts
+        ),
         baselines=baselines,
     )

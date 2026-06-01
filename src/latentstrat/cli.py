@@ -233,6 +233,16 @@ def train_features(
     learning_rate: Annotated[
         float | None, typer.Option("--learning-rate", help="Override AdamW learning rate.")
     ] = None,
+    split_policy: Annotated[
+        str | None,
+        typer.Option(
+            "--split-policy",
+            help=(
+                "Override validation split policy: chronological-holdout, week-held-out, "
+                "event-held-out, or stratified-event-comp."
+            ),
+        ),
+    ] = None,
     early_stopping: Annotated[
         bool,
         typer.Option(
@@ -264,6 +274,13 @@ def train_features(
         typer.Option(
             "--venue-mode/--standard-mode",
             help="Freeze the V5 trunk and train only event-delta embeddings.",
+        ),
+    ] = False,
+    freeze_team_embeddings: Annotated[
+        bool,
+        typer.Option(
+            "--freeze-team-embeddings/--train-team-embeddings",
+            help="Freeze Z_base and Z_event while training the Set Transformer and heads.",
         ),
     ] = False,
     event_key: Annotated[
@@ -313,6 +330,8 @@ def train_features(
         updates["mini_batch_size"] = mini_batch_size
     if learning_rate is not None:
         updates["learning_rate"] = learning_rate
+    if split_policy is not None:
+        updates["split_policy"] = split_policy
     updates["use_early_stopping"] = early_stopping
     updates["restore_best_validation_model"] = restore_best
     if lr_eta_min is not None:
@@ -321,6 +340,15 @@ def train_features(
         updates["loss_log_var_min"] = loss_log_var_min
     if loss_log_var_max is not None:
         updates["loss_log_var_max"] = loss_log_var_max
+    if freeze_team_embeddings and venue_mode:
+        typer.echo("Error: --freeze-team-embeddings cannot be used with --venue-mode.", err=True)
+        raise typer.Exit(code=2)
+    if freeze_team_embeddings and checkpoint is None and prior_checkpoint is None:
+        typer.echo(
+            "Error: --freeze-team-embeddings requires --prior-checkpoint or --checkpoint.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
     opts = default_options().model_copy(update=updates)
     initial_model = load_v5_checkpoint_model(checkpoint) if checkpoint is not None else None
     sidecar_tables = {}
@@ -346,10 +374,12 @@ def train_features(
                     f"- epochs: {opts.epochs}",
                     f"- mini_batch_size: {opts.mini_batch_size}",
                     f"- learning_rate: {opts.learning_rate}",
+                    f"- split_policy: {opts.split_policy}",
                     f"- lr_eta_min: {opts.lr_eta_min}",
                     f"- use_early_stopping: {opts.use_early_stopping}",
                     f"- restore_best_validation_model: {opts.restore_best_validation_model}",
                     f"- loss_log_var_bounds: [{opts.loss_log_var_min}, {opts.loss_log_var_max}]",
+                    f"- freeze_team_embeddings: {freeze_team_embeddings}",
                     f"- prior_checkpoint: {prior_checkpoint}",
                     f"- rankings_sidecar: {rankings_sidecar}",
                     f"- selections_sidecar: {selections_sidecar}",
@@ -368,6 +398,7 @@ def train_features(
             venue_event_key=event_key,
             initial_model=initial_model,
             prior_checkpoint=prior_checkpoint,
+            freeze_team_embeddings=freeze_team_embeddings,
             sidecar_tables=sidecar_tables or None,
             tensorboard_writer=writer,
             tensorboard_logdir=run_logdir,
@@ -448,6 +479,7 @@ def validate_walk_forward(
         updates["latent_dim"] = latent_dim
     opts = default_options().model_copy(update=updates)
     sidecar_tables = {}
+    source_paths = {}
     for name, path in (
         ("rankings", rankings_sidecar),
         ("selections", selections_sidecar),
@@ -455,6 +487,7 @@ def validate_walk_forward(
     ):
         if path is not None:
             sidecar_tables[name] = pd.read_parquet(path, engine="pyarrow")
+            source_paths[f"{name}_sidecar"] = path
     result = run_walk_forward_validation(
         features,
         output,
@@ -466,6 +499,7 @@ def validate_walk_forward(
         save_fold_checkpoints=save_fold_checkpoints,
         tensorboard_logdir=tensorboard_logdir if tensorboard else None,
         tensorboard_run_name=tensorboard_run_name,
+        source_paths=source_paths,
     )
     if result.tensorboard_logdir is not None:
         typer.echo(f"TensorBoard active: tensorboard --logdir={tensorboard_logdir}")

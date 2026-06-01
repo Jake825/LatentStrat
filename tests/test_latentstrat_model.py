@@ -3,7 +3,7 @@ import torch
 
 from latentstrat.config import default_options
 from latentstrat.model import init_model, optimizer_parameter_groups
-from latentstrat.training import create_optimizer, model_loss
+from latentstrat.training import active_embedding_l2, create_optimizer, model_loss
 
 
 def test_model_shapes_attention_and_heads():
@@ -109,6 +109,37 @@ def test_optimizer_groups_do_not_decay_embeddings_biases_or_norms():
     assert id(model.atomic_head.weight) in decayed
     assert id(model.team_value_head.linear.weight) in decayed
     assert {group["weight_decay"] for group in groups if group["weight_decay"]} == {1e-4}
+
+
+def test_optimizer_groups_skip_frozen_embeddings():
+    opts = default_options()
+    model = init_model(8, opts.latent_dim, 4, 1, opts)
+    model.Z_base.weight.requires_grad = False
+    model.Z_event.weight.requires_grad = False
+
+    groups = optimizer_parameter_groups(model, opts)
+    grouped = {id(parameter) for group in groups for parameter in group["params"]}
+
+    assert id(model.Z_base.weight) not in grouped
+    assert id(model.Z_event.weight) not in grouped
+    assert id(model.cont_head.weight) in grouped
+    assert id(model.sab.attention.in_proj_weight) in grouped
+
+
+def test_active_embedding_l2_is_zero_for_frozen_embeddings():
+    opts = default_options()
+    model = init_model(8, opts.latent_dim, 4, 1, opts)
+    with torch.no_grad():
+        model.Z_base.weight.fill_(2.0)
+    red = torch.tensor([[1, 2, 3]], dtype=torch.long)
+    blue = torch.tensor([[4, 5, 6]], dtype=torch.long)
+
+    unfrozen = active_embedding_l2(model, red, blue, coefficient=0.5)
+    model.Z_base.weight.requires_grad = False
+    frozen = active_embedding_l2(model, red, blue, coefficient=0.5)
+
+    assert float(unfrozen.detach()) > 0
+    assert float(frozen.detach()) == 0.0
 
 
 def test_value_heads_return_rank_scalars():

@@ -117,7 +117,9 @@ It does not contain decoder, head, or log-var weights.
 | `prior_nearest_neighbors.csv` | cosine neighbors for each team |
 | `prior_sanity_checks.csv` | finite, norm, collapse, and dominant-dimension checks |
 | `prior_training_history.csv` | copied training history |
-| PNG plots | PCA, norm histogram, EPA/culture colorings where available |
+| `prior_tsne_coordinates.csv` | t-SNE `x/y` coordinates plus team metadata |
+| `prior_latent_stat_correlations.csv` | latent dimension, stat name, Pearson correlation, and finite row count |
+| PNG plots | PCA, t-SNE, latent/stat heatmap, norm histogram, EPA/culture colorings where available |
 
 ## Feature Training Artifacts
 
@@ -130,10 +132,28 @@ It does not contain decoder, head, or log-var weights.
 | `feature_common_metrics.csv` | common match metrics by split |
 | `feature_binary_metrics.csv` | Brier/log-loss style binary metrics |
 | `feature_continuous_metrics.csv` | continuous target RMSE/MAE |
+| `feature_calibration.csv` | binary probability calibration bins |
+| `feature_availability_slices.csv` | validation metrics for unseen and low-data team slices |
 | `feature_endgame_metrics.csv` | ordinal endgame metrics |
 | `feature_award_metrics.csv` | judged-award auxiliary metrics |
 | `feature_set_attention.csv` | PMA attention diagnostics |
 | `feature_zero_out_diagnostics.csv` | sensitivity to slot zero-out diagnostics |
+| `feature_team_attention_summary.csv` | team-level PMA attention averages and max-attention rates |
+| `feature_team_zero_out_sensitivity.csv` | team-level validation zero-out RMSE deltas |
+| `feature_embedding_drift.csv` | prior-to-final PCA coordinates and drift norms when a prior checkpoint is supplied |
+| `feature_event_delta_summary.csv` | `Z_event` L2 norms by team-event row |
+| `feature_selection_value.csv` | TeamValueHead scores joined to selection sidecar draft order |
+| `feature_training_loss.png` | train and validation loss plot |
+| `feature_task_losses.png` | raw task-loss plot |
+| `feature_task_precision_evolution.png` | homoscedastic task precision curves |
+| `feature_win_calibration.png` | binary calibration plot |
+| `feature_attention_entropy.png` | PMA attention entropy plot |
+| `feature_zero_out_delta_rmse.png` | zero-out sensitivity plot |
+| `feature_pma_carry_support.png` | prior EPA or embedding norm against average PMA attention |
+| `feature_zero_out_war.png` | prior EPA or embedding norm against team zero-out delta RMSE |
+| `feature_embedding_drift_quiver.png` | PCA arrow plot from prior vector to final team-event vector |
+| `feature_event_delta_by_week.png` | event-delta magnitude boxplot by canonical week |
+| `feature_team_value_vs_draft_pick.png` | selection-sidecar draft pick number against TeamValueHead score |
 | `feature_*_sidecar.csv` | indexed sidecar copies when sidecars are supplied |
 
 `feature_history.csv` is a training-stability file. Use `feature_common_metrics.csv` or walk-forward metrics for model-quality claims.

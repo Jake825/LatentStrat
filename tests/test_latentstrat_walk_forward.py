@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 import pandas as pd
 import torch
@@ -116,6 +118,16 @@ def test_run_walk_forward_writes_fold_and_average_metrics(tmp_path):
 
     assert (result.output_dir / "walk_forward_metrics.csv").exists()
     assert (result.output_dir / "walk_forward_history.csv").exists()
+    assert (result.output_dir / "walk_forward_predictions.parquet").exists()
+    assert (result.output_dir / "config.json").exists()
+    config = json.loads((result.output_dir / "config.json").read_text(encoding="utf-8"))
+    assert config["workflow"] == "v5.8-walk-forward"
+    assert config["sources"]["features"]["sha256"]
+    assert config["sources"]["prior_checkpoint"]["sha256"]
+    assert len(result.predictions) == 6
+    assert set(result.predictions["val_week"]) == {2, 3}
+    assert result.predictions["match_key"].str.startswith("2026week").all()
+    assert result.predictions["pred_red_win_probability"].between(0, 1).all()
     assert "AVERAGE" in set(result.metrics["fold_number"])
     first_fold = result.metrics[result.metrics["fold_number"] == 1].iloc[0]
     assert int(first_fold["val_week"]) == 2
@@ -153,6 +165,8 @@ def test_walk_forward_cli_runs_on_tiny_features(tmp_path):
 
     assert result.exit_code == 0, result.output
     assert (output / "walk_forward_metrics.csv").exists()
+    assert (output / "walk_forward_predictions.parquet").exists()
+    assert (output / "config.json").exists()
 
 
 def test_walk_forward_cli_accepts_latent_dim_override(tmp_path):
