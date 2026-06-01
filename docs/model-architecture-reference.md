@@ -14,7 +14,7 @@ related:
 
 # Model Architecture Reference
 
-This page records the exact V5.6.4/V5.8 model shapes, parameter sizes, and loss equations used by the current LatentStrat code. It is intended as the technical companion to the more readable [Model Structure](model-structure.md), [Prior Training](prior-training.md), and [Season Training](season-training.md) pages.
+This page records the exact V5.6.4 prior and V6-Lite season-model shapes, parameter sizes, and loss equations used by the current LatentStrat code. It is intended as the technical companion to the more readable [Model Structure](model-structure.md), [Prior Training](prior-training.md), [Season Training](season-training.md), and [V6-Lite](V6-Lite.md) pages.
 
 The values below were checked against:
 
@@ -23,6 +23,7 @@ The values below were checked against:
 - `src/latentstrat/prior_model.py`
 - `src/latentstrat/training.py`
 - `src/latentstrat/evaluation.py`
+- `src/latentstrat/world_model/match_breakdown/model.py`
 
 ## Current Defaults
 
@@ -41,6 +42,10 @@ The values below were checked against:
 | Prior training epochs | `1000` | `PriorOpts.epochs` |
 | Season training epochs | `200` | `LatentStratOptions.epochs` |
 | Loss log-var clamp | `[-5.0, 5.0]` | `LatentStratOptions.loss_log_var_min/max` |
+| V6 score target width | `16` | `WorldModelOptions.score_embedding.width` |
+| V6 award target width | `256` | `WorldModelOptions.award_embedding.width` |
+| V6 rank target width | `16` | `WorldModelOptions.rank_embedding.width` |
+| V6 pick target width | `16` | `WorldModelOptions.pick_embedding.width` |
 
 If `latent_dim` changes, every `[16]` latent shape in this page scales with that value. The output target dimensions stay fixed unless the feature schema changes.
 
@@ -138,7 +143,10 @@ With the standard V5.6.4 prior cap, `Z_base` has at least:
 
 `Z_event` is variable-sized because it depends on the loaded feature table. Event row `0` is the null delta. Missing slots still use the learned ghost base row `0`, but `Z_event[0]` contributes no event-local movement.
 
-The season non-embedding core is about `9.4k` trainable parameters, plus `Z_base` and variable-size `Z_event`.
+The supervised season non-embedding core is about `9.4k` trainable parameters, plus `Z_base` and
+variable-size `Z_event`. Current V6-Lite runtime scaffolding instantiates `5,166` additional
+predictor and balancer parameters; phase configs decide which integrated frozen-target losses are
+active. Score-archetype attachment is deferred.
 
 ## Set Transformer Tensor Shapes
 
@@ -209,7 +217,10 @@ Missing slots and random team dropout route slots to base row `0` and event row 
 | Team value head | one team latent | scalar | `17` |
 | Alliance value head | one alliance latent | scalar | `17` |
 | Delta integration gate | `Z_base`, `Z_event`, `delta_weeks` | `[16]` gate | `3,216` |
-| Homoscedastic balancer | task names | `11` scalar log vars | `11` |
+| Award prototype predictor | team-event latent `[B, 6, 16]` | semantic prototype `[B, 6, 256]` | `4,352` |
+| Rank outcome predictor | team-event latent `[B, 16]` | rank latent `[B, 16]` | `272` |
+| Selection embedding predictor | captain plus candidate `[B, 32]` | pick latent `[B, 16]` | `528` |
+| Homoscedastic balancer | task names | `14` scalar log vars | `14` |
 
 The continuous phase output order follows the configured continuous targets:
 
@@ -274,6 +285,41 @@ Alliance selection uses a triplet loss:
 $$ L_{triplet} = \max(0, d(captain, pick) - d(captain, passed\_over) + margin) $$
 
 Sidecar loaders are optional. Empty or missing sidecars make their task inactive instead of producing dummy losses.
+
+### V6-Lite Frozen-Target Losses
+
+V6-Lite adds active losses only for enabled integrated frozen spaces:
+
+$$ L_{V6} = L_{supervised} + \lambda_{award}(1 - cos(\hat{e}_{award}, e_{award})) + \lambda_{rank}MSE(\hat{z}_{rank}, z_{rank}) + \lambda_{pick}MSE(\hat{z}_{pick}, z_{pick}) $$
+
+Award prototype loss is positive-unlabeled: slots without a semantic award target are masked, not
+treated as negative examples. Rank encoders remain frozen after offline fitting. The offline pick
+encoder may use availability-pool context, but the runtime selection predictor uses only
+fixed-width captain and candidate latents.
+
+### Offline Match-Breakdown Encoder
+
+The V6-Lite V1 historical score artifact is separate from the season model. For each eligible
+season `y`, it trains:
+
+```text
+concat(values_y, masks_y)
+  -> E_y: 2N_y -> 128 -> 64
+  -> G:   64 -> 32 -> 16
+  -> D_y: 16 -> 64 -> 128 -> N_y
+```
+
+`E_y` and `D_y` are season-specific. `G` is shared. The encoder uses raw values, observed masks,
+GELU, LayerNorm, encoder dropout `0.05`, numeric SmoothL1, boolean/categorical BCE-with-logits,
+AdamW, and gradient clipping at `1.0`. It does not construct normalized inputs or a padded union
+training tensor.
+
+The future season-model attachment is explicitly per alliance:
+
+```text
+z_red  -> ScoreEmbeddingPredictor -> frozen_red_16d
+z_blue -> ScoreEmbeddingPredictor -> frozen_blue_16d
+```
 
 ### Embedding Regularization
 

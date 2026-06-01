@@ -9,8 +9,7 @@ from pathlib import Path
 import torch
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
-from latentstrat.config import LatentStratOptions, default_options
-from latentstrat.model import SetTransformerModel
+from latentstrat.features import load_season_checkpoint_model
 
 
 class TeamBaseEmbedding(SQLModel, table=True):
@@ -77,23 +76,9 @@ def consolidate_event_checkpoint(
     delta_weeks: float = 1.0,
 ) -> Path:
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-    opts = LatentStratOptions.model_validate(
-        checkpoint.get("options", default_options().model_dump())
-    )
+    model = load_season_checkpoint_model(checkpoint_path)
+    opts = model.opts
     state = checkpoint["model_state_dict"]
-    base_weight = state["Z_base.weight"]
-    event_weight = state["Z_event.weight"]
-    model = SetTransformerModel(
-        base_weight.shape[0],
-        base_weight.shape[1],
-        len(opts.target_map),
-        len(opts.binary_targets),
-        opts,
-        num_event_teams=event_weight.shape[0],
-        num_endgame_classes=len(opts.endgame_class_order),
-        num_awards=len(opts.award_targets),
-    )
-    model.load_state_dict(state, strict=False)
     base_map: dict[str, int] = checkpoint.get("team_base_index_map", {})
     event_map: dict[str, int] = checkpoint.get("team_event_index_map", {})
     reverse_base = {idx: key for key, idx in base_map.items()}
@@ -122,6 +107,7 @@ def consolidate_event_checkpoint(
 
     updated = dict(checkpoint)
     updated["model_state_dict"] = updated_state
-    output_path = Path(checkpoint_path).with_name("v5_checkpoint_consolidated.pt")
+    version = "v6" if checkpoint.get("checkpoint_schema_version") == 6 else "v5"
+    output_path = Path(checkpoint_path).with_name(f"{version}_checkpoint_consolidated.pt")
     torch.save(updated, output_path)
     return output_path

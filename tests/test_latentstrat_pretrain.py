@@ -1187,5 +1187,5 @@ def test_train_features_cli_accepts_prior_checkpoint(tmp_path):
     )
 
     assert result.exit_code == 0, result.output
-    checkpoint = torch.load(output / "v5_checkpoint.pt", map_location="cpu", weights_only=False)
+    checkpoint = torch.load(output / "v6_checkpoint.pt", map_location="cpu", weights_only=False)
     assert checkpoint["prior_vectors_applied"] == 6

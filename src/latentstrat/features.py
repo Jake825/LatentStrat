@@ -42,6 +42,12 @@ from latentstrat.model import SetTransformerModel, init_model
 from latentstrat.pretrain_loop import apply_prior_checkpoint_to_model, load_prior_embedding_table
 from latentstrat.training import TrainingDiagnostics, train_model
 from latentstrat.visualizations import write_feature_phase_visuals
+from latentstrat.world_model import (
+    LoadedWorldModelBundle,
+    WorldModelOptions,
+    attach_world_model_targets,
+    load_world_model_bundle,
+)
 
 PARQUET_ENGINE = "pyarrow"
 NAN = float("nan")
@@ -98,6 +104,8 @@ class FeatureTrainingResult:
     split_policy: str | None = None
     split_fallback_reason: str | None = None
     frozen_embedding_tables: tuple[str, ...] = ()
+    world_model_bundle: str | None = None
+    world_model_options: WorldModelOptions | None = None
 
 
 def _validate_feature_table(table: pd.DataFrame) -> pd.DataFrame:
@@ -517,6 +525,27 @@ def index_sidecar_tables(
                 team_event_index_map.get(f"{event_key}::{team_key}", 0)
                 for event_key, team_key in zip(out["event_key"], out["team_key"], strict=True)
             ]
+        elif name == "world_rank" and "team_key" in out.columns:
+            out["team_base_idx"] = [
+                _base_idx_for_key(str(key), team_index_map) for key in out["team_key"]
+            ]
+            out["team_event_idx"] = [
+                team_event_index_map.get(f"{event_key}::{team_key}", 0)
+                for event_key, team_key in zip(out["event_key"], out["team_key"], strict=True)
+            ]
+        elif name == "world_pick":
+            for prefix, column in (
+                ("captain", "captain_team_key"),
+                ("candidate", "candidate_team_key"),
+            ):
+                out[f"{prefix}_base_idx"] = [
+                    _base_idx_for_key(str(key), team_index_map) if str(key) else 0
+                    for key in out[column]
+                ]
+                out[f"{prefix}_event_idx"] = [
+                    team_event_index_map.get(f"{event_key}::{team_key}", 0)
+                    for event_key, team_key in zip(out["event_key"], out[column], strict=True)
+                ]
         elif name == "selections":
             for prefix, column in (
                 ("captain", "captain_team_key"),
@@ -640,9 +669,41 @@ def load_v5_checkpoint_model(checkpoint_path: str | Path) -> SetTransformerModel
         num_event_teams=event_weight.shape[0],
         num_endgame_classes=len(opts.endgame_class_order),
         num_awards=len(opts.award_targets),
+        world_model_opts=WorldModelOptions(enabled=False),
     )
     model.load_state_dict(state, strict=False)
     return model
+
+
+def load_v6_checkpoint_model(checkpoint_path: str | Path) -> SetTransformerModel:
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    if checkpoint.get("checkpoint_schema_version") != 6:
+        raise ValueError("Expected a V6 seasonal checkpoint.")
+    opts = LatentStratOptions.model_validate(checkpoint["options"])
+    world_model_opts = WorldModelOptions.model_validate(checkpoint["world_model"])
+    state = checkpoint["model_state_dict"]
+    base_weight = state["Z_base.weight"]
+    event_weight = state["Z_event.weight"]
+    model = init_model(
+        base_weight.shape[0],
+        base_weight.shape[1],
+        len(opts.target_map),
+        len(opts.binary_targets),
+        opts,
+        num_event_teams=event_weight.shape[0],
+        num_endgame_classes=len(opts.endgame_class_order),
+        num_awards=len(opts.award_targets),
+        world_model_opts=world_model_opts,
+    )
+    model.load_state_dict(state, strict=True)
+    return model
+
+
+def load_season_checkpoint_model(checkpoint_path: str | Path) -> SetTransformerModel:
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    if checkpoint.get("checkpoint_schema_version") == 6:
+        return load_v6_checkpoint_model(checkpoint_path)
+    return load_v5_checkpoint_model(checkpoint_path)
 
 
 def train_feature_table(
@@ -660,8 +721,41 @@ def train_feature_table(
     split_override: Split | None = None,
     tensorboard_writer: object | None = None,
     tensorboard_logdir: str | Path | None = None,
+    world_model_bundle: str | Path | LoadedWorldModelBundle | None = None,
 ) -> FeatureTrainingResult:
     opts = opts or default_options()
+    loaded_world_model = (
+        load_world_model_bundle(world_model_bundle)
+        if isinstance(world_model_bundle, (str, Path))
+        else world_model_bundle
+    )
+    world_model_opts = (
+        loaded_world_model.options
+        if loaded_world_model is not None
+        else WorldModelOptions(enabled=False)
+    )
+    if (
+        loaded_world_model is None
+        and initial_model is not None
+        and initial_model.world_model_opts.active_spaces()
+    ):
+        raise ValueError("Active V6 checkpoint training requires world_model_bundle.")
+    if initial_model is not None:
+        initial_widths = tuple(
+            initial_model.world_model_opts.space(name).width
+            for name in ("score", "award", "rank", "pick")
+        )
+        requested_widths = tuple(
+            world_model_opts.space(name).width for name in ("score", "award", "rank", "pick")
+        )
+        if initial_widths != requested_widths:
+            raise ValueError("World-model bundle widths do not match the checkpoint architecture.")
+        initial_model.world_model_opts = world_model_opts
+    attached_sidecars = sidecar_tables
+    if loaded_world_model is not None:
+        table, attached_sidecars = attach_world_model_targets(
+            table, sidecar_tables, loaded_world_model
+        )
     indexed, team_index_map, team_event_index_map = make_v5_team_index_maps(
         _validate_feature_table(table)
     )
@@ -674,7 +768,9 @@ def train_feature_table(
     v57_target_stats = fit_v57_target_stats(indexed, split.train_mask, opts)
     prepared = apply_v57_target_stats(apply_target_stats(indexed, target_stats), v57_target_stats)
     baselines = fit_baselines(prepared, split, opts)
-    indexed_sidecars = index_sidecar_tables(sidecar_tables, team_index_map, team_event_index_map)
+    indexed_sidecars = index_sidecar_tables(
+        attached_sidecars, team_index_map, team_event_index_map
+    )
     prior_vectors_applied = 0
     training_model = initial_model
     if prior_checkpoint is not None:
@@ -689,6 +785,7 @@ def train_feature_table(
                 num_event_teams=len(team_event_index_map) + 1,
                 num_endgame_classes=len(opts.endgame_class_order),
                 num_awards=len(opts.award_targets),
+                world_model_opts=world_model_opts,
             )
         prior_vectors_applied = apply_prior_checkpoint_to_model(
             training_model,
@@ -706,6 +803,7 @@ def train_feature_table(
         initial_model=training_model,
         sidecar_tables=indexed_sidecars,
         tensorboard_writer=tensorboard_writer,
+        world_model_opts=world_model_opts,
     )
     report = evaluate_model(
         model, prepared, split, target_stats, opts, baselines, v57_target_stats
@@ -728,6 +826,10 @@ def train_feature_table(
         split_policy=split.policy,
         split_fallback_reason=split.fallback_reason,
         frozen_embedding_tables=frozen_embedding_tables,
+        world_model_bundle=(
+            str(loaded_world_model.root) if loaded_world_model is not None else None
+        ),
+        world_model_options=world_model_opts,
     )
     if output_dir is not None:
         write_feature_training_artifacts(result, output_dir)
@@ -749,6 +851,7 @@ def train_feature_file(
     split_override: Split | None = None,
     tensorboard_writer: object | None = None,
     tensorboard_logdir: str | Path | None = None,
+    world_model_bundle: str | Path | LoadedWorldModelBundle | None = None,
 ) -> FeatureTrainingResult:
     return train_feature_table(
         read_feature_table(input_path),
@@ -764,6 +867,7 @@ def train_feature_file(
         split_override=split_override,
         tensorboard_writer=tensorboard_writer,
         tensorboard_logdir=tensorboard_logdir,
+        world_model_bundle=world_model_bundle,
     )
 
 
@@ -969,8 +1073,7 @@ def write_feature_training_artifacts(result: FeatureTrainingResult, output_dir: 
         sidecar_tables=result.sidecar_tables,
         output_dir=out,
     )
-    torch.save(
-        {
+    checkpoint = {
             "model_state_dict": result.model.state_dict(),
             "options": result.model.opts.model_dump(mode="json"),
             "target_stats": {
@@ -995,9 +1098,13 @@ def write_feature_training_artifacts(result: FeatureTrainingResult, output_dir: 
             "split_fallback_reason": result.split_fallback_reason,
             "frozen_embedding_tables": list(result.frozen_embedding_tables),
             "sidecar_tables": sorted(result.sidecar_tables) if result.sidecar_tables else [],
-        },
-        out / "v5_checkpoint.pt",
-    )
+        }
+    world_model_options = result.world_model_options or WorldModelOptions(enabled=False)
+    checkpoint["checkpoint_schema_version"] = 6
+    checkpoint["world_model"] = world_model_options.model_dump(mode="json")
+    checkpoint["world_model_bundle"] = result.world_model_bundle
+    checkpoint_path = out / "v6_checkpoint.pt"
+    torch.save(checkpoint, checkpoint_path)
     return out
 
 

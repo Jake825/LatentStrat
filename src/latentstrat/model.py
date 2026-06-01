@@ -8,6 +8,7 @@ import torch
 from torch import Tensor, nn
 
 from latentstrat.config import LatentStratOptions, default_options
+from latentstrat.world_model import WorldModelOptions
 
 
 @dataclass
@@ -25,6 +26,7 @@ class ForwardOutput:
     special_logits: Tensor
     endgame_logits: Tensor
     award_logits: Tensor
+    wm_award_embedding: Tensor
     red_missing_mask: Tensor
     blue_missing_mask: Tensor
     red_dropout_mask: Tensor
@@ -245,6 +247,7 @@ class SetTransformerModel(nn.Module):
         num_event_teams: int | None = None,
         num_endgame_classes: int | None = None,
         num_awards: int | None = None,
+        world_model_opts: WorldModelOptions | None = None,
     ) -> None:
         super().__init__()
         opts = opts or default_options()
@@ -258,6 +261,8 @@ class SetTransformerModel(nn.Module):
         self.num_foul_targets = 2 * len(opts.foul_targets)
         self.num_bonus_targets = 2 * len(opts.bonus_binary_targets)
         self.num_special_targets = 2 * len(opts.special_binary_targets)
+        self.world_model_opts = world_model_opts or WorldModelOptions()
+        self.world_model_opts.active_spaces()
 
         self.Z_base = nn.Embedding(max(num_teams, 1), latent_dim)
         self.Z_event = nn.Embedding(max(num_event_teams or num_teams, 1), latent_dim, padding_idx=0)
@@ -286,6 +291,15 @@ class SetTransformerModel(nn.Module):
         self.team_value_head = TeamValueHead(latent_dim)
         self.alliance_value_head = AllianceValueHead(latent_dim)
         self.delta_integration_gate = DeltaIntegrationGate(latent_dim)
+        self.award_prototype_predictor = nn.Linear(
+            latent_dim, self.world_model_opts.award_embedding.width
+        )
+        self.rank_outcome_predictor = nn.Linear(
+            latent_dim, self.world_model_opts.rank_embedding.width
+        )
+        self.selection_embedding_predictor = nn.Linear(
+            2 * latent_dim, self.world_model_opts.pick_embedding.width
+        )
         self.loss_balancer = HomoscedasticTaskBalancer(
             (
                 "continuous",
@@ -299,6 +313,9 @@ class SetTransformerModel(nn.Module):
                 "rank",
                 "playoff",
                 "selection",
+                "wm_award",
+                "wm_rank",
+                "wm_pick",
             )
         )
 
@@ -314,6 +331,22 @@ class SetTransformerModel(nn.Module):
 
     def team_value(self, team_base_idx: Tensor, team_event_idx: Tensor | None = None) -> Tensor:
         return self.team_value_head(self.team_latent(team_base_idx, team_event_idx))
+
+    def predict_rank_embedding(
+        self, team_base_idx: Tensor, team_event_idx: Tensor | None = None
+    ) -> Tensor:
+        return self.rank_outcome_predictor(self.team_latent(team_base_idx, team_event_idx))
+
+    def predict_selection_embedding(
+        self,
+        captain_base_idx: Tensor,
+        candidate_base_idx: Tensor,
+        captain_event_idx: Tensor | None = None,
+        candidate_event_idx: Tensor | None = None,
+    ) -> Tensor:
+        captain = self.team_latent(captain_base_idx, captain_event_idx)
+        candidate = self.team_latent(candidate_base_idx, candidate_event_idx)
+        return self.selection_embedding_predictor(torch.cat([captain, candidate], dim=-1))
 
     def alliance_value(
         self,
@@ -427,6 +460,9 @@ class SetTransformerModel(nn.Module):
             special_logits=special[:, : self.num_special_targets],
             endgame_logits=self.endgame_head(slot_context),
             award_logits=self.award_head(slot_context),
+            wm_award_embedding=self.award_prototype_predictor(
+                torch.cat([red_set, blue_set], dim=1)
+            ),
             red_missing_mask=red_effective_missing,
             blue_missing_mask=blue_effective_missing,
             red_dropout_mask=red_dropout,
@@ -447,6 +483,7 @@ def init_model(
     num_event_teams: int | None = None,
     num_endgame_classes: int | None = None,
     num_awards: int | None = None,
+    world_model_opts: WorldModelOptions | None = None,
 ) -> SetTransformerModel:
     return SetTransformerModel(
         num_teams,
@@ -457,6 +494,7 @@ def init_model(
         num_event_teams=num_event_teams,
         num_endgame_classes=num_endgame_classes,
         num_awards=num_awards,
+        world_model_opts=world_model_opts,
     )
 
 
@@ -491,6 +529,9 @@ def optimizer_parameter_groups(model: SetTransformerModel, opts: LatentStratOpti
                 "team_value_head.",
                 "alliance_value_head.",
                 "delta_integration_gate.",
+                "award_prototype_predictor.",
+                "rank_outcome_predictor.",
+                "selection_embedding_predictor.",
             )
         ):
             head_decay.append(parameter)

@@ -3,10 +3,22 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from frc.models import Match, TbaAward, TbaEvent, TbaMatch, TbaTeam, _as_plain_data
+
+TBA_API_BASE_URL = "https://www.thebluealliance.com/api/v3"
+
+
+@dataclass(frozen=True)
+class TbaJsonResponse:
+    source_url: str
+    status_code: int
+    payload: Any | None
+    response_etag: str | None
+    from_cache: bool
 
 
 class TbaProvider:
@@ -70,6 +82,34 @@ class TbaProvider:
     def _call(self, name: str, *args: Any, **kwargs: Any) -> Any:
         method = getattr(self.client, name)
         return _as_plain_data(method(*args, **kwargs))
+
+    def get_json_response(
+        self,
+        path: str,
+        *,
+        etag: str | None = None,
+        refresh: bool = False,
+    ) -> TbaJsonResponse:
+        """Fetch one API path while retaining response metadata for durable corpora."""
+
+        url = path if path.startswith("http") else f"{TBA_API_BASE_URL}/{path.lstrip('/')}"
+        headers = {"If-None-Match": etag} if etag else {}
+        kwargs: dict[str, Any] = {"headers": headers}
+        if refresh and hasattr(self.client.session, "cache"):
+            kwargs["expire_after"] = 0
+        response = self.client.session.get(url, **kwargs)
+        if response.status_code == 304:
+            payload = None
+        else:
+            response.raise_for_status()
+            payload = response.json()
+        return TbaJsonResponse(
+            source_url=url,
+            status_code=int(response.status_code),
+            payload=payload,
+            response_etag=response.headers.get("ETag"),
+            from_cache=bool(getattr(response, "from_cache", False)),
+        )
 
     def get_status(self) -> dict[str, Any]:
         return _as_plain_data(self.client.status())

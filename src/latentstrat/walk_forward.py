@@ -1,4 +1,4 @@
-"""Walk-forward temporal validation for LatentStrat V5.8."""
+"""Walk-forward temporal validation for LatentStrat V6-Lite."""
 
 from __future__ import annotations
 
@@ -38,6 +38,7 @@ from latentstrat.training import (
     create_tensorboard_writer,
     match_v5_matrices,
 )
+from latentstrat.world_model import WorldModelOptions, build_world_model_bundle
 
 
 @dataclass
@@ -94,7 +95,7 @@ def _walk_forward_config(
         sources[name] = _source_record(path)
     return {
         "schema_version": 1,
-        "workflow": "v5.8-walk-forward",
+        "workflow": "v6-walk-forward",
         "git_commit": _git_head_commit(),
         "options": opts.model_dump(mode="json"),
         "min_train_week": min_train_week,
@@ -171,10 +172,10 @@ def _validation_prediction_table(
 
 def _usable_week_series(table: pd.DataFrame) -> pd.Series:
     if "event_week" not in table.columns:
-        raise ValueError("missing event_week; rebuild prior features with V5.8 week metadata.")
+        raise ValueError("missing event_week; rebuild features with canonical week metadata.")
     weeks = pd.to_numeric(table["event_week"], errors="coerce")
     if not np.isfinite(weeks.to_numpy(dtype=float)).any():
-        raise ValueError("missing event_week; rebuild prior features with V5.8 week metadata.")
+        raise ValueError("missing event_week; rebuild features with canonical week metadata.")
     return weeks
 
 
@@ -205,7 +206,7 @@ def _sidecars_with_weeks(
     )
     for name, table in enriched.items():
         if not table.empty and "event_week" not in table.columns:
-            raise ValueError(f"{name} sidecar missing event_week; rebuild V5.8 sidecars.")
+            raise ValueError(f"{name} sidecar missing event_week; rebuild canonical sidecars.")
     return enriched
 
 
@@ -500,6 +501,10 @@ def run_walk_forward_validation(
     tensorboard_logdir: str | Path | None = None,
     tensorboard_run_name: str | None = None,
     source_paths: dict[str, str | Path] | None = None,
+    world_model_options: WorldModelOptions | None = None,
+    world_model_events_path: str | Path | None = None,
+    award_catalog_path: str | Path | None = None,
+    openai_cache_path: str | Path | None = None,
     verbose: bool = True,
 ) -> WalkForwardResult:
     opts = opts or default_options()
@@ -545,6 +550,22 @@ def run_walk_forward_validation(
             )
             train_sidecars = _filter_sidecars(sidecars, max_week=train_week)
             validation_sidecars = _filter_sidecars(sidecars, exact_week=val_week)
+            fold_world_model = None
+            if world_model_options is not None and world_model_options.enabled:
+                if world_model_events_path is None:
+                    raise ValueError("Fold-local world-model builds require event metadata.")
+                fold_world_model = build_world_model_bundle(
+                    features_path,
+                    out / "world_model" / f"fold_{fold_number:02d}_train_week_{train_week}",
+                    world_model_options,
+                    events_path=world_model_events_path,
+                    rankings_path=(source_paths or {}).get("rankings_sidecar"),
+                    selections_path=(source_paths or {}).get("selections_sidecar"),
+                    playoffs_path=(source_paths or {}).get("playoffs_sidecar"),
+                    award_catalog_path=award_catalog_path,
+                    openai_cache_path=openai_cache_path,
+                    fit_max_week=train_week,
+                )
             if verbose:
                 print(
                     f"Fold {fold_number}: train weeks <= {train_week}, "
@@ -571,6 +592,7 @@ def run_walk_forward_validation(
                     )
                     if run_logdir is not None
                     else None,
+                    world_model_bundle=fold_world_model,
                 )
             finally:
                 if fold_writer is not None:
@@ -586,6 +608,10 @@ def run_walk_forward_validation(
                         "fold_number": fold_number,
                         "train_max_week": train_week,
                         "val_week": val_week,
+                        "checkpoint_schema_version": 6,
+                        "world_model": (
+                            result.world_model_options or WorldModelOptions(enabled=False)
+                        ).model_dump(mode="json"),
                     },
                     checkpoint_dir / f"fold_{fold_number:02d}_val_week_{val_week}.pt",
                 )
@@ -646,6 +672,9 @@ def run_walk_forward_validation(
     )
     config["fold_count"] = fold_number
     config["prediction_rows"] = len(predictions)
+    config["world_model"] = (
+        world_model_options.model_dump(mode="json") if world_model_options is not None else None
+    )
     metrics.to_csv(out / "walk_forward_metrics.csv", index=False)
     history.to_csv(out / "walk_forward_history.csv", index=False)
     predictions.to_parquet(out / "walk_forward_predictions.parquet", engine="pyarrow", index=False)

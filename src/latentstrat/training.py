@@ -26,6 +26,7 @@ from latentstrat.data import (
     v57_continuous_target_names,
 )
 from latentstrat.model import SetTransformerModel, init_model, optimizer_parameter_groups
+from latentstrat.world_model import WorldModelOptions
 
 
 @dataclass
@@ -46,6 +47,9 @@ class LossMetrics:
     rank_loss: float = 0.0
     playoff_loss: float = 0.0
     selection_loss: float = 0.0
+    wm_award_loss: float = 0.0
+    wm_rank_loss: float = 0.0
+    wm_pick_loss: float = 0.0
 
 
 @dataclass
@@ -77,6 +81,9 @@ TASK_NAMES = (
     "rank",
     "playoff",
     "selection",
+    "wm_award",
+    "wm_rank",
+    "wm_pick",
 )
 
 
@@ -97,6 +104,7 @@ class MatchTensorDataset(Dataset):
         award_targets: Tensor,
         v57_cont_targets: Tensor | None = None,
         v57_bin_targets: Tensor | None = None,
+        wm_award_targets: Tensor | None = None,
     ) -> None:
         self.red_team_idx = red_team_idx
         self.blue_team_idx = blue_team_idx
@@ -118,10 +126,18 @@ class MatchTensorDataset(Dataset):
             if v57_bin_targets is not None
             else torch.empty((len(red_team_idx), 0), dtype=torch.float32)
         )
+        self.wm_award_targets = (
+            wm_award_targets
+            if wm_award_targets is not None
+            else torch.empty((len(red_team_idx), 6, 0), dtype=torch.float32)
+        )
 
     @classmethod
     def from_table(
-        cls, table: pd.DataFrame, opts: LatentStratOptions | None = None
+        cls,
+        table: pd.DataFrame,
+        opts: LatentStratOptions | None = None,
+        world_model_opts: WorldModelOptions | None = None,
     ) -> MatchTensorDataset:
         opts = opts or default_options()
         matrices = match_v5_matrices(table)
@@ -143,6 +159,10 @@ class MatchTensorDataset(Dataset):
         )
         endgame_targets = endgame_target_matrix(table, opts)
         award_targets = award_target_tensor(table, opts)
+        world_model_opts = world_model_opts or WorldModelOptions()
+        wm_award_targets = world_award_target_tensor(
+            table, world_model_opts.award_embedding.width
+        )
         return cls(
             red_team_idx=torch.as_tensor(matrices[0], dtype=torch.long),
             blue_team_idx=torch.as_tensor(matrices[1], dtype=torch.long),
@@ -156,6 +176,7 @@ class MatchTensorDataset(Dataset):
             award_targets=torch.as_tensor(award_targets, dtype=torch.float32),
             v57_cont_targets=torch.as_tensor(v57_cont_targets, dtype=torch.float32),
             v57_bin_targets=torch.as_tensor(v57_bin_targets, dtype=torch.float32),
+            wm_award_targets=torch.as_tensor(wm_award_targets, dtype=torch.float32),
         )
 
     def __len__(self) -> int:
@@ -175,6 +196,7 @@ class MatchTensorDataset(Dataset):
             self.award_targets[index],
             self.v57_cont_targets[index],
             self.v57_bin_targets[index],
+            self.wm_award_targets[index],
         )
 
 
@@ -341,6 +363,82 @@ class SelectionTripletDataset(Dataset):
         )
 
 
+class RankEmbeddingDataset(Dataset):
+    def __init__(self, team_base_idx: Tensor, team_event_idx: Tensor, targets: Tensor) -> None:
+        self.team_base_idx = team_base_idx
+        self.team_event_idx = team_event_idx
+        self.targets = targets
+
+    @classmethod
+    def from_table(cls, table: pd.DataFrame, width: int) -> RankEmbeddingDataset:
+        required = ["team_base_idx", "team_event_idx"]
+        if table is None or table.empty or not all(column in table.columns for column in required):
+            return cls(
+                torch.empty(0, dtype=torch.long),
+                torch.empty(0, dtype=torch.long),
+                torch.empty((0, width), dtype=torch.float32),
+            )
+        targets = world_embedding_matrix(table, "", width)
+        return cls(
+            torch.as_tensor(table["team_base_idx"].to_numpy(), dtype=torch.long),
+            torch.as_tensor(table["team_event_idx"].to_numpy(), dtype=torch.long),
+            torch.as_tensor(targets, dtype=torch.float32),
+        )
+
+    def __len__(self) -> int:
+        return int(self.team_base_idx.shape[0])
+
+    def __getitem__(self, index: int) -> tuple[Tensor, ...]:
+        return self.team_base_idx[index], self.team_event_idx[index], self.targets[index]
+
+
+class PickEmbeddingDataset(Dataset):
+    def __init__(
+        self,
+        captain_base_idx: Tensor,
+        candidate_base_idx: Tensor,
+        captain_event_idx: Tensor,
+        candidate_event_idx: Tensor,
+        targets: Tensor,
+    ) -> None:
+        self.captain_base_idx = captain_base_idx
+        self.candidate_base_idx = candidate_base_idx
+        self.captain_event_idx = captain_event_idx
+        self.candidate_event_idx = candidate_event_idx
+        self.targets = targets
+
+    @classmethod
+    def from_table(cls, table: pd.DataFrame, width: int) -> PickEmbeddingDataset:
+        required = [
+            "captain_base_idx",
+            "candidate_base_idx",
+            "captain_event_idx",
+            "candidate_event_idx",
+        ]
+        if table is None or table.empty or not all(column in table.columns for column in required):
+            empty = torch.empty(0, dtype=torch.long)
+            return cls(empty, empty, empty, empty, torch.empty((0, width), dtype=torch.float32))
+        return cls(
+            torch.as_tensor(table["captain_base_idx"].to_numpy(), dtype=torch.long),
+            torch.as_tensor(table["candidate_base_idx"].to_numpy(), dtype=torch.long),
+            torch.as_tensor(table["captain_event_idx"].to_numpy(), dtype=torch.long),
+            torch.as_tensor(table["candidate_event_idx"].to_numpy(), dtype=torch.long),
+            torch.as_tensor(world_embedding_matrix(table, "", width), dtype=torch.float32),
+        )
+
+    def __len__(self) -> int:
+        return int(self.captain_base_idx.shape[0])
+
+    def __getitem__(self, index: int) -> tuple[Tensor, ...]:
+        return (
+            self.captain_base_idx[index],
+            self.candidate_base_idx[index],
+            self.captain_event_idx[index],
+            self.candidate_event_idx[index],
+            self.targets[index],
+        )
+
+
 def resolve_device(requested: str = "auto") -> torch.device:
     if requested != "auto":
         return torch.device(requested)
@@ -450,6 +548,20 @@ def award_target_tensor(table: pd.DataFrame, opts: LatentStratOptions) -> np.nda
             column = f"{prefix}_award_{axis}"
             if column in table.columns:
                 result[:, slot_idx, award_idx] = table[column].astype(float).to_numpy()
+    return result
+
+
+def world_embedding_matrix(table: pd.DataFrame, prefix: str, width: int) -> np.ndarray:
+    separator = "_" if prefix else ""
+    columns = [f"{prefix}{separator}z_{idx:03d}" for idx in range(width)]
+    return optional_target_matrix(table, columns)
+
+
+def world_award_target_tensor(table: pd.DataFrame, width: int) -> np.ndarray:
+    result = np.full((len(table), 6, width), np.nan, dtype=np.float32)
+    slot_prefixes = [f"{color}_team_{slot}" for color in ("red", "blue") for slot in (1, 2, 3)]
+    for slot_idx, prefix in enumerate(slot_prefixes):
+        result[:, slot_idx, :] = world_embedding_matrix(table, f"{prefix}_wm_award", width)
     return result
 
 
@@ -564,6 +676,7 @@ def model_loss(
     award_targets: Tensor | None = None,
     v57_cont_targets: Tensor | None = None,
     v57_bin_targets: Tensor | None = None,
+    wm_award_targets: Tensor | None = None,
 ) -> tuple[Tensor, LossMetrics, object]:
     opts = opts or default_options()
     pred = (forward_model or model)(
@@ -657,6 +770,30 @@ def model_loss(
         raw_special_loss, special_active = zero, False
     special_term = model.balance_loss("special", raw_special_loss, special_active)
 
+    world_options = model.world_model_opts
+    if (
+        world_options.enabled
+        and world_options.award_embedding.enabled
+        and wm_award_targets is not None
+        and wm_award_targets.numel()
+    ):
+        valid_awards = torch.isfinite(wm_award_targets).all(dim=-1) & ~slot_missing
+        if torch.any(valid_awards):
+            raw_wm_award_loss = (
+                1
+                - F.cosine_similarity(
+                    pred.wm_award_embedding[valid_awards],
+                    wm_award_targets[valid_awards],
+                    dim=-1,
+                )
+            ).mean()
+            wm_award_active = True
+        else:
+            raw_wm_award_loss, wm_award_active = zero, False
+    else:
+        raw_wm_award_loss, wm_award_active = zero, False
+    wm_award_term = model.balance_loss("wm_award", raw_wm_award_loss, wm_award_active)
+
     emb_l2 = active_embedding_l2(model, red_team_idx, blue_team_idx, opts.l2_embedding)
     event_l2 = zero
     if red_event_idx is not None and blue_event_idx is not None:
@@ -672,6 +809,7 @@ def model_loss(
         + foul_term
         + bonus_term
         + special_term
+        + wm_award_term
         + emb_l2
         + event_l2
     )
@@ -689,6 +827,7 @@ def model_loss(
         foul_loss=float(raw_foul_loss.detach().cpu()),
         bonus_loss=float(raw_bonus_loss.detach().cpu()),
         special_loss=float(raw_special_loss.detach().cpu()),
+        wm_award_loss=float(raw_wm_award_loss.detach().cpu()),
     )
     return total, metrics, pred
 
@@ -775,6 +914,7 @@ def _loss_from_batch(
         awards,
         v57_cont,
         v57_bin,
+        wm_award,
     ) = batch
     return model_loss(
         model,
@@ -793,6 +933,7 @@ def _loss_from_batch(
         award_targets=awards,
         v57_cont_targets=v57_cont,
         v57_bin_targets=v57_bin,
+        wm_award_targets=wm_award,
     )
 
 
@@ -832,6 +973,24 @@ def _selection_loss_from_batch(
     )
 
 
+def _rank_embedding_loss_from_batch(
+    model: SetTransformerModel, batch: tuple[Tensor, ...]
+) -> Tensor:
+    team, event, target = batch
+    prediction = model.predict_rank_embedding(team, event)
+    return _masked_mse(prediction, target)[0]
+
+
+def _pick_embedding_loss_from_batch(
+    model: SetTransformerModel, batch: tuple[Tensor, ...]
+) -> Tensor:
+    captain, candidate, captain_event, candidate_event, target = batch
+    prediction = model.predict_selection_embedding(
+        captain, candidate, captain_event, candidate_event
+    )
+    return _masked_mse(prediction, target)[0]
+
+
 def _metrics_to_losses(metrics: LossMetrics) -> dict[str, float]:
     return {
         "continuous": metrics.continuous_loss,
@@ -842,6 +1001,7 @@ def _metrics_to_losses(metrics: LossMetrics) -> dict[str, float]:
         "foul": metrics.foul_loss,
         "bonus": metrics.bonus_loss,
         "special": metrics.special_loss,
+        "wm_award": metrics.wm_award_loss,
     }
 
 
@@ -924,6 +1084,7 @@ def _prepare_sidecar_loaders(
     *,
     generator: torch.Generator,
     device: torch.device,
+    world_model_opts: WorldModelOptions,
 ) -> dict[str, DataLoader]:
     if not sidecar_tables:
         return {}
@@ -934,6 +1095,14 @@ def _prepare_sidecar_loaders(
         datasets["playoff"] = AlliancePairDataset.from_table(sidecar_tables["playoffs"])
     if "selections" in sidecar_tables:
         datasets["selection"] = SelectionTripletDataset.from_table(sidecar_tables["selections"])
+    if "world_rank" in sidecar_tables and world_model_opts.rank_embedding.enabled:
+        datasets["wm_rank"] = RankEmbeddingDataset.from_table(
+            sidecar_tables["world_rank"], world_model_opts.rank_embedding.width
+        )
+    if "world_pick" in sidecar_tables and world_model_opts.pick_embedding.enabled:
+        datasets["wm_pick"] = PickEmbeddingDataset.from_table(
+            sidecar_tables["world_pick"], world_model_opts.pick_embedding.width
+        )
     loaders = {}
     for name, dataset in datasets.items():
         loader = _sidecar_loader(dataset, opts, generator=generator, device=device)
@@ -985,10 +1154,14 @@ def train_model(
     freeze_team_embeddings: bool = False,
     sidecar_tables: dict[str, pd.DataFrame] | None = None,
     tensorboard_writer: Any | None = None,
+    world_model_opts: WorldModelOptions | None = None,
 ) -> tuple[SetTransformerModel, pd.DataFrame, TrainingDiagnostics]:
     opts = opts or default_options()
+    world_model_opts = world_model_opts or (
+        initial_model.world_model_opts if initial_model is not None else WorldModelOptions()
+    )
     device = resolve_device(opts.device)
-    dataset = MatchTensorDataset.from_table(table, opts)
+    dataset = MatchTensorDataset.from_table(table, opts, world_model_opts)
     train_rows = np.flatnonzero(split.train_mask)
     validation_rows = np.flatnonzero(split.validation_mask)
     if len(train_rows) == 0:
@@ -1007,6 +1180,7 @@ def train_model(
         num_event_teams=num_event_teams,
         num_endgame_classes=len(opts.endgame_class_order),
         num_awards=len(opts.award_targets),
+        world_model_opts=world_model_opts,
     )
     if venue_mode and freeze_team_embeddings:
         raise ValueError("venue_mode and freeze_team_embeddings cannot be used together.")
@@ -1027,7 +1201,11 @@ def train_model(
         dataset, train_rows, opts, shuffle=True, generator=generator, device=device
     )
     sidecar_loaders = _prepare_sidecar_loaders(
-        sidecar_tables, opts, generator=generator, device=device
+        sidecar_tables,
+        opts,
+        generator=generator,
+        device=device,
+        world_model_opts=world_model_opts,
     )
     sidecar_iters = {name: cycle(loader) for name, loader in sidecar_loaders.items()}
     train_eval_loader = _make_loader(dataset, train_rows, opts, shuffle=False, device=device)
@@ -1075,6 +1253,10 @@ def train_model(
                         raw_loss = _playoff_loss_from_batch(model, sidecar_batch, opts)
                     elif name == "selection":
                         raw_loss = _selection_loss_from_batch(model, sidecar_batch, opts)
+                    elif name == "wm_rank":
+                        raw_loss = _rank_embedding_loss_from_batch(model, sidecar_batch)
+                    elif name == "wm_pick":
+                        raw_loss = _pick_embedding_loss_from_batch(model, sidecar_batch)
                     else:
                         continue
                     _accumulate_loss(

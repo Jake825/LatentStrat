@@ -19,7 +19,7 @@ For a higher-level explanation of how the model fits into the project, see the [
 
 For the exact tensor shapes, layer dimensions, parameter counts, and loss equations, see the [Model Architecture Reference](model-architecture-reference.md).
 
-LatentStrat V5 is a cross-alliance Set Transformer written in PyTorch. Each match row contains three red slots and three blue slots. Each slot carries a durable team base index, an event-team delta index, and a missing-team diagnostic mask.
+LatentStrat V6-Lite is a cross-alliance Set Transformer written in PyTorch. Each match row contains three red slots and three blue slots. Each slot carries a durable team base index, an event-team delta index, and a missing-team diagnostic mask. V6-Lite retains the supervised V5 trunk and reserves frozen-target auxiliary predictors. The first historical score encoder is offline-only and is not attached to this runtime model yet.
 
 Agent-facing architecture guidance lives in [`$pytorch-set-transformer`](../.agents/skills/pytorch-set-transformer/SKILL.md).
 
@@ -72,9 +72,28 @@ During `model.train()`, healthy non-missing slots are randomly dropped at `opts.
 - `TeamValueHead` predicts a scalar team value from one `Z_base + Z_event` vector for qualification rank pair losses.
 - `AllianceValueHead` predicts a scalar alliance value from a pooled alliance representation for playoff ordering losses.
 
+V6-Lite runtime scaffolding includes three lightweight predictors:
+
+- `AwardPrototypePredictor(z_team_event)` predicts a normalized 256D semantic award prototype.
+- `RankOutcomePredictor(z_team_event)` predicts a frozen 16D completed-event outcome latent.
+- `SelectionEmbeddingPredictor(z_captain, z_candidate)` predicts a frozen 16D pick-desirability latent.
+
+The offline historical match-breakdown encoder exports frozen 16D latents per played alliance. A follow-up will add the runtime score contract:
+
+```text
+z_red  -> ScoreEmbeddingPredictor -> frozen_red_16d
+z_blue -> ScoreEmbeddingPredictor -> frozen_blue_16d
+```
+
+The pick target builder uses ranked-unselected pool context offline. The runtime predictor only
+receives the captain and candidate latents, so the match loader never carries a variable-sized
+draft pool.
+
 Judged awards use NaN-masked targets. Impact and EI share cultural gradients, while machine awards are masked single-hot targets so an Autonomous win does not create false negative labels for Quality, Design, Control, or Excellence.
 
 All task losses are routed through a task-name keyed homoscedastic balancer. If a target group is unavailable or all entries in a batch are `NaN`, that task is inactive for the step and does not update its log variance.
+
+Read [V6-Lite](V6-Lite.md) for the target-space builders, fold-safety boundary, and phase gates.
 
 ## Consolidation
 

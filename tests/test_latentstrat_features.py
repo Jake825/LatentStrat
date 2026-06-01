@@ -25,12 +25,15 @@ from latentstrat.features import (
     build_event_sidecars,
     build_feature_sidecars,
     event_week_table_from_feature_table,
+    load_season_checkpoint_model,
     merge_scouting_features,
     read_feature_table,
     train_feature_table,
     write_feature_table,
 )
+from latentstrat.model import init_model
 from latentstrat.secrets import load_environment
+from latentstrat.world_model import TargetSpaceOptions, WorldModelOptions
 
 
 def _feature_table(row_count=8):
@@ -160,7 +163,12 @@ def test_train_feature_table_adds_indices_and_writes_artifacts(tmp_path):
     assert not (output / "feature_zero_out_war.png").exists()
     assert not (output / "feature_embedding_drift.csv").exists()
     assert not (output / "feature_selection_value.csv").exists()
-    assert (output / "v5_checkpoint.pt").exists()
+    assert (output / "v6_checkpoint.pt").exists()
+    checkpoint = torch.load(output / "v6_checkpoint.pt", map_location="cpu", weights_only=False)
+    assert checkpoint["checkpoint_schema_version"] == 6
+    assert checkpoint["world_model"]["enabled"] is False
+    loaded = load_season_checkpoint_model(output / "v6_checkpoint.pt")
+    assert loaded.world_model_opts.enabled is False
     common = pd.read_csv(output / "feature_common_metrics.csv")
     assert set(common["split"]) == {"train", "validation"}
     assert "next_match_phase_score_mse" in common.columns
@@ -250,7 +258,6 @@ def test_sidecar_generation_preserves_schemas_and_passed_over_team():
     assert selections.loc[0, "captain_team_key"] == "frc1"
     assert selections.loc[0, "pick_team_key"] == "frc3"
     assert selections.loc[0, "passed_over_team_key"] == "frc2"
-    assert "declining_team_key" not in selections.columns
     assert int(playoffs.loc[0, "playoff_finish_order"]) == 1
 
 
@@ -449,7 +456,7 @@ def test_train_features_cli_loads_parquet_and_writes_artifacts(tmp_path):
     assert result.exit_code == 0, result.output
     assert (output / "feature_match_table.csv").exists()
     assert (output / "feature_training_diagnostics.json").exists()
-    assert (output / "v5_checkpoint.pt").exists()
+    assert (output / "v6_checkpoint.pt").exists()
     history = pd.read_csv(output / "feature_history.csv")
     assert "learning_rate" in history.columns
 
@@ -507,7 +514,7 @@ def test_train_features_cli_freezes_prior_embeddings_and_records_metadata(tmp_pa
     )
 
     assert result.exit_code == 0, result.output
-    checkpoint = torch.load(output / "v5_checkpoint.pt", map_location="cpu", weights_only=False)
+    checkpoint = torch.load(output / "v6_checkpoint.pt", map_location="cpu", weights_only=False)
     assert checkpoint["split_policy"] == "stratified-event-comp"
     assert checkpoint["frozen_embedding_tables"] == ["Z_base", "Z_event"]
     assert checkpoint["sidecar_tables"] == ["playoffs", "rankings"]
@@ -561,7 +568,7 @@ def test_consolidate_event_cli_writes_embedding_store(tmp_path):
         app,
         [
             "consolidate-event",
-            str(output / "v5_checkpoint.pt"),
+            str(output / "v6_checkpoint.pt"),
             "--event-key",
             "2026features",
             "--embedding-db",
@@ -573,7 +580,7 @@ def test_consolidate_event_cli_writes_embedding_store(tmp_path):
 
     assert result.exit_code == 0, result.output
     assert db_path.exists()
-    assert (output / "v5_checkpoint_consolidated.pt").exists()
+    assert (output / "v6_checkpoint_consolidated.pt").exists()
 
 
 def test_feature_file_errors_are_clear(tmp_path):
@@ -581,3 +588,21 @@ def test_feature_file_errors_are_clear(tmp_path):
         read_feature_table(tmp_path / "missing.parquet")
     with pytest.raises(ValueError, match="Feature table is empty"):
         write_feature_table(pd.DataFrame(), tmp_path / "empty.parquet")
+
+
+def test_active_integrated_v6_checkpoint_training_requires_world_model_bundle():
+    opts = default_options()
+    model = init_model(
+        7,
+        opts.latent_dim,
+        len(opts.target_map),
+        len(opts.binary_targets),
+        opts,
+        num_event_teams=7,
+        world_model_opts=WorldModelOptions(
+            award_embedding=TargetSpaceOptions(enabled=True, width=256)
+        ),
+    )
+
+    with pytest.raises(ValueError, match="requires world_model_bundle"):
+        train_feature_table(_feature_table(), opts, initial_model=model, verbose=False)

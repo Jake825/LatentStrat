@@ -113,7 +113,36 @@ Target normalization (`fit_target_stats`) is split-local. Validation rows never 
 
 To map string FRC team keys to tensors, `make_v5_team_index_maps` runs in memory after loading the Parquet file. For V5.6, `frc####` maps directly to `team_base_idx=####` for team numbers `1..12500` by default, and `team_base_idx=0` is the learned ghost robot used for blank or explicit missing slots. Real event-team pairs still map to contiguous `team_event_idx` values starting at `1`, with `team_event_idx=0` reserved for no event-local delta.
 
-## 4. PyTorch Training Loop
+## 4. V6-Lite Offline Score Artifact
+
+V6-Lite V1 builds the first score target space offline before attaching it to the Set Transformer:
+
+```powershell
+latentstrat sync-match-breakdowns `
+  --start-season 2015 `
+  --end-season 2026
+
+latentstrat train-match-breakdown-encoder `
+  --start-season 2015 `
+  --end-season 2026 `
+  --epochs 50 `
+  --seasons-per-step 4 `
+  --rows-per-season 64 `
+  --learning-rate 0.001 `
+  --seed 2026
+```
+
+The historical score encoder uses one raw typed schema per eligible season and a shared 16D
+bottleneck. It writes no normalization file and never pads inputs to a cross-season union schema.
+Its default event filter is TBA types `0..5`; FOC `6` and remote `7` are opt-in.
+
+This artifact is not attached to full-season or walk-forward training yet. Score auxiliary
+configuration remains disabled until a follow-up adds per-alliance frozen targets. Omitting
+`--world-model-bundle` remains the supervised-only V6 ablation.
+
+Read [V6-Lite](V6-Lite.md) for the phase order and promotion gates.
+
+## 5. PyTorch Training Loop
 
 Run:
 
@@ -160,7 +189,7 @@ latentstrat train-features data/features/season/features_2026.parquet \
   --playoffs-sidecar data/sidecars/v58_2026/playoffs_2026.parquet
 ```
 
-V5.8 walk-forward validation uses canonical `event_week` values. TBA Week 0 is bundled into model-facing Week 1, and missing TBA weeks fall back to dense chronological event order. Each fold starts from the Day Zero prior, trains on weeks `<= N`, validates on week `N + 1`, and pre-filters sidecars to prevent future rankings, selections, or playoff labels from reaching training. `walk_forward_metrics.csv` includes row-weighted next-match phase score MSE, total score MSE when available, red-win accuracy, Brier score, and log loss. LatentStrat reports `p_red_win`; blue win probability is `1 - p_red_win`. The command also writes TensorBoard by default: a summary run tracks fold-level metrics, while one sub-run per fold tracks epoch-level training curves.
+Walk-forward validation uses canonical `event_week` values. TBA Week 0 is bundled into model-facing Week 1, and missing TBA weeks fall back to dense chronological event order. Each fold starts from the Day Zero prior, trains on weeks `<= N`, validates on week `N + 1`, and pre-filters sidecars. `walk_forward_metrics.csv` includes row-weighted next-match phase score MSE, total score MSE when available, red-win accuracy, Brier score, and log loss. `walk_forward_predictions.parquet` enables paired fold-match bootstrap comparisons. Fold-local score-target rebuilding remains a future integration milestone.
 
 ```bash
 latentstrat validate-walk-forward \
@@ -175,7 +204,7 @@ latentstrat validate-walk-forward \
   --tensorboard
 ```
 
-## 5. Baselines And Controls
+## 6. Baselines And Controls
 
 `fit_baselines` computes:
 
@@ -189,23 +218,23 @@ latentstrat validate-walk-forward \
 
 These controls are applied at the Pandas DataFrame level before training. The PyTorch model does not need special control-mode branches.
 
-## 6. Evaluation Context
+## 7. Evaluation Context
 
 During evaluation, the model runs under `torch.inference_mode()` with `model.eval()` active. Prediction is batched through a `DataLoader` so full seasons do not allocate one large tensor on GPU or MPS.
 
-## 7. Venue Mode And Consolidation
+## 8. Venue Mode And Consolidation
 
 Venue mode fine-tunes only `Z_event` for a supplied event:
 
 ```bash
 latentstrat train-features data/features/season/features_2026.parquet --venue-mode --event-key 2026ilch \
-  --checkpoint artifacts/season/features_run/v5_checkpoint.pt
+  --checkpoint artifacts/season/features_run/v6_checkpoint.pt
 ```
 
 After the event, `consolidate-event` folds event deltas into durable base embeddings using `DeltaIntegrationGate(Z_base, Z_event, delta_weeks)` and writes the result to `data/embeddings/latentstrat_embeddings.sqlite`:
 
 ```bash
-latentstrat consolidate-event artifacts/season/features_run/v5_checkpoint.pt --event-key 2026ilch
+latentstrat consolidate-event artifacts/season/features_run/v6_checkpoint.pt --event-key 2026ilch
 ```
 
 ## Related

@@ -15,6 +15,7 @@ from latentstrat import cli
 from latentstrat.cli import app
 from latentstrat.paths import (
     EMBEDDING_DB_PATH,
+    MATCH_BREAKDOWN_CORPUS_PATH,
     OPENAI_EMBEDDING_CACHE_PATH,
     SCOUTING_DB_PATH,
     STATBOTICS_CACHE_PATH,
@@ -31,6 +32,7 @@ def test_canonical_storage_paths_are_stable():
     assert OPENAI_EMBEDDING_CACHE_PATH == Path("data/cache/openai_embeddings.sqlite")
     assert SCOUTING_DB_PATH == Path("data/scouting/scouting.db")
     assert EMBEDDING_DB_PATH == Path("data/embeddings/latentstrat_embeddings.sqlite")
+    assert MATCH_BREAKDOWN_CORPUS_PATH == Path("data/world_model/match_breakdowns.sqlite")
     assert prior_features_path(2026) == Path("data/features/prior/prior_features_2026.parquet")
     assert season_features_path(2026) == Path("data/features/season/features_2026.parquet")
     assert event_features_path("2026ilch") == Path("data/features/event/features_2026ilch.parquet")
@@ -150,6 +152,9 @@ def test_clear_cache_removes_new_and_legacy_caches_but_keeps_features(tmp_path, 
     feature = Path("data/features/season/features_2026.parquet")
     feature.parent.mkdir(parents=True, exist_ok=True)
     feature.write_text("feature", encoding="utf-8")
+    corpus = Path("data/world_model/match_breakdowns.sqlite")
+    corpus.parent.mkdir(parents=True, exist_ok=True)
+    corpus.write_text("durable corpus", encoding="utf-8")
 
     result = CliRunner().invoke(app, ["clear-cache"])
 
@@ -161,6 +166,7 @@ def test_clear_cache_removes_new_and_legacy_caches_but_keeps_features(tmp_path, 
     assert not Path("tba_cache.sqlite").exists()
     assert not Path("statbotics_offline_cache").exists()
     assert feature.exists()
+    assert corpus.exists()
 
 
 def test_organize_local_outputs_dry_run_and_apply(tmp_path):

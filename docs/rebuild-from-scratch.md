@@ -53,7 +53,7 @@ Do not paste real keys into docs, screenshots, commits, or transcripts.
 
 ## Local Storage Layout
 
-New default paths keep generated outputs grouped by purpose. Provider caches live under `data/cache/`, scouting lives under `data/scouting/scouting.db`, durable consolidated embeddings live under `data/embeddings/latentstrat_embeddings.sqlite`, prior/season/event feature tables live under `data/features/`, sidecars live under `data/sidecars/`, artifacts live under grouped `artifacts/` subdirectories, and TensorBoard runs live under `runs/`. Explicit legacy paths still work when passed on the CLI, but new rebuilds should use the canonical layout.
+New default paths keep generated outputs grouped by purpose. Provider caches live under `data/cache/`, the durable raw match-breakdown corpus lives under `data/world_model/`, scouting lives under `data/scouting/scouting.db`, durable consolidated embeddings live under `data/embeddings/latentstrat_embeddings.sqlite`, feature tables live under `data/features/`, sidecars live under `data/sidecars/`, artifacts live under grouped `artifacts/` subdirectories, and TensorBoard runs live under `runs/`. Explicit legacy paths still work when passed on the CLI, but new rebuilds should use the canonical layout.
 
 ## 3. Build The Prior Feature Table
 
@@ -125,7 +125,8 @@ Review:
 latentstrat build-features `
   --season 2026 `
   --output data/features/season/features_v58_2026.parquet `
-  --sidecar-output-dir data/sidecars/v58_2026
+  --sidecar-output-dir data/sidecars/v58_2026 `
+  --event-metadata-output data/features/season/events_2026.parquet
 ```
 
 Expected outputs:
@@ -135,11 +136,32 @@ data/features/season/features_v58_2026.parquet
 data/sidecars/v58_2026/rankings_2026.parquet
 data/sidecars/v58_2026/selections_2026.parquet
 data/sidecars/v58_2026/playoffs_2026.parquet
+data/features/season/events_2026.parquet
 ```
 
 The feature table should include canonical `event_week` values for walk-forward validation.
+Event metadata remains available for later fold-local V6 target integrations.
 
-## 7. Train A Full-Season Model
+## 7. Build The V6-Lite Historical Score Artifact
+
+```powershell
+latentstrat sync-match-breakdowns `
+  --start-season 2015 `
+  --end-season 2026
+
+latentstrat train-match-breakdown-encoder `
+  --start-season 2015 `
+  --end-season 2026 `
+  --epochs 50 `
+  --seasons-per-step 4 `
+  --rows-per-season 64 `
+  --learning-rate 0.001 `
+  --seed 2026
+```
+
+Review `artifacts/world_model/match_breakdown/v1_2015_2026/validation_report.json`. It records grouped reconstruction losses, effective rank, nearest-neighbor sanity rows, and linear probes. The corresponding `bundle.json` records `promotion_eligible=false`: this all-years artifact is offline-only and is not attached to Set Transformer training yet.
+
+## 8. Train A Full-Season Model
 
 Use this when you want a conventional train/validation split:
 
@@ -164,9 +186,9 @@ Expected artifacts:
 - `feature_common_metrics.csv`
 - task-specific metric CSVs
 - attention and zero-out diagnostics
-- `v5_checkpoint.pt`
+- `v6_checkpoint.pt`
 
-## 8. Run Walk-Forward Validation
+## 9. Run Walk-Forward Validation
 
 Use this as the main season validation path:
 
@@ -177,7 +199,7 @@ latentstrat validate-walk-forward `
   --rankings-sidecar data/sidecars/v58_2026/rankings_2026.parquet `
   --selections-sidecar data/sidecars/v58_2026/selections_2026.parquet `
   --playoffs-sidecar data/sidecars/v58_2026/playoffs_2026.parquet `
-  --output artifacts/walk-forward/v58_walk_forward_v564_latent16_50ep_2026 `
+  --output artifacts/walk-forward/v58_walk_forward_2026 `
   --epochs 50 `
   --mini-batch-size 256 `
   --latent-dim 16 `
@@ -190,9 +212,20 @@ Expected artifacts:
 
 - `walk_forward_metrics.csv`
 - `walk_forward_history.csv`
+- `walk_forward_predictions.parquet`
+- `config.json`
 - TensorBoard summary and fold runs under `runs/`
 
-## 9. Validate Documentation And Repo State
+After a future milestone attaches per-alliance score targets, compare its walk-forward predictions against the archived V5.8 export:
+
+```powershell
+latentstrat compare-world-model `
+  --baseline artifacts/baselines/v5.8/walk-forward/walk_forward_predictions.parquet `
+  --candidate artifacts/walk-forward/v6_score_attached/walk_forward_predictions.parquet `
+  --output artifacts/walk-forward/v6_score_attached/promotion_vs_v58.csv
+```
+
+## 10. Validate Documentation And Repo State
 
 For documentation-only changes:
 

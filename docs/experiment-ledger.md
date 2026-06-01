@@ -58,6 +58,7 @@ Interpretation: feature-summed OpenAI loss improved the training path but did no
 | V5.8 walk-forward 8D | `artifacts/v58_walk_forward_latent8_2026/` | V5.6.1 8D | `10` folds, `5` epochs/fold | Test 8D prior in season validation | Accuracy `0.6594`, score MSE worse than 16D | 8D was too tight for this local setup |
 | V5.8 walk-forward V5.6.2 | `artifacts/v58_walk_forward_v562_latent16_2026/` | V5.6.2 16D | `10` folds, `5` epochs/fold | Test cultural-prior attempt | Accuracy `0.6604`, worse than V5.6.1 16D | EPA-mask bug likely hurt the prior despite richer targets |
 | V5.8 walk-forward V5.6.4 50ep | `artifacts/v58_walk_forward_v564_latent16_50ep_2026/` | V5.6.4 16D | `10` folds, `50` epochs/fold | Long folded validation with latest prior | Best local score MSE and accuracy, but weaker Brier/log loss | Calibration is now the main follow-up |
+| Frozen V5.8 replay for V6 comparison | `artifacts/baselines/v5.8/walk-forward/` | tagged `v5.8-baseline`, V5.6.4 16D | `10` folds, `50` epochs/fold | Archive paired prediction export and exact hashes before V6-Lite | Phase score MSE `8829.77`, total score MSE `8971.60`, accuracy `0.7164`, Brier `0.2090`, log loss `0.7227` | Use this manifest-backed replay as the V6 promotion boundary |
 
 ## Current Walk-Forward Comparison
 
@@ -73,6 +74,52 @@ Reading:
 - V5.6.4 plus longer folded training gave the best local score MSE and match accuracy.
 - The same run did not give the best Brier score or log loss.
 - Future improvements should treat calibration as a first-class acceptance criterion, not a secondary chart.
+
+## V6-Lite Offline Target Work
+
+| Artifact | Input | Purpose | Status |
+|---|---|---|---|
+| `artifacts/world_model/match_breakdown/v1_2015_2026/` | `data/world_model/match_breakdowns.sqlite` | Train season-specific raw match-breakdown encoders and decoders around one shared 16D bottleneck | Completed locally: `328076` alliance embeddings, combined holdout effective rank `13.26`, eval loss `17.29 -> 0.52`, all-data loss `16.50 -> 0.51` |
+
+This V1 artifact is intentionally offline-only. It exports one latent per played alliance, keeps `2021` as an audited schema exclusion, uses normal official TBA event types `0..5` by default, and writes no normalization file. Its bundle records `promotion_eligible=false` because all-years representation training is not a leakage-safe 2026 walk-forward result.
+
+The local corpus synchronized `1965` eligible events and `164211` matches. `164054` matches had posted scores and alliance breakdowns; `173` incomplete or null-breakdown rows remain in SQLite for refreshes. Per-season vector widths range from `24` in 2015 to `222` in 2023. The union-schema audit records presence only and confirms `training_uses_union_padding=false`.
+
+### Match-Breakdown Inspection Report
+
+The standalone local inspection report is:
+
+```text
+artifacts/world_model/match_breakdown/v1_2015_2026/inspection/
+```
+
+It was generated from `328076` production alliance embeddings and `32818` reconstructed
+eval-model holdout rows. The report samples `11000` production and `5500` holdout rows for t-SNE,
+exports `400` extreme network seeds with `800` different-season neighbor edges, and leaves the
+trained `bundle.json` hash unchanged.
+
+Local visual review:
+
+- Production PCA and t-SNE retain strong season-specific regions. The shared bottleneck has not
+  erased game identity, so season overlap should not be treated as established.
+- Score and auto percentiles show visible gradients. Endgame extremes occupy narrower regions,
+  while foul extremes are comparatively diffuse.
+- The first three production PCA components explain about `51.80%` of variance; the first eight
+  explain about `87.31%`.
+- The cross-season network finds different-season analog edges throughout the PCA frame, but this
+  is qualitative evidence only.
+- Safe aggregate endgame fields are unavailable for `2015`, `2016`, `2017`, and `2023`; those
+  seasons remain `NaN` in endgame coloring rather than using invented proxies.
+
+These plots are interpretation aids, not promotion evidence. They help locate follow-up questions
+before per-alliance score attachment and leakage-safe walk-forward evaluation.
+
+The next milestone is per-alliance Set Transformer attachment:
+
+```text
+z_red  -> ScoreEmbeddingPredictor -> frozen_red_16d
+z_blue -> ScoreEmbeddingPredictor -> frozen_blue_16d
+```
 
 ## Open Follow-Ups
 

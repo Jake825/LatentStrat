@@ -29,12 +29,13 @@ If you are new to the project, read in this order:
 3. [Changelog](changelog.md): how semantic versions connect to Git commits and local artifact eras.
 4. [Data sources](data-sources.md): where the model gets its information.
 5. [Prior training](prior-training.md): how teams get Day Zero identities before matches are played.
-6. [Season training](season-training.md): how the model learns from matches, sidecars, and walk-forward validation.
-7. [Model architecture reference](model-architecture-reference.md): exact tensor shapes, layer sizes, parameter counts, and equations.
-8. [Metrics and artifacts](metrics-and-artifacts.md): how to read the outputs.
-9. [Project history](project-history.md): what experiments were tried and what changed because of them.
-10. [Experiment ledger](experiment-ledger.md): local run evidence and design lessons.
-11. [Rebuild from scratch](rebuild-from-scratch.md): commands to reproduce the current pipeline.
+6. [V6-Lite design](V6-Lite.md): frozen FRC target spaces and phased promotion gates.
+7. [Season training](season-training.md): how the model learns from matches, sidecars, and walk-forward validation.
+8. [Model architecture reference](model-architecture-reference.md): exact tensor shapes, layer sizes, parameter counts, and equations.
+9. [Metrics and artifacts](metrics-and-artifacts.md): how to read the outputs.
+10. [Project history](project-history.md): what experiments were tried and what changed because of them.
+11. [Experiment ledger](experiment-ledger.md): local run evidence and design lessons.
+12. [Rebuild from scratch](rebuild-from-scratch.md): commands to reproduce the current pipeline.
 
 ## The Big Idea
 
@@ -63,7 +64,10 @@ flowchart TD
     TBAHistory[TBA team history and awards] --> PriorFeatures
     PriorFeatures --> PriorTraining[V5.6.4 prior training]
     PriorTraining --> ZBase[Day Zero Z_base checkpoint]
-    FeatureTable --> SeasonTraining[V5.8 season training]
+    TBA --> MatchCorpus[Historical match-breakdown SQLite corpus]
+    MatchCorpus --> ScoreArtifact[V6-Lite offline score artifact]
+    FeatureTable --> SeasonTraining[V6-Lite supervised season training]
+    ScoreArtifact -. future per-alliance attachment .-> SeasonTraining
     ZBase --> SeasonTraining
     Sidecars[Rankings, selections, playoffs] --> SeasonTraining
     SeasonTraining --> Metrics[Metrics and artifacts]
@@ -95,6 +99,7 @@ Read [Metrics and artifacts](metrics-and-artifacts.md) if you want to understand
 
 - Brier score, log loss, match accuracy, and score MSE.
 - Prior inspection files such as PCA plots and nearest-neighbor CSVs.
+- Historical match-breakdown inspection plots for score gradients, season structure, and cross-season analogies.
 - Feature training outputs such as `feature_history.csv`.
 - Walk-forward outputs such as `walk_forward_metrics.csv`.
 
@@ -124,6 +129,7 @@ Use these grouped links when you already know what kind of question you have.
 
 - [Model structure](model-structure.md): readable architecture overview.
 - [Model architecture reference](model-architecture-reference.md): exact tensor shapes, parameter counts, and equations.
+- [V6-Lite design](V6-Lite.md): frozen target-space builders and promotion rules.
 - [Prior training](prior-training.md): Day Zero prior and checkpoint handoff.
 - [Season training](season-training.md): Set Transformer training and walk-forward validation.
 - [V5.7 notes](V5.7.md): sensor-fusion transition notes.

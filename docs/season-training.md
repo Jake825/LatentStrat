@@ -5,7 +5,7 @@ tags:
   - model-architecture
 aliases:
   - "Season Training"
-  - "V5.8 Season Training"
+  - "V6-Lite Season Training"
   - "Walk-Forward Training"
 related:
   - "[[prior-training]]"
@@ -20,6 +20,9 @@ related:
 Season training teaches LatentStrat how teams behave in real matches. It starts from the Day Zero prior and learns event-specific evidence from the season.
 
 For exact tensor shapes, head dimensions, parameter counts, and equations, see the [Model Architecture Reference](model-architecture-reference.md).
+
+V6-Lite keeps the V5 supervised trunk and adds frozen offline target spaces. Read
+[V6-Lite](V6-Lite.md) for the canonical phase roadmap.
 
 ## The Two Team Vectors
 
@@ -99,6 +102,16 @@ The sidecar tasks are:
 - Alliance selection triplets: captain, selected pick, and computed passed-over team.
 
 Sidecar loaders can be much smaller than the match loader. The match loader drives the epoch, while non-empty sidecar loaders are cycled.
+
+## V6-Lite Frozen Targets
+
+V6-Lite V1 builds historical score-archetype targets offline. The match-breakdown encoder uses
+separate raw schemas per eligible season and one shared 16D bottleneck. It is not attached to
+season training yet, so score embedding configuration remains disabled.
+
+Award, completed-ranking, and pick-desirability target-space scaffolds remain available for later
+phases. The main runtime selection predictor receives only captain and candidate latents;
+ranked-unselected pool context stays inside the offline builder.
 
 ## Stability Patch
 
@@ -243,12 +256,14 @@ Season training writes files such as:
 - `feature_embedding_drift_quiver.png`
 - `feature_event_delta_by_week.png`
 - `feature_team_value_vs_draft_pick.png`
-- `v5_checkpoint.pt`
+- `v6_checkpoint.pt`
 
 Walk-forward writes:
 
 - `walk_forward_metrics.csv`
 - `walk_forward_history.csv`
+- `walk_forward_predictions.parquet`
+- `config.json`
 - optional fold checkpoints.
 
 Read [Metrics and artifacts](metrics-and-artifacts.md) for interpretation.

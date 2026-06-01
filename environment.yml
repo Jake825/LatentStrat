@@ -20,6 +20,7 @@ dependencies:
       - openai>=1
       - pydantic>=2
       - python-dotenv
+      - pyyaml>=6
       - sqlmodel>=0.0.22
       - tensorboard>=2.16
       - typer

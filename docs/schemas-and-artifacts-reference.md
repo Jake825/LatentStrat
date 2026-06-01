@@ -17,7 +17,9 @@ related:
 
 # Schemas And Artifacts Reference
 
-This page documents the generated data contracts and output files used by the current V5.6.4/V5.8 pipeline. It is a practical reference, not a replacement for source-level validation in tests.
+This page documents the generated data contracts and output files used by the V5.6.4 prior,
+tagged V5.8 baseline, and active V6-Lite pipeline. It is a practical reference, not a replacement
+for source-level validation in tests.
 
 ## Prior Feature Table
 
@@ -87,8 +89,6 @@ Sidecars are optional auxiliary labels. They do not change the match-row grain. 
 | `selections_2026.parquet` | `season`, `event_key`, `alliance_number`, `captain_team_key`, `pick_team_key`, `pick_order`, `passed_over_team_key`, `raw_event_week`, `event_week` | `3597` |
 | `playoffs_2026.parquet` | `season`, `event_key`, `alliance_number`, `team_1_key`, `team_2_key`, `team_3_key`, `playoff_finish_order`, `status`, `raw_event_week`, `event_week` | `1666` |
 
-Declines are intentionally not modeled because TBA does not reliably populate them in event data.
-
 ## Prior Artifacts
 
 `train-prior` writes a directory or checkpoint path. Directory output writes:
@@ -127,7 +127,7 @@ It does not contain decoder, head, or log-var weights.
 
 | File | Meaning |
 |---|---|
-| `v5_checkpoint.pt` | trained Set Transformer checkpoint |
+| `v6_checkpoint.pt` | strict-schema V6 Set Transformer checkpoint, including supervised-only ablations |
 | `feature_history.csv` | epoch-level train/validation losses and task diagnostics |
 | `feature_common_metrics.csv` | common match metrics by split |
 | `feature_binary_metrics.csv` | Brier/log-loss style binary metrics |
@@ -166,10 +166,60 @@ It does not contain decoder, head, or log-var weights.
 |---|---|
 | `walk_forward_metrics.csv` | one row per fold plus `AVERAGE` |
 | `walk_forward_history.csv` | fold and epoch training history |
+| `walk_forward_predictions.parquet` | fold-match paired comparison rows |
+| `config.json` | workflow config, Git commit, and SHA-256 source hashes |
 | TensorBoard event files | summary and fold-level training curves |
 | optional fold checkpoints | only when `--save-fold-checkpoints` is enabled |
 
 The `AVERAGE` row uses row-weighted validation aggregates for common metrics. Do not average fold means by hand when validation fold sizes differ.
+
+## V6-Lite Frozen Target Bundles
+
+The V6-Lite V1 historical match-breakdown artifact writes:
+
+| File | Meaning |
+|---|---|
+| `eval_model.pt` | holdout-only season-specific encoders/decoders and shared bottleneck used for diagnostics |
+| `model.pt` | all-data retrain used for exported embeddings |
+| `embeddings.parquet` | one frozen 16D latent per played alliance |
+| `schema.json` | typed season-specific vector schemas |
+| `union_schema_audit.json` | cross-season presence report; never used as a padded training tensor |
+| `bundle.json` | source hashes, Git SHA, seasons, event filter, widths, provenance, and `promotion_eligible=false` |
+| `validation_report.json` | grouped reconstruction loss, effective rank, nearest neighbors, and score probes |
+| `training_history.csv` | eval and all-data epoch histories |
+
+The canonical directory is:
+
+```text
+artifacts/world_model/match_breakdown/v1_2015_2026/
+```
+
+The match-breakdown encoder intentionally writes no normalizer file. It uses raw values plus observed masks and keeps per-season vector widths separate.
+
+`inspect-match-breakdown-encoder` writes a standalone `inspection/` directory without changing
+`bundle.json`:
+
+| File | Meaning |
+|---|---|
+| `production_pca_coordinates.csv` | every production embedding in the production PCA frame |
+| `holdout_pca_coordinates.csv` | eval-model holdout vectors orthogonally aligned for display in the production PCA frame |
+| `pca_explained_variance.csv` and `.png` | component and cumulative production PCA variance |
+| `production_pca_multiview.png`, `holdout_pca_multiview.png` | fixed-coordinate season, percentile, and top-component views |
+| `production_tsne_coordinates.csv`, `holdout_tsne_coordinates.csv` | deterministic season-and-score-decile sampled t-SNE coordinates |
+| `production_tsne_multiview.png`, `holdout_tsne_multiview.png` | local-neighborhood views; do not compare their absolute coordinates |
+| `latent_archetype_profiles.csv`, `latent_parallel_coordinates.png` | raw and standardized production latent profiles by archetype slice |
+| `cross_season_neighbor_nodes.csv`, `cross_season_neighbor_edges.csv`, `cross_season_neighbor_network.png` | PCA-positioned cross-season Euclidean neighbor network |
+| `component_metric_sources.json` | one prioritized safe component aggregate per season and audited missing seasons |
+| `inspection_manifest.json` | report input hashes, generation options, generated-file hashes, and geometry provenance |
+
+Projection assets are diagnostic interpretation aids. They do not change the artifact bundle and
+do not replace leakage-safe fold metrics.
+
+Award, rank, and pick target-space scaffolds remain under `artifacts/world_model/`. The umbrella `bundle.json` records enabled spaces and source files. `train-features --world-model-bundle` fails if an enabled integrated space is absent. Score embedding configuration remains disabled until a follow-up attaches per-alliance targets to season training.
+
+Large V5.8 comparison artifacts stay ignored under `artifacts/baselines/v5.8/`. The tracked
+`baselines/v5.8-baseline.json` file records their SHA-256 hashes, summary metrics, tag, commit SHA,
+and regeneration command.
 
 ## Artifact Naming Convention
 
@@ -190,20 +240,24 @@ The canonical generated-file layout is:
 data/cache/tba.sqlite
 data/cache/statbotics.sqlite
 data/cache/openai_embeddings.sqlite
+data/world_model/match_breakdowns.sqlite
 data/scouting/scouting.db
 data/embeddings/latentstrat_embeddings.sqlite
 data/features/prior/
 data/features/season/
 data/features/event/
+data/features/world_model/
 data/sidecars/
 artifacts/prior/
 artifacts/prior-grid/
 artifacts/season/
 artifacts/walk-forward/
+artifacts/world_model/
+artifacts/baselines/
 artifacts/smoke/
 artifacts/evidence/
 artifacts/inspection/
 runs/
 ```
 
-Parquet feature tables remain file artifacts. Provider caches, scouting rows, and durable embedding stores use SQLite. The local organizer script `scripts/organize_local_outputs.ps1` can dry-run moves from legacy paths into this layout.
+Parquet feature tables remain file artifacts. Provider caches, scouting rows, durable embedding stores, and the raw match-breakdown corpus use SQLite. The local organizer script `scripts/organize_local_outputs.ps1` can dry-run moves from legacy paths into this layout.

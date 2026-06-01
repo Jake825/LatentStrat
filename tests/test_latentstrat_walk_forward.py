@@ -2,6 +2,7 @@ import json
 
 import numpy as np
 import pandas as pd
+import pytest
 import torch
 from typer.testing import CliRunner
 
@@ -13,6 +14,7 @@ from latentstrat.walk_forward import (
     make_walk_forward_split,
     run_walk_forward_validation,
 )
+from latentstrat.world_model import TargetSpaceOptions, WorldModelOptions
 
 
 def _walk_table() -> pd.DataFrame:
@@ -63,6 +65,8 @@ def _walk_table() -> pd.DataFrame:
                 "blue_committed_minor_foul_count": float((idx + 1) % 2),
                 "red_committed_major_foul_count": 0.0,
                 "blue_committed_major_foul_count": 0.0,
+                "red_atomic_endgame_count": float(idx % 2),
+                "blue_atomic_endgame_count": float((idx + 1) % 2),
                 "win_margin": 10,
                 "fouls_drawn": 0,
                 "red_win": True,
@@ -121,7 +125,7 @@ def test_run_walk_forward_writes_fold_and_average_metrics(tmp_path):
     assert (result.output_dir / "walk_forward_predictions.parquet").exists()
     assert (result.output_dir / "config.json").exists()
     config = json.loads((result.output_dir / "config.json").read_text(encoding="utf-8"))
-    assert config["workflow"] == "v5.8-walk-forward"
+    assert config["workflow"] == "v6-walk-forward"
     assert config["sources"]["features"]["sha256"]
     assert config["sources"]["prior_checkpoint"]["sha256"]
     assert len(result.predictions) == 6
@@ -232,6 +236,41 @@ def test_walk_forward_cli_writes_tensorboard_runs(tmp_path):
     assert (run_dir / "summary").exists()
     assert any(run_dir.glob("summary/events.out.tfevents.*"))
     assert any(run_dir.glob("fold_*/events.out.tfevents.*"))
+
+
+def test_walk_forward_rejects_deferred_score_embedding_integration(tmp_path):
+    features = write_feature_table(_walk_table(), tmp_path / "features.parquet")
+    prior = _prior_checkpoint(tmp_path / "prior.pt")
+    events = tmp_path / "events.parquet"
+    pd.DataFrame(
+        [
+            {"key": "2026week1", "event_type": 0},
+            {"key": "2026week2", "event_type": 0},
+            {"key": "2026week3", "event_type": 0},
+        ]
+    ).to_parquet(events, index=False)
+    opts = default_options().model_copy(
+        update={"epochs": 1, "mini_batch_size": 4, "use_early_stopping": False}
+    )
+    world = WorldModelOptions(
+        score_embedding=TargetSpaceOptions(enabled=True, width=4),
+        award_embedding=TargetSpaceOptions(enabled=False, width=256),
+        rank_embedding=TargetSpaceOptions(enabled=False, width=4),
+        pick_embedding=TargetSpaceOptions(enabled=False, width=4),
+        target_epochs=1,
+    )
+
+    with pytest.raises(ValueError, match="score_embedding is offline-only"):
+        run_walk_forward_validation(
+            features,
+            tmp_path / "walk",
+            prior_checkpoint=prior,
+            opts=opts,
+            world_model_options=world,
+            world_model_events_path=events,
+            max_validation_week=2,
+            verbose=False,
+        )
 
 
 def test_walk_forward_average_row_weights_common_metrics():

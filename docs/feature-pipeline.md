@@ -53,7 +53,7 @@ Rankings, alliance selections, and playoff outcomes have post-event or event-lev
 - `selections_YYYY.parquet`: `captain_team_key`, `pick_team_key`, `pick_order`, and `passed_over_team_key`. Passed-over teams are computed from rankings during sidecar generation.
 - `playoffs_YYYY.parquet`: alliance team keys and `playoff_finish_order`.
 
-Declines are intentionally not modeled because TBA does not reliably populate them in real event data. Sidecars are auxiliary training labels only; they are not pre-match input features.
+Sidecars are auxiliary training labels only; they are not pre-match input features.
 
 ## Scouting Joins
 

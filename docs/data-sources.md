@@ -20,7 +20,7 @@ LatentStrat uses several data sources, but each source has a different role. The
 
 | Source | Used for | Typical commands | Timing role |
 |---|---|---|---|
-| The Blue Alliance | Teams, events, matches, score breakdowns, awards, rankings, alliances | `build-features`, `build-prior-features` | Match spine and historical labels |
+| The Blue Alliance | Teams, events, matches, score breakdowns, awards, rankings, alliances | `build-features`, `build-prior-features`, `sync-match-breakdowns` | Match spine and historical labels |
 | Statbotics | Historical normalized EPA trajectory for prior training | `build-prior-features` | Prior-season strength signal |
 | OpenAI embeddings | Narrative text targets for prior distillation | `build-prior-features` | Offline text semantics |
 | Local scouting SQLite | Optional scouting observations | `init-scouting-db`, `build-features` | Local team/event/match scouting |
@@ -51,6 +51,16 @@ For V5.7, the 2026 mapper writes groups such as:
 - Special binary targets.
 
 Committed fouls are inverted because TBA reports foul points as points awarded to the opponent. If blue receives foul points, those points came from red committing fouls.
+
+V6-Lite V1 also preserves raw TBA match payloads for offline historical score-archetype training:
+
+```text
+data/world_model/match_breakdowns.sqlite
+```
+
+This durable corpus is separate from the disposable TBA transport cache. Synchronization defaults to normal official event types `0..5`; FOC `6` and remote `7` require explicit flags. The requested range is `2015..2026`, but the current TBA OpenAPI breakdown schemas skip `2021`, so that season is retained in the audit and excluded from encoder training.
+
+The encoder emits one row per played alliance only when both posted scores are present and both alliance breakdown dictionaries are non-null. It keeps raw incomplete match objects in SQLite so a refresh can update them later.
 
 ## Canonical Event Weeks
 
@@ -131,6 +141,7 @@ Never copy real keys into docs, logs, screenshots, or committed files.
 Common local storage paths include:
 
 - TBA request cache at `data/cache/tba.sqlite`.
+- Durable raw match-breakdown corpus at `data/world_model/match_breakdowns.sqlite`.
 - Statbotics response cache at `data/cache/statbotics.sqlite`.
 - OpenAI embedding cache at `data/cache/openai_embeddings.sqlite`.
 - Scouting database at `data/scouting/scouting.db`.

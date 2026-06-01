@@ -108,11 +108,59 @@ Attention, zero-out, t-SNE, and drift visuals are diagnostic evidence. Use them 
 
 - `walk_forward_metrics.csv`
 - `walk_forward_history.csv`
+- `walk_forward_predictions.parquet`
+- `config.json` with source SHA-256 hashes and the exact comparison configuration
 - TensorBoard fold runs.
 
 `walk_forward_metrics.csv` contains one row per fold plus an `AVERAGE` row. The common metrics in the `AVERAGE` row are row-weighted season aggregates, not simple unweighted means of fold means.
 
 This is the most important validation file for season-level claims because it simulates training on earlier weeks and predicting later weeks.
+
+`walk_forward_predictions.parquet` is keyed by fold and match. V6 promotion uses
+`compare-world-model` to bootstrap paired prediction differences within folds with seed `2026`.
+
+## V6-Lite World-Model Artifacts
+
+The V6-Lite V1 historical match-breakdown artifact lives under
+`artifacts/world_model/match_breakdown/v1_2015_2026/` and writes:
+
+| File | Meaning |
+|---|---|
+| `eval_model.pt` | holdout-only model used for diagnostics |
+| `model.pt` | all-data retrain used for frozen embedding export |
+| `embeddings.parquet` | one 16D target per played alliance |
+| `schema.json` | separate typed schema for each eligible season |
+| `union_schema_audit.json` | field-presence audit only; training never pads to this union |
+| `bundle.json` | source hashes, Git SHA, event filter, widths, provenance, and audit counts |
+| `validation_report.json` | grouped reconstruction losses, effective rank, neighbors, and probes |
+| `training_history.csv` | eval and production retrain curves |
+
+The historical encoder uses raw values and masks without normalizer files. It defaults to normal
+official TBA event types `0..5`; FOC `6` and remote `7` are opt-in. The artifact records
+`promotion_eligible=false` because all-years training is not leakage-safe walk-forward evidence.
+
+`inspect-match-breakdown-encoder` writes a separate `inspection/` directory beside the bundle:
+
+| Output | Meaning |
+|---|---|
+| `production_pca_multiview.png` and `holdout_pca_multiview.png` | one fixed PCA frame colored by season and within-season score/component percentiles |
+| `production_tsne_multiview.png` and `holdout_tsne_multiview.png` | deterministic sampled local-neighborhood views; absolute coordinates are not comparable across the two plots |
+| `pca_explained_variance.csv` and `.png` | production-space PCA variance summary |
+| `latent_parallel_coordinates.png` and `latent_archetype_profiles.csv` | raw and standardized production latent profiles for five deterministic archetype slices |
+| `cross_season_neighbor_nodes.csv`, `cross_season_neighbor_edges.csv`, and `.png` | extreme production rows with nearest different-season neighbors under Euclidean latent distance |
+| `component_metric_sources.json` | selected safe aggregate field per season and missing-component seasons |
+| `inspection_manifest.json` | input hashes, options, generated-file hashes, and production-versus-holdout provenance |
+
+The holdout vectors come from `eval_model.pt` and are orthogonally aligned only for display in the
+production PCA frame. These projection plots can reveal calendar-year separation, score gradients,
+and cross-season analogies. They are interpretation aids, not standalone promotion evidence.
+
+Award prototypes retain normalized raw 256D OpenAI vectors without PCA. Score attachment to the
+Set Transformer remains deferred until per-alliance runtime integration is implemented.
+
+Promotion comparisons require the 95% bootstrap confidence-interval upper bound to stay within
+`+0.002` Brier, `+0.01` log loss, and `+1%` total-score MSE versus both tagged V5.8 and the prior
+accepted V6 phase.
 
 ## Local Experiment Snapshot
 
@@ -124,6 +172,7 @@ The current local artifact set includes these observed `AVERAGE` rows:
 | V5.6.1 8D, 5-epoch walk-forward | 12601.13 | 12792.16 | 0.6594 | 0.2190 | 0.6269 | 18164 |
 | V5.6.2 16D, 5-epoch walk-forward | 10760.56 | 10950.33 | 0.6604 | 0.2091 | 0.6037 | 18164 |
 | V5.6.4 16D, 50-epoch walk-forward | 8953.20 | 9055.87 | 0.7192 | 0.2025 | 0.6796 | 18164 |
+| Frozen `v5.8-baseline` replay, V5.6.4 16D, 50 epochs | 8829.77 | 8971.60 | 0.7164 | 0.2090 | 0.7227 | 18164 |
 
 Interpretation:
 
@@ -132,6 +181,9 @@ Interpretation:
 - The same run worsened log loss and Brier relative to the earlier V5.6.1 16D run, so calibration needs more investigation.
 
 These are local experiment results, not permanent claims about the model.
+
+V6 promotion uses the frozen `v5.8-baseline` replay row and its paired prediction export. The
+older V5.6.4 row remains useful historical evidence but is not the hash-manifest comparison input.
 
 ## Reading TensorBoard
 
