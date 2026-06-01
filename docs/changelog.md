@@ -40,11 +40,11 @@ Use a detached checkout only when you intentionally want to inspect history:
 git switch --detach <commit>
 ```
 
-## Current Unreleased State
+## Current Committed State
 
 | Field | Value |
 |---|---|
-| Status | `Unreleased / V6-Lite implementation after v5.8-baseline` |
+| Status | `Committed V6-Lite V1 at 8c640f4` |
 | Current stack | V5.6.4 prior, tagged V5.8 comparison baseline, V6-Lite offline historical score artifact |
 | Current recommended prior | `artifacts/prior_v564_latent16/checkpoint.pt` local historical path; new default equivalent is `artifacts/prior/prior_v564_latent16/checkpoint.pt` |
 | Current recommended walk-forward comparison | `artifacts/baselines/v5.8/walk-forward/` with tracked manifest `baselines/v5.8-baseline.json` |
@@ -69,9 +69,8 @@ Read [Current State](current-state.md) for the current recommended artifacts, ca
 | Obsidian vault | 2026-05-22 | `5d587f8` | Add obsidian | Added Obsidian vault metadata under `docs/.obsidian/`. | `docs/.obsidian/` | `git show --stat 5d587f8` |
 | V5.7 sensor fusion | 2026-05-22 | `680bbb5` | Implement V5.7 sensor fusion training | Added V5.7 match-spine targets, sidecars, prior grid, richer prior features, heterogeneous training, and expanded tests. | [V5.7 Notes](V5.7.md), [Feature Pipeline](feature-pipeline.md) | `git show --stat 680bbb5` |
 | TensorBoard policy | 2026-05-23 | `cc58c31` | Document TensorBoard training policy | Documented TensorBoard as the expected observability path for training commands. | [Training And Validation](training-and-validation.md) | `git show --stat cc58c31` |
-| Current docs and V5.8 state | 2026-05-24 | `Unreleased` | Working tree after `cc58c31` | Documents V5.6.4 prior, V5.7.2 stability, V5.8 walk-forward, current artifacts, model architecture math, and experiment ledger. | [Current State](current-state.md), [Experiment Ledger](experiment-ledger.md), [Model Architecture Reference](model-architecture-reference.md) | commit pending |
 | V5.8 frozen comparison baseline | 2026-06-01 | `b8e9a6c` | Freeze V5.8 diagnostics baseline | Adds prediction/config/hash exports for walk-forward replay and marks the historical source boundary with `v5.8-baseline`. | `artifacts/baselines/v5.8/`, `baselines/v5.8-baseline.json` | `git show --stat v5.8-baseline` |
-| V6-Lite historical score artifact | 2026-06-01 | `Unreleased` | Working tree after `v5.8-baseline` | Adds durable historical TBA match-breakdown storage, per-season raw schemas, a shared 16D bottleneck, and offline artifact exports. Keeps score runtime integration disabled while retaining later award, ranking, and pick scaffolds. | [V6-Lite](V6-Lite.md), `src/latentstrat/world_model/match_breakdown/` | commit pending |
+| V6-Lite historical score artifact | 2026-06-01 | `8c640f4` | Implement V6-Lite frozen target tooling | Adds durable historical TBA match-breakdown storage, per-season raw schemas, a shared 16D bottleneck, static inspection reports, and offline artifact exports. Keeps score runtime integration disabled while retaining later award, ranking, and pick scaffolds. | [V6-Lite](V6-Lite.md), `src/latentstrat/world_model/match_breakdown/` | `git show --stat 8c640f4` |
 
 ## Semantic Version Map
 
@@ -80,13 +79,13 @@ Read [Current State](current-state.md) for the current recommended artifacts, ca
 | V5.5 | `ff5d3da` | Committed | Text/narrative pretraining era. | This is the cleanest committed anchor for prior pretraining before V5.6 transductive refinements. |
 | V5.6 | `680bbb5` plus local artifacts | Mixed | Transductive team-number dictionary and stripped checkpoint handoff. | The committed V5.7 work contains many V5.6-era prior pieces; exact V5.6 experiment states are best understood from local artifacts. |
 | V5.6.1 | `680bbb5` plus `artifacts/prior_v561_latent16/` | Local artifact era | Multi-task prior with OpenAI plus EPA target. | No separate clean commit anchor; use artifact evidence and docs. |
-| V5.6.2 | current working tree plus `artifacts/prior_v562_latent16/` | Local artifact era | Cultural prior attempt with broken normalized EPA masks. | Important negative result, not a promoted code state. |
-| V5.6.3 | current working tree plus `artifacts/prior_v563_latent16/` | Local artifact era | Corrected normalized EPA extraction and grouped EPA trajectory loss. | Used as the prior feature schema for V5.6.4 training. |
-| V5.6.4 | current working tree plus `artifacts/prior_v564_latent16/` | Current local state | Feature-summed OpenAI loss with 16D prior. | Current recommended prior checkpoint until superseded. |
+| V5.6.2 | `8c640f4` plus `artifacts/prior_v562_latent16/` | Local artifact era | Cultural prior attempt with broken normalized EPA masks. | Important negative result, not a promoted code state. |
+| V5.6.3 | `8c640f4` plus `artifacts/prior_v563_latent16/` | Local artifact era | Corrected normalized EPA extraction and grouped EPA trajectory loss. | Used as the prior feature schema for V5.6.4 training. |
+| V5.6.4 | `8c640f4` plus `artifacts/prior_v564_latent16/` | Current local state | Feature-summed OpenAI loss with 16D prior. | Current recommended prior checkpoint until superseded. |
 | V5.7 | `680bbb5` | Committed | Match-spine expansion, sidecars, heterogeneous training, and V5.7 target heads. | This is the main committed sensor-fusion anchor. |
-| V5.7.2 | current working tree plus V5.7.2 artifacts | Current local state | Stability patch: log-var clamp, best restoration, cosine LR, AdamW decay. | Not separately tagged or committed as a named version yet. |
+| V5.7.2 | `8c640f4` plus V5.7.2 artifacts | Current local state | Stability patch: log-var clamp, best restoration, cosine LR, AdamW decay. | Not separately tagged as a named version. |
 | V5.8 | tag `v5.8-baseline` at `b8e9a6c` plus archived artifacts | Tagged historical baseline | Walk-forward validation, common metrics, canonical week handling, prediction export. | Comparison boundary for V6 promotion. |
-| V6-Lite | current working tree after `v5.8-baseline` | Unreleased active architecture | Offline historical score representations plus reserved frozen-target scaffolds. | Score attachment is deferred; no V6 phase is promoted yet. |
+| V6-Lite | `8c640f4` after `v5.8-baseline` | Committed active architecture | Offline historical score representations plus reserved frozen-target scaffolds. | Score attachment is deferred; no V6 phase is promoted yet. |
 
 ## Maintenance Rule
 
