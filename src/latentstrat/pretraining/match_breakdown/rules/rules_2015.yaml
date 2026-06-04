@@ -1,0 +1,28 @@
+season: 2015
+defaults: {weight: 1.0, tolerance: 1.0e-6, min_pass_rate: 0.995}
+rules:
+  - name: teleop_points_sum
+    status: required
+    lhs: {teleop_points: 1}
+    rhs: {tote_points: 1, container_points: 1, litter_points: 1}
+    notes: Direct TBA teleop subtotal.
+  - name: tote_points_from_counts
+    status: required
+    lhs: {tote_points: 1}
+    rhs: {tote_count_far: 2, tote_count_near: 2}
+    notes: Direct tote count-to-point equation.
+  - name: litter_points_from_counts
+    status: required
+    lhs: {litter_points: 1}
+    rhs: {litter_count_container: 6, litter_count_landfill: 1, litter_count_unprocessed: 4}
+    notes: Direct litter count-to-point equation.
+  - name: container_points_from_levels
+    status: required
+    lhs: {container_points: 1}
+    rhs: {container_count_level1: 4, container_count_level2: 8, container_count_level3: 12, container_count_level4: 16, container_count_level5: 20, container_count_level6: 24}
+    notes: Direct container level-to-point equation.
+  - name: total_points_sum
+    status: disabled
+    lhs: {total_points: 1}
+    rhs: {auto_points: 1, teleop_points: 1, foul_points: 1, adjust_points: 1}
+    notes: Disabled because raw TBA alliance totals do not satisfy this equation reliably in 2015.

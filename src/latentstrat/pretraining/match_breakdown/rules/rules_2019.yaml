@@ -1,0 +1,16 @@
+season: 2019
+defaults: {weight: 1.0, tolerance: 1.0e-6, min_pass_rate: 0.995}
+rules:
+  - name: auto_points_sum
+    status: required
+    lhs: {autoPoints: 1}
+    rhs: {sandStormBonusPoints: 1}
+  - name: teleop_points_sum
+    status: required
+    lhs: {teleopPoints: 1}
+    rhs: {cargoPoints: 1, hatchPanelPoints: 1, habClimbPoints: 1}
+  - name: total_points_sum
+    status: candidate
+    lhs: {totalPoints: 1}
+    rhs: {autoPoints: 1, teleopPoints: 1, foulPoints: 1, adjustPoints: 1}
+    notes: Rare TBA outliers are retained in the raw audit.

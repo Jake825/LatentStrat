@@ -1,0 +1,28 @@
+season: 2018
+defaults: {weight: 1.0, tolerance: 1.0e-6, min_pass_rate: 0.995}
+rules:
+  - name: auto_points_sum
+    status: required
+    lhs: {autoPoints: 1}
+    rhs: {autoOwnershipPoints: 1, autoRunPoints: 1}
+  - name: teleop_points_sum
+    status: required
+    lhs: {teleopPoints: 1}
+    rhs: {teleopOwnershipPoints: 1, vaultPoints: 1, endgamePoints: 1}
+  - name: vault_points_from_totals
+    status: required
+    lhs: {vaultPoints: 1}
+    rhs: {vaultBoostTotal: 5, vaultForceTotal: 5, vaultLevitateTotal: 5}
+  - name: auto_ownership_points_from_seconds
+    status: required
+    lhs: {autoOwnershipPoints: 1}
+    rhs: {autoScaleOwnershipSec: 2, autoSwitchOwnershipSec: 2}
+  - name: teleop_ownership_points_from_seconds
+    status: required
+    lhs: {teleopOwnershipPoints: 1}
+    rhs: {teleopScaleOwnershipSec: 1, teleopScaleBoostSec: 1, teleopSwitchOwnershipSec: 1, teleopSwitchBoostSec: 1}
+  - name: total_points_sum
+    status: disabled
+    lhs: {totalPoints: 1}
+    rhs: {autoPoints: 1, teleopPoints: 1, foulPoints: 1, adjustPoints: 1}
+    notes: Disabled because raw TBA rows fall below the 0.995 pass threshold.

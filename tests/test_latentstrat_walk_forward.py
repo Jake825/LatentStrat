@@ -8,13 +8,13 @@ from typer.testing import CliRunner
 
 from latentstrat.cli import app
 from latentstrat.config import default_options
+from latentstrat.experimental.frozen_targets import TargetSpaceOptions, WorldModelOptions
 from latentstrat.features import write_feature_table
 from latentstrat.walk_forward import (
     _average_row,
     make_walk_forward_split,
     run_walk_forward_validation,
 )
-from latentstrat.world_model import TargetSpaceOptions, WorldModelOptions
 
 
 def _walk_table() -> pd.DataFrame:

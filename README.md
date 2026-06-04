@@ -1,141 +1,91 @@
 # LatentStrat
 
-LatentStrat is a Python-first FRC machine learning project for learning durable
-team base embeddings and event-specific deltas from The Blue Alliance,
-Statbotics, and scouting data. V6-Lite keeps the supervised cross-alliance Set
-Transformer and is building frozen FRC target embeddings offline. The current
-V1 score-archetype encoder is not attached to Set Transformer training yet.
-The tagged `v5.8-baseline` state remains the historical comparison boundary.
+LatentStrat is a Python-first FRC machine-learning toolkit. It learns durable team identities,
+event-specific adjustments, and supervised match predictions from The Blue Alliance, Statbotics,
+and optional scouting data. V6.1 also provides offline pretraining workflows for Day Zero priors
+and historical match-breakdown embeddings.
 
 ## Install
 
-```bash
+```powershell
 pip install -e ".[dev]"
 ```
 
-The runtime stack is Python 3.11+, `tbapy` for The Blue Alliance API v3,
-`statbotics==3.0.0` for EPA/Statbotics data, `openai>=1` for optional V5.6.4
-text-plus-normalized-EPA prior distillation, Pandas/NumPy/SciPy/PyArrow for tables and Parquet
-features, scikit-learn for linear baselines, and PyTorch for the Set
-Transformer model.
-
-## Secrets
-
-Live TBA ingestion reads `TBA_API_KEY` from the environment. V5.6.4 prior
-distillation also needs `OPENAI_API_KEY` when generating uncached text
-embeddings. For local development, create `.env` from `.env.example`:
+Create `.env` from the example file:
 
 ```powershell
 Copy-Item .env.example .env
 notepad .env
 ```
 
-The CLI loads `.env` automatically. `.env` is ignored by Git.
+Live TBA ingestion requires `TBA_API_KEY`. Prior pretraining also requires `OPENAI_API_KEY` when
+the text embedding cache does not already contain the requested vectors.
 
-## Commands
+## Supported Workflow
 
-For a complete command-by-command reference, see
-[CLI reference](docs/cli-reference.md).
+```powershell
+latentstrat dev api-smoke
+latentstrat scouting init
 
-```bash
-latentstrat api-smoke
-latentstrat init-scouting-db --path data/scouting/scouting.db
-latentstrat build-features --event-key 2026ilch --output data/features/event/features_2026ilch.parquet
-latentstrat build-features --season 2026 --output data/features/season/features_2026.parquet --sidecar-output-dir data/sidecars/v58_2026 --event-metadata-output data/features/season/events_2026.parquet
-latentstrat build-prior-features --target-season 2026 --output data/features/prior/prior_features_2026.parquet
-latentstrat train-prior --features data/features/prior/prior_features_2026.parquet --output artifacts/prior/prior_v564_latent16 --epochs 1000 --latent-dim 16 --tensorboard
-tensorboard --logdir=runs
-latentstrat inspect-prior --checkpoint artifacts/prior/prior_v564_latent16/checkpoint.pt --output artifacts/prior/prior_v564_latent16/inspection
-latentstrat run-prior-grid --features data/features/prior/prior_features_2026.parquet --output artifacts/prior-grid/prior_elbow_grid --epochs 500 --latent-dims 2,4,8,16,32,64,128,256
-latentstrat train-features data/features/season/features_2026.parquet --prior-checkpoint artifacts/prior/prior_v564_latent16/checkpoint.pt
-latentstrat train-features data/features/season/features_2026.parquet --rankings-sidecar data/sidecars/v58_2026/rankings_2026.parquet --selections-sidecar data/sidecars/v58_2026/selections_2026.parquet --playoffs-sidecar data/sidecars/v58_2026/playoffs_2026.parquet
-latentstrat train-features data/features/season/features_2026.parquet --epochs 100 --no-early-stopping --restore-best
-tensorboard --logdir=runs
-latentstrat validate-walk-forward --features data/features/season/features_2026.parquet --prior-checkpoint artifacts/prior/prior_v564_latent16/checkpoint.pt --rankings-sidecar data/sidecars/v58_2026/rankings_2026.parquet --selections-sidecar data/sidecars/v58_2026/selections_2026.parquet --playoffs-sidecar data/sidecars/v58_2026/playoffs_2026.parquet --output artifacts/walk-forward/v58_walk_forward_2026 --epochs 5 --latent-dim 16
-latentstrat sync-match-breakdowns --start-season 2015 --end-season 2026
-latentstrat train-match-breakdown-encoder --start-season 2015 --end-season 2026 --epochs 50 --seasons-per-step 4 --rows-per-season 64 --learning-rate 0.001 --seed 2026
-latentstrat inspect-match-breakdown-encoder --artifact-dir artifacts/world_model/match_breakdown/v1_2015_2026 --output artifacts/world_model/match_breakdown/v1_2015_2026/inspection
-latentstrat train-features data/features/event/features_2026ilch.parquet --output artifacts/season/features_run
-latentstrat train-features data/features/event/features_2026ilch.parquet --venue-mode --event-key 2026ilch --checkpoint artifacts/season/features_run/v6_checkpoint.pt
-latentstrat consolidate-event artifacts/season/features_run/v6_checkpoint.pt --event-key 2026ilch
-latentstrat smoke-test
-latentstrat full-season-offline --season 2026
-latentstrat inspect-embeddings
-latentstrat build-evidence-packet
+latentstrat pretrain prior build --target-season 2026
+latentstrat pretrain prior train `
+  --features data/features/pretraining/prior/prior_features_2026.parquet
+
+latentstrat season build-features --season 2026
+latentstrat season train data/features/season/features_2026.parquet `
+  --prior-checkpoint artifacts/pretraining/prior/prior_run/checkpoint.pt
+
+latentstrat season validate `
+  --features data/features/season/features_2026.parquet `
+  --prior-checkpoint artifacts/pretraining/prior/prior_run/checkpoint.pt
 ```
 
-The preferred ML loop is to run `build-features` after data changes, then run
-`train-features` repeatedly from the local Parquet file. Provider and embedding
-caches use local SQLite files under `data/cache/`.
+Historical match-breakdown pretraining is a separate offline workflow:
 
-All LatentStrat training CLI entrypoints should support local TensorBoard logs
-under `runs/` by default, with `--no-tensorboard` available for quiet batch or
-test runs. Current prior and feature training commands follow this convention.
-The `runs/` directory is ignored by Git. See
-[Training and validation](docs/training-and-validation.md) for the logging
-policy expected of future training scripts.
+```powershell
+latentstrat pretrain match-breakdown sync --start-season 2015 --end-season 2026
+latentstrat pretrain match-breakdown train --start-season 2015 --end-season 2026
+latentstrat pretrain match-breakdown inspect `
+  --artifact-dir artifacts/pretraining/match-breakdown/v1_2015_2026
+```
 
-Optional scouting data lives in `data/scouting/scouting.db`. `build-features` merges it
-into Parquet when the database exists; training still reads only the Parquet
-feature file.
+Flat command aliases remain available for one release and print V6.2 removal warnings.
 
-## Local Storage Layout
+## Storage
 
-Generated local files are organized by purpose. Provider caches live under `data/cache/`: TBA uses `data/cache/tba.sqlite`, Statbotics uses `data/cache/statbotics.sqlite`, and OpenAI embeddings use `data/cache/openai_embeddings.sqlite`. The durable raw match-breakdown corpus lives at `data/world_model/match_breakdowns.sqlite`. Scouting uses `data/scouting/scouting.db`, durable consolidated embeddings use `data/embeddings/latentstrat_embeddings.sqlite`, Parquet feature tables live under `data/features/`, sidecars live under `data/sidecars/`, model artifacts live under grouped `artifacts/` subdirectories, and TensorBoard runs stay under `runs/`. Legacy explicit paths still work, but new commands and docs should prefer the canonical layout.
+Generated local files are ignored by Git:
 
-Use `scripts/organize_local_outputs.ps1` to preview local generated-file moves into this layout. The default mode is a dry run; pass `-Apply` only after reviewing the planned moves.
+```text
+data/cache/
+data/pretraining/
+data/features/
+data/scouting/
+data/sidecars/
+artifacts/pretraining/
+artifacts/season/
+artifacts/walk-forward/
+artifacts/experimental/
+artifacts/archive/
+runs/
+```
 
-V5.7 match features include generic score-breakdown targets for atomic scoring
-counts, committed fouls, bonus ranking-point thresholds, and special penalties.
-Optional rankings, alliance selections, and playoff sidecars can be written with
-`--sidecar-output-dir` and supplied to `train-features` as auxiliary
-learning-to-rank labels. V5.7.2 clamps homoscedastic log variances, uses cosine
-learning-rate decay, and restores the best validation epoch even for long
-`--no-early-stopping` monitoring runs. V5.8 added walk-forward validation over
-canonical season weeks. V6-Lite retains the same team-event latent and adds an
-offline historical score-archetype artifact plus reserved award, ranking, and
-pick target-space scaffolds. Runtime score attachment is deferred.
+Preview legacy local-output migration with:
 
-## Docs
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/organize_local_outputs.ps1
+```
 
-- [Documentation hub](docs/index.md): guided entrypoint for students and
-  developers.
-- [Student primer](docs/student-primer.md): plain-language explanation of
-  LatentStrat for FRC students.
-- [Current state](docs/current-state.md): canonical snapshot of the current
-  implementation, artifacts, caveats, and validation status.
-- [V6-Lite design](docs/V6-Lite.md): frozen FRC target spaces, fold safety,
-  phased promotion gates, and deliberately excluded designs.
-- [Changelog](docs/changelog.md): semantic version timeline tied to Git commits
-  and local artifact eras.
-- [Rebuild from scratch](docs/rebuild-from-scratch.md): end-to-end setup,
-  feature building, prior training, season training, and walk-forward commands.
-- [CLI reference](docs/cli-reference.md): current command surface and examples.
-- [Prior training](docs/prior-training.md): V5.6.4 Day Zero prior,
-  narratives, EPA trajectory, culture targets, and checkpoint handoff.
-- [Season training](docs/season-training.md): V6-Lite training, sidecars,
-  stability, TensorBoard, and walk-forward validation.
-- [Data sources](docs/data-sources.md): TBA, Statbotics, OpenAI, scouting
-  SQLite, sidecars, and timing boundaries.
-- [Metrics and artifacts](docs/metrics-and-artifacts.md): Brier score, log
-  loss, score MSE, TensorBoard, and artifact interpretation.
-- [Schemas and artifacts reference](docs/schemas-and-artifacts-reference.md):
-  generated Parquet and CSV contracts.
-- [Project history](docs/project-history.md): historical experiment ledger and
-  design decisions through V5.8.
-- [Experiment ledger](docs/experiment-ledger.md): run-by-run local artifact
-  evidence and design lessons.
-- [Feature pipeline](docs/feature-pipeline.md): TBA match spine, scouting joins,
-  Parquet boundaries, V5 team/event indexing, awards, and tensor-ready data.
-- [Training and validation](docs/training-and-validation.md): splits,
-  normalization, baselines, controls, and training workflow.
-- [Model structure](docs/model-structure.md): V6 latent trunk, Set Transformer
-  architecture, frozen-target heads, ghost-token behavior, and tensor contract.
-- [Model evaluation](docs/model-evaluation.md): calibration, baselines,
-  controls, evidence packets, and embeddings.
-- [Embedding inspection](docs/embedding-inspection.md): PCA, cosine neighbors,
-  archetypes, PMA attention, and zero-out diagnostics.
-- [Scouting data layer](docs/scouting-data-layer.md): SQLite scouting schema and
-  merge behavior.
+Apply only after reviewing the preview:
 
-The current codebase treats the Python implementation as the source of truth.
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/organize_local_outputs.ps1 -Apply
+```
+
+## Documentation
+
+- [V6.1 overview](docs/V6.1.md)
+- [Architecture](docs/architecture.md)
+- [CLI reference](docs/cli-reference.md)
+- [Rebuild from scratch](docs/rebuild-from-scratch.md)
+- [Evaluation and artifacts](docs/evaluation-and-artifacts.md)
+- [Documentation hub](docs/index.md)

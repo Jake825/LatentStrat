@@ -47,10 +47,3 @@ class TBAImporter:
         for event in events:
             TBAImporter.import_event(provider, store, event.key)
         return pd.DataFrame([event.model_dump() for event in events])
-
-
-class StatboticsImporter:
-    @staticmethod
-    def import_season_stats(provider, store: FRCDataStore, season: int) -> None:
-        _ = store
-        provider.get_team_years(year=season)

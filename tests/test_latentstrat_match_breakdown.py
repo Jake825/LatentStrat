@@ -2,20 +2,25 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import replace
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 import torch
 from typer.testing import CliRunner
 
 from frc.providers.tba_provider import TbaJsonResponse
+from latentstrat import cli
 from latentstrat.cli import app
-from latentstrat.world_model.match_breakdown.corpus import (
+from latentstrat.pretraining.match_breakdown.corpus import (
     MatchBreakdownCorpus,
     OpenApiMetadata,
     sync_match_breakdowns,
 )
-from latentstrat.world_model.match_breakdown.inspection import (
+from latentstrat.pretraining.match_breakdown.inspection import (
+    BASELINE_COMPARISON_FILES,
     EXPECTED_REPORT_FILES,
     LATENT_COLUMNS,
     MatchBreakdownInspectionOptions,
@@ -27,22 +32,32 @@ from latentstrat.world_model.match_breakdown.inspection import (
     select_component_sources,
     shared_pca_coordinates,
     stratified_projection_sample,
+    write_baseline_comparison,
     write_match_breakdown_inspection,
 )
-from latentstrat.world_model.match_breakdown.loss import grouped_type_aware_loss
-from latentstrat.world_model.match_breakdown.model import MatchBreakdownAutoencoder
-from latentstrat.world_model.match_breakdown.parse import (
+from latentstrat.pretraining.match_breakdown.loss import grouped_type_aware_loss
+from latentstrat.pretraining.match_breakdown.model import MatchBreakdownAutoencoder
+from latentstrat.pretraining.match_breakdown.parse import (
     AllianceBreakdownRow,
     extract_alliance_rows,
     flatten_breakdown,
 )
-from latentstrat.world_model.match_breakdown.train import (
+from latentstrat.pretraining.match_breakdown.rules import (
+    audit_rules,
+    load_rule_file,
+    numeric_field_to_index,
+    score_consistency_loss,
+)
+from latentstrat.pretraining.match_breakdown.train import (
     MatchBreakdownTrainingOptions,
     _season_tensors,
     _split_indices,
+    corrupt_observed_source_fields,
+    load_match_breakdown_training_options,
     train_match_breakdown_encoder,
+    winner_margin_ranking_loss,
 )
-from latentstrat.world_model.match_breakdown.vectorize import (
+from latentstrat.pretraining.match_breakdown.vectorize import (
     EncodedField,
     discover_season_schema,
     union_schema_audit,
@@ -363,7 +378,7 @@ def test_match_grouped_split_keeps_alliances_together():
     assert len(validation[2026]) == 2
 
 
-def _train_toy_artifact(tmp_path):
+def _train_toy_artifact(tmp_path, *, options=None, output_name="artifacts"):
     corpus_path = tmp_path / "match_breakdowns.sqlite"
     corpus = MatchBreakdownCorpus(corpus_path)
     fetched_at = "2026-01-01T00:00:00+00:00"
@@ -383,9 +398,10 @@ def _train_toy_artifact(tmp_path):
             )
     return train_match_breakdown_encoder(
         corpus_path,
-        tmp_path / "artifacts",
+        tmp_path / output_name,
         tmp_path / "features.parquet",
-        MatchBreakdownTrainingOptions(
+        options
+        or MatchBreakdownTrainingOptions(
             start_season=2025,
             end_season=2026,
             epochs=1,
@@ -580,3 +596,289 @@ def test_inspection_cli_executes_against_tiny_artifact(tmp_path):
     assert response.exit_code == 0, response.output
     assert "production_rows=24 holdout_rows=8" in response.output
     assert (output / "inspection_manifest.json").exists()
+
+
+def _write_toy_rule_dir(root: Path) -> Path:
+    root.mkdir()
+    for season, field in ((2025, "autoPoints"), (2026, "totalPoints")):
+        (root / f"rules_{season}.yaml").write_text(
+            "\n".join(
+                (
+                    f"season: {season}",
+                    "rules:",
+                    "  - name: identity",
+                    "    status: required",
+                    f"    lhs: {{{field}: 1}}",
+                    f"    rhs: {{{field}: 1}}",
+                    "",
+                )
+            ),
+            encoding="utf-8",
+        )
+    return root
+
+
+def test_v2_config_is_explicit_and_cli_overrides_file_values(tmp_path):
+    config = tmp_path / "v2.yaml"
+    config.write_text(
+        "\n".join(
+            (
+                "artifact_version: v2",
+                "training:",
+                "  epochs: 12",
+                "loss:",
+                "  denoising_consistency_weight: 0.1",
+                "denoising:",
+                "  enabled: true",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+    assert load_match_breakdown_training_options().artifact_version == "v1"
+    loaded = load_match_breakdown_training_options(config, overrides={"epochs": 3})
+    assert loaded.artifact_version == "v2"
+    assert loaded.epochs == 3
+    assert loaded.denoising_enabled is True
+    assert loaded.denoising_consistency_weight == 0.1
+
+
+def test_v2_cli_config_is_opt_in_and_explicit_flags_override_yaml(tmp_path, monkeypatch):
+    config = tmp_path / "v2.yaml"
+    config.write_text(
+        "\n".join(("artifact_version: v2", "training:", "  epochs: 12", "")),
+        encoding="utf-8",
+    )
+    captured = {}
+
+    def fake_train(corpus_path, output_dir, alliance_features_path, options):
+        captured.update(
+            {
+                "corpus_path": corpus_path,
+                "output_dir": output_dir,
+                "alliance_features_path": alliance_features_path,
+                "options": options,
+            }
+        )
+        return type(
+            "Result",
+            (),
+            {
+                "output_dir": output_dir,
+                "bundle": {
+                    "audit": {"alliance_rows": 2},
+                    "seasons_trained": [2015],
+                    "derived_batch_size": options.derived_batch_size,
+                },
+            },
+        )()
+
+    monkeypatch.setattr(cli, "train_match_breakdown_encoder", fake_train)
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(
+        app,
+        ["train-match-breakdown-encoder", "--config", str(config), "--epochs", "3"],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["options"].artifact_version == "v2"
+    assert captured["options"].epochs == 3
+    assert captured["output_dir"] == Path(
+        "artifacts/pretraining/match-breakdown/v2_2015_2026"
+    )
+
+
+def test_denoising_corruption_masks_categorical_sources_atomically():
+    rows = [
+        AllianceBreakdownRow(
+            "2025test_qm1:red",
+            2025,
+            "2025test",
+            "2025test_qm1",
+            "qm",
+            1,
+            1,
+            "red",
+            10,
+            9,
+            "red",
+            {"autoPoints": 0, "endGameStatus": "Parked"},
+        ),
+        AllianceBreakdownRow(
+            "2025test_qm1:blue",
+            2025,
+            "2025test",
+            "2025test_qm1",
+            "qm",
+            1,
+            1,
+            "blue",
+            9,
+            10,
+            "red",
+            {"autoPoints": 1, "endGameStatus": "None"},
+        ),
+    ]
+    data = _season_tensors(rows)[2025]
+    values, masks = corrupt_observed_source_fields(
+        data.values,
+        data.masks,
+        data.schema,
+        dropout=1.0,
+        rng=np.random.default_rng(2026),
+    )
+    assert not values.any()
+    assert not masks.any()
+    original_auto = [field.name for field in data.schema.encoded_fields].index("autoPoints")
+    assert data.values[0, original_auto] == 0
+    assert data.masks[0, original_auto] == 1
+
+
+def test_winner_ranking_loss_skips_ties_and_is_differentiable():
+    rows = extract_alliance_rows(_match(2026, 1, breakdown=_breakdown_2026(20)))
+    rows.extend(extract_alliance_rows(_match(2026, 2, breakdown=_breakdown_2026(21), score=8)))
+    data = _season_tensors(rows)[2026]
+    model = MatchBreakdownAutoencoder({2026: data.schema.width}, quality_head_enabled=True)
+    pairs = np.asarray([[0, 1], [2, 3]], dtype=np.int64)
+    loss = winner_margin_ranking_loss(
+        model,
+        2026,
+        data,
+        pairs,
+        margin=0.05,
+        skip_ties=True,
+        device=torch.device("cpu"),
+    )
+    loss.backward()
+    assert loss.ndim == 0
+    assert model.quality_head.weight.grad is not None
+    tie_rows = list(rows)
+    tie_rows[0] = AllianceBreakdownRow(
+        **{**tie_rows[0].__dict__, "alliance_score": tie_rows[1].alliance_score}
+    )
+    tie_data = _season_tensors(tie_rows)[2026]
+    tie_loss = winner_margin_ranking_loss(
+        model,
+        2026,
+        tie_data,
+        np.asarray([[0, 1]], dtype=np.int64),
+        margin=0.05,
+        skip_ties=True,
+        device=torch.device("cpu"),
+    )
+    assert tie_loss.item() == 0
+
+
+def test_rule_audit_promotes_candidates_rejects_required_drift_and_penalizes_residuals(tmp_path):
+    rule_path = tmp_path / "rules_2026.yaml"
+    rule_path.write_text(
+        "\n".join(
+            (
+                "season: 2026",
+                "rules:",
+                "  - name: sum",
+                "    status: candidate",
+                "    lhs: {totalPoints: 1}",
+                "    rhs: {partA: 1, partB: 1}",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+    rows = [
+        AllianceBreakdownRow(
+            "2026test_qm1:red",
+            2026,
+            "2026test",
+            "2026test_qm1",
+            "qm",
+            1,
+            1,
+            "red",
+            3,
+            2,
+            "red",
+            {"totalPoints": 3, "partA": 1, "partB": 2},
+        )
+    ]
+    data = _season_tensors(rows)[2026]
+    rules = load_rule_file(rule_path)
+    resolution = audit_rules(
+        season=2026,
+        schema=data.schema,
+        rows=data.rows,
+        values=data.values,
+        masks=data.masks,
+        indices=np.asarray([0]),
+        rules=rules,
+        rule_file_hash="hash",
+        scope="test",
+    )
+    assert [rule.name for rule in resolution.enabled] == ["sum"]
+    index = numeric_field_to_index(data.schema)
+    pred = data.values.clone().requires_grad_()
+    assert score_consistency_loss(pred, resolution.enabled, index).item() == 0
+    pred = pred.detach().clone()
+    pred[:, index["totalPoints"]] += 2
+    assert score_consistency_loss(pred, resolution.enabled, index).item() > 0
+
+    required = (replace(rules[0], status="required"),)
+    drifted = data.values.clone()
+    drifted[:, index["totalPoints"]] += 2
+    with pytest.raises(ValueError, match="below"):
+        audit_rules(
+            season=2026,
+            schema=data.schema,
+            rows=data.rows,
+            values=drifted,
+            masks=data.masks,
+            indices=np.asarray([0]),
+            rules=required,
+            rule_file_hash="hash",
+            scope="test",
+        )
+
+
+def test_v2_training_writes_rule_audit_and_loads_quality_head_strictly(tmp_path):
+    rule_dir = _write_toy_rule_dir(tmp_path / "rules")
+    options = MatchBreakdownTrainingOptions(
+        artifact_version="v2",
+        start_season=2025,
+        end_season=2026,
+        epochs=1,
+        seasons_per_step=2,
+        rows_per_season=2,
+        seed=2026,
+        validation_fraction=0.25,
+        denoising_enabled=True,
+        denoising_start_epoch=1,
+        denoising_consistency_weight=0.1,
+        winner_ranking_enabled=True,
+        winner_ranking_start_epoch=1,
+        winner_margin_rank_weight=0.02,
+        score_consistency_enabled=True,
+        score_consistency_start_epoch=1,
+        score_consistency_weight=0.05,
+        score_rule_dir=str(rule_dir),
+    )
+    result = _train_toy_artifact(tmp_path, options=options, output_name="v2-artifacts")
+    for name in ("rule_audit.json", "resolved_config.json"):
+        assert (result.output_dir / name).exists()
+        assert name in result.bundle["files"]
+    model, checkpoint = load_match_breakdown_model(result.output_dir / "model.pt")
+    assert checkpoint["schema_version"] == 2
+    assert model.quality_head is not None
+    assert checkpoint["quality_head_contract"] == "diagnostic-only"
+    assert result.validation_report["winner_ranking"]["enabled"] is True
+    assert result.validation_report["score_consistency"]["enabled"] is True
+    assert result.validation_report["denoising_consistency"]["enabled"] is True
+
+
+def test_baseline_comparison_writes_neighbor_and_score_sorting_drift_tables(tmp_path):
+    result = _train_toy_artifact(tmp_path)
+    candidate = pd.read_parquet(result.embeddings_path)
+    output = tmp_path / "comparison"
+    output.mkdir()
+    report = write_baseline_comparison(candidate, result.output_dir, output, seed=2026)
+    assert set(report["generated_files"]) == set(BASELINE_COMPARISON_FILES)
+    for name in BASELINE_COMPARISON_FILES:
+        assert (output / name).exists()

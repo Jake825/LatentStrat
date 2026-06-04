@@ -9,7 +9,7 @@ from pathlib import Path
 import torch
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
-from latentstrat.features import load_season_checkpoint_model
+from latentstrat.artifacts.checkpoints import load_season_checkpoint_model
 
 
 class TeamBaseEmbedding(SQLModel, table=True):
@@ -107,7 +107,6 @@ def consolidate_event_checkpoint(
 
     updated = dict(checkpoint)
     updated["model_state_dict"] = updated_state
-    version = "v6" if checkpoint.get("checkpoint_schema_version") == 6 else "v5"
-    output_path = Path(checkpoint_path).with_name(f"{version}_checkpoint_consolidated.pt")
+    output_path = Path(checkpoint_path).with_name("checkpoint_consolidated.pt")
     torch.save(updated, output_path)
     return output_path

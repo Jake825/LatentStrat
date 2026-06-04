@@ -1,0 +1,6 @@
+# Active season defaults. Historical checkpoint payloads retain their resolved options.
+endgame_class_order:
+  - "None"
+  - Level1
+  - Level2
+  - Level3

@@ -1,0 +1,25 @@
+season: 2017
+defaults: {weight: 1.0, tolerance: 1.0e-6, min_pass_rate: 0.995}
+rules:
+  - name: auto_points_sum
+    status: required
+    lhs: {autoPoints: 1}
+    rhs: {autoFuelPoints: 1, autoMobilityPoints: 1, autoRotorPoints: 1}
+  - name: teleop_points_sum
+    status: required
+    lhs: {teleopPoints: 1}
+    rhs: {teleopFuelPoints: 1, teleopRotorPoints: 1, teleopTakeoffPoints: 1, kPaBonusPoints: 1, rotorBonusPoints: 1}
+  - name: total_points_sum
+    status: required
+    lhs: {totalPoints: 1}
+    rhs: {autoPoints: 1, teleopPoints: 1, foulPoints: 1, adjustPoints: 1}
+  - name: auto_fuel_points_from_counts
+    status: disabled
+    lhs: {autoFuelPoints: 1}
+    rhs: {autoFuelHigh: 1, autoFuelLow: 0.3333333333}
+    notes: Disabled because fractional fuel conversion does not satisfy exact linear equality.
+  - name: teleop_fuel_points_from_counts
+    status: disabled
+    lhs: {teleopFuelPoints: 1}
+    rhs: {teleopFuelHigh: 0.3333333333, teleopFuelLow: 0.1111111111}
+    notes: Disabled because fractional fuel conversion does not satisfy exact linear equality.

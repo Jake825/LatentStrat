@@ -7,12 +7,10 @@ aliases:
   - "LatentStrat Beginner Guide"
 related:
   - "[[index]]"
-  - "[[ghost robot]]"
-  - "[[Set Transformer]]"
-  - "[[prior-training]]"
+  - "[[architecture]]"
+  - "[[prior-pretraining]]"
   - "[[season-training]]"
-  - "[[model-structure]]"
-  - "[[model-architecture-reference]]"
+  - "[[evaluation-and-artifacts]]"
 ---
 
 # Student Primer
@@ -74,7 +72,7 @@ Team `0` is the ghost robot. It represents an empty or missing robot slot.
 
 The ghost robot is learned, not deleted. This matters because a two-robot alliance is not the same as a three-robot alliance with one robot hidden from the math. The Set Transformer still sees three slots and can learn how a missing robot changes alliance dynamics.
 
-For the dedicated concept note, see [Ghost robot](ghost%20robot.md).
+The archived [ghost robot note](archive/ghost%20robot.md) preserves the longer historical explanation.
 
 ## Set Transformer
 
@@ -178,8 +176,8 @@ Recommended path:
 
 1. [Current state](current-state.md)
 2. [Data sources](data-sources.md)
-3. [Prior training](prior-training.md)
+3. [Prior pretraining](prior-pretraining.md)
 4. [Season training](season-training.md)
-5. [Metrics and artifacts](metrics-and-artifacts.md)
+5. [Evaluation and artifacts](evaluation-and-artifacts.md)
 6. [Experiment ledger](experiment-ledger.md)
 7. [Rebuild from scratch](rebuild-from-scratch.md)

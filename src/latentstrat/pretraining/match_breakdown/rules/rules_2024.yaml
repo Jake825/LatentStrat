@@ -1,0 +1,47 @@
+season: 2024
+defaults: {weight: 1.0, tolerance: 1.0e-6, min_pass_rate: 0.995}
+rules:
+  - name: auto_amp_note_points_from_count
+    status: required
+    lhs: {autoAmpNotePoints: 1}
+    rhs: {autoAmpNoteCount: 2}
+  - name: auto_speaker_note_points_from_count
+    status: required
+    lhs: {autoSpeakerNotePoints: 1}
+    rhs: {autoSpeakerNoteCount: 5}
+  - name: auto_total_note_points
+    status: required
+    lhs: {autoTotalNotePoints: 1}
+    rhs: {autoAmpNotePoints: 1, autoSpeakerNotePoints: 1}
+  - name: auto_points_sum
+    status: required
+    lhs: {autoPoints: 1}
+    rhs: {autoLeavePoints: 1, autoTotalNotePoints: 1}
+  - name: teleop_amp_note_points_from_count
+    status: required
+    lhs: {teleopAmpNotePoints: 1}
+    rhs: {teleopAmpNoteCount: 1}
+  - name: teleop_speaker_note_points_from_count
+    status: required
+    lhs: {teleopSpeakerNotePoints: 1}
+    rhs: {teleopSpeakerNoteCount: 2}
+  - name: teleop_speaker_amplified_points_from_count
+    status: required
+    lhs: {teleopSpeakerNoteAmplifiedPoints: 1}
+    rhs: {teleopSpeakerNoteAmplifiedCount: 5}
+  - name: teleop_total_note_points
+    status: required
+    lhs: {teleopTotalNotePoints: 1}
+    rhs: {teleopAmpNotePoints: 1, teleopSpeakerNotePoints: 1, teleopSpeakerNoteAmplifiedPoints: 1}
+  - name: endgame_total_stage_points
+    status: required
+    lhs: {endGameTotalStagePoints: 1}
+    rhs: {endGameParkPoints: 1, endGameOnStagePoints: 1, endGameHarmonyPoints: 1, endGameSpotLightBonusPoints: 1, endGameNoteInTrapPoints: 1}
+  - name: teleop_points_sum
+    status: required
+    lhs: {teleopPoints: 1}
+    rhs: {teleopTotalNotePoints: 1, endGameTotalStagePoints: 1}
+  - name: total_points_sum
+    status: required
+    lhs: {totalPoints: 1}
+    rhs: {autoPoints: 1, teleopPoints: 1, foulPoints: 1, adjustPoints: 1}

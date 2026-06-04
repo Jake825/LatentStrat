@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
+import subprocess
 import time
 from typing import Annotated
 
@@ -23,17 +24,17 @@ from frc.scouting import create_db_and_tables
 from latentstrat.baseline_manifest import write_baseline_manifest
 from latentstrat.baselines import fit_baselines
 from latentstrat.config import LatentStratOptions, PriorOpts, default_options
-from latentstrat.data import (
+from latentstrat.season.data import (
     apply_target_stats,
     build_season_match_table,
     fit_target_stats,
     make_split,
     make_team_index_map,
 )
-from latentstrat.evaluation import evaluate_model
-from latentstrat.experiments import build_evidence_packet
-from latentstrat.embedding_store import consolidate_event_checkpoint
-from latentstrat.features import (
+from latentstrat.season.evaluate import evaluate_model
+from latentstrat.dev.diagnostics import build_evidence_packet, inspect_embeddings
+from latentstrat.experimental.venue import consolidate_event_checkpoint
+from latentstrat.season.features import (
     build_feature_sidecars,
     build_event_feature_table,
     build_season_feature_table,
@@ -42,11 +43,11 @@ from latentstrat.features import (
     train_feature_file,
     write_feature_table,
 )
-from latentstrat.inspection import inspect_embeddings
 from latentstrat.paths import (
     CACHE_ROOT,
     EMBEDDING_DB_PATH,
     EVIDENCE_ARTIFACT_ROOT,
+    EXPERIMENTAL_FROZEN_TARGET_ARTIFACT_ROOT,
     INSPECTION_ARTIFACT_ROOT,
     MATCH_BREAKDOWN_CORPUS_PATH,
     OPENAI_EMBEDDING_CACHE_PATH,
@@ -58,37 +59,98 @@ from latentstrat.paths import (
     STATBOTICS_CACHE_PATH,
     TBA_CACHE_BASE,
     WALK_FORWARD_ARTIFACT_ROOT,
-    WORLD_MODEL_ARTIFACT_ROOT,
     event_features_path,
     match_breakdown_artifact_dir,
     match_breakdown_features_path,
     prior_features_path,
     season_features_path,
 )
-from latentstrat.pretrain_features import (
+from latentstrat.pretraining.prior import (
     build_prior_feature_table,
+    inspect_prior_checkpoint,
+    run_prior_grid,
+    train_prior_file,
     write_prior_feature_table,
+    write_prior_inspection_artifacts,
 )
-from latentstrat.prior_inspection import inspect_prior_checkpoint, write_prior_inspection_artifacts
-from latentstrat.pretrain_loop import train_prior_file
-from latentstrat.prior_grid import run_prior_grid
-from latentstrat.training import train_model
-from latentstrat.training import create_tensorboard_writer
-from latentstrat.walk_forward import run_walk_forward_validation
-from latentstrat.world_model import (
+from latentstrat.season.train import create_tensorboard_writer, train_model
+from latentstrat.season.walk_forward import run_walk_forward_validation
+from latentstrat.experimental.frozen_targets import (
     build_world_model_bundle,
     load_world_model_options,
     paired_bootstrap_noninferiority,
 )
-from latentstrat.world_model.match_breakdown import (
+from latentstrat.pretraining.match_breakdown import (
     MatchBreakdownInspectionOptions,
-    MatchBreakdownTrainingOptions,
+    load_match_breakdown_training_options,
     sync_match_breakdowns,
     train_match_breakdown_encoder,
     write_match_breakdown_inspection,
 )
 
 app = typer.Typer(help="LatentStrat Python CLI")
+pretrain_app = typer.Typer(help="Offline representation pretraining workflows.")
+prior_app = typer.Typer(help="Day Zero prior pretraining.")
+match_breakdown_app = typer.Typer(help="Historical match-breakdown pretraining.")
+season_app = typer.Typer(help="Supported supervised season workflow.")
+artifact_app = typer.Typer(help="Artifact manifests and comparisons.")
+scouting_app = typer.Typer(help="Scouting database commands.")
+dev_app = typer.Typer(help="Developer utilities.")
+diagnostics_app = typer.Typer(help="Exploratory developer diagnostics.")
+experimental_app = typer.Typer(help="Explicitly experimental workflows.")
+frozen_targets_app = typer.Typer(help="Experimental frozen-target workflows.")
+venue_app = typer.Typer(help="Experimental venue-mode workflow.")
+
+app.add_typer(pretrain_app, name="pretrain")
+pretrain_app.add_typer(prior_app, name="prior")
+pretrain_app.add_typer(match_breakdown_app, name="match-breakdown")
+app.add_typer(season_app, name="season")
+app.add_typer(artifact_app, name="artifacts")
+app.add_typer(scouting_app, name="scouting")
+app.add_typer(dev_app, name="dev")
+dev_app.add_typer(diagnostics_app, name="diagnostics")
+app.add_typer(experimental_app, name="experimental")
+experimental_app.add_typer(frozen_targets_app, name="frozen-targets")
+experimental_app.add_typer(venue_app, name="venue")
+
+FLAT_ALIAS_REPLACEMENTS = {
+    "api-smoke": "dev api-smoke",
+    "smoke-test": "dev smoke-test",
+    "build-features": "season build-features",
+    "init-scouting-db": "scouting init",
+    "train-features": "season train",
+    "validate-walk-forward": "season validate",
+    "build-world-model": "experimental frozen-targets build",
+    "sync-match-breakdowns": "pretrain match-breakdown sync",
+    "train-match-breakdown-encoder": "pretrain match-breakdown train",
+    "inspect-match-breakdown-encoder": "pretrain match-breakdown inspect",
+    "compare-world-model": "artifacts compare-predictions",
+    "build-prior-features": "pretrain prior build",
+    "train-prior": "pretrain prior train",
+    "inspect-prior": "pretrain prior inspect",
+    "run-prior-grid": "pretrain prior grid",
+    "consolidate-event": "experimental venue consolidate",
+    "write-baseline-manifest": "artifacts baseline-manifest",
+    "full-season-offline": "season build-features followed by season train",
+    "inspect-embeddings": "dev diagnostics embeddings",
+    "build-evidence-packet": "dev diagnostics evidence",
+    "clear-cache": "dev clear-cache",
+}
+
+
+@app.callback()
+def root_callback(ctx: typer.Context) -> None:
+    """Route top-level commands while retaining V6.1 flat aliases."""
+
+    replacement = FLAT_ALIAS_REPLACEMENTS.get(ctx.invoked_subcommand or "")
+    if replacement is not None:
+        typer.echo(
+            f"Deprecated V6.1 alias: use `latentstrat {replacement}`. "
+            "Flat aliases will be removed in V6.2.",
+            err=True,
+        )
+
+
 DEFAULT_MATCH_BREAKDOWN_ARTIFACT_DIR = match_breakdown_artifact_dir(2015, 2026)
 
 
@@ -339,7 +401,11 @@ def train_features(
     ] = None,
     world_model_bundle: Annotated[
         Path | None,
-        typer.Option("--world-model-bundle", help="Optional frozen V6 world-model bundle."),
+        typer.Option(
+            "--frozen-target-bundle",
+            "--world-model-bundle",
+            help="Optional experimental frozen-target bundle.",
+        ),
     ] = None,
     rankings_sidecar: Annotated[
         Path | None,
@@ -521,7 +587,11 @@ def validate_walk_forward(
     ] = None,
     world_model_config: Annotated[
         Path | None,
-        typer.Option("--world-model-config", help="Optional V6 fold-local world-model config."),
+        typer.Option(
+            "--frozen-target-config",
+            "--world-model-config",
+            help="Optional experimental fold-local frozen-target config.",
+        ),
     ] = None,
     event_metadata: Annotated[
         Path | None,
@@ -538,7 +608,7 @@ def validate_walk_forward(
         typer.Option("--openai-cache", help="OpenAI embedding cache for award prototypes."),
     ] = OPENAI_EMBEDDING_CACHE_PATH,
 ) -> None:
-    """Run V6-Lite walk-forward temporal validation."""
+    """Run temporal walk-forward validation."""
     updates = {"epochs": epochs, "use_early_stopping": False}
     if mini_batch_size is not None:
         updates["mini_batch_size"] = mini_batch_size
@@ -584,14 +654,14 @@ def validate_walk_forward(
 
 @app.command("build-world-model")
 def build_world_model(
-    config: Annotated[Path, typer.Option("--config", help="V6 world-model YAML config.")],
+    config: Annotated[Path, typer.Option("--config", help="Experimental frozen-target YAML.")],
     features: Annotated[Path, typer.Option("--features", help="Season feature Parquet.")],
     events: Annotated[
         Path, typer.Option("--events", help="Event metadata Parquet with event_type.")
     ],
     output: Annotated[
-        Path, typer.Option("--output", help="Frozen world-model bundle output directory.")
-    ] = WORLD_MODEL_ARTIFACT_ROOT / "v6_lite",
+        Path, typer.Option("--output", help="Frozen-target bundle output directory.")
+    ] = EXPERIMENTAL_FROZEN_TARGET_ARTIFACT_ROOT / "v6_lite",
     rankings: Annotated[
         Path | None, typer.Option("--rankings", help="Optional rankings sidecar Parquet.")
     ] = None,
@@ -611,7 +681,7 @@ def build_world_model(
         int | None, typer.Option("--fit-max-week", help="Optional fold-local week boundary.")
     ] = None,
 ) -> None:
-    """Build frozen V6-Lite target spaces offline."""
+    """Build experimental frozen target spaces offline."""
     bundle = build_world_model_bundle(
         features,
         output,
@@ -685,37 +755,47 @@ def sync_match_breakdowns_command(
 
 @app.command("train-match-breakdown-encoder")
 def train_match_breakdown_encoder_command(
+    config: Annotated[
+        Path | None,
+        typer.Option("--config", help="Explicit V2 objective YAML; omitted keeps V1 defaults."),
+    ] = None,
     start_season: Annotated[
-        int, typer.Option("--start-season", help="First corpus season to include.")
-    ] = 2015,
+        int | None, typer.Option("--start-season", help="First corpus season to include.")
+    ] = None,
     end_season: Annotated[
-        int, typer.Option("--end-season", help="Last corpus season to include.")
-    ] = 2026,
-    epochs: Annotated[int, typer.Option("--epochs", help="Epochs for each training phase.")] = 50,
+        int | None, typer.Option("--end-season", help="Last corpus season to include.")
+    ] = None,
+    epochs: Annotated[
+        int | None, typer.Option("--epochs", help="Epochs for each training phase.")
+    ] = None,
     seasons_per_step: Annotated[
-        int, typer.Option("--seasons-per-step", help="Season routes sampled per optimizer step.")
-    ] = 4,
+        int | None,
+        typer.Option("--seasons-per-step", help="Season routes sampled per optimizer step."),
+    ] = None,
     rows_per_season: Annotated[
-        int, typer.Option("--rows-per-season", help="Alliance rows sampled per season route.")
-    ] = 64,
+        int | None,
+        typer.Option("--rows-per-season", help="Alliance rows sampled per season route."),
+    ] = None,
     learning_rate: Annotated[
-        float, typer.Option("--learning-rate", help="AdamW learning rate.")
-    ] = 1e-3,
-    seed: Annotated[int, typer.Option("--seed", help="Deterministic random seed.")] = 2026,
+        float | None, typer.Option("--learning-rate", help="AdamW learning rate.")
+    ] = None,
+    seed: Annotated[
+        int | None, typer.Option("--seed", help="Deterministic random seed.")
+    ] = None,
     include_foc: Annotated[
-        bool,
+        bool | None,
         typer.Option(
             "--include-foc/--exclude-foc",
             help="Include FIRST Festival of Champions event type 6 from the corpus.",
         ),
-    ] = False,
+    ] = None,
     include_remote: Annotated[
-        bool,
+        bool | None,
         typer.Option(
             "--include-remote/--exclude-remote",
             help="Include remote event type 7 from the corpus.",
         ),
-    ] = False,
+    ] = None,
     corpus_db: Annotated[
         Path, typer.Option("--corpus-db", help="Durable raw match-breakdown SQLite corpus.")
     ] = MATCH_BREAKDOWN_CORPUS_PATH,
@@ -726,26 +806,35 @@ def train_match_breakdown_encoder_command(
         Path | None,
         typer.Option("--alliance-features", help="Flattened raw alliance Parquet output."),
     ] = None,
-    device: Annotated[str, typer.Option("--device", help='Torch device, or "auto".')] = "auto",
+    device: Annotated[
+        str | None, typer.Option("--device", help='Torch device, or "auto".')
+    ] = None,
 ) -> None:
-    """Train the offline V6-Lite historical match-breakdown encoder."""
+    """Train the offline historical match-breakdown encoder."""
 
-    options = MatchBreakdownTrainingOptions(
-        start_season=start_season,
-        end_season=end_season,
-        epochs=epochs,
-        seasons_per_step=seasons_per_step,
-        rows_per_season=rows_per_season,
-        learning_rate=learning_rate,
-        seed=seed,
-        device=device,
-        include_foc=include_foc,
-        include_remote=include_remote,
+    options = load_match_breakdown_training_options(
+        config,
+        overrides={
+            "start_season": start_season,
+            "end_season": end_season,
+            "epochs": epochs,
+            "seasons_per_step": seasons_per_step,
+            "rows_per_season": rows_per_season,
+            "learning_rate": learning_rate,
+            "seed": seed,
+            "device": device,
+            "include_foc": include_foc,
+            "include_remote": include_remote,
+        },
     )
     result = train_match_breakdown_encoder(
         corpus_db,
-        output or match_breakdown_artifact_dir(start_season, end_season),
-        alliance_features or match_breakdown_features_path(start_season, end_season),
+        output
+        or match_breakdown_artifact_dir(
+            options.start_season, options.end_season, options.artifact_version
+        ),
+        alliance_features
+        or match_breakdown_features_path(options.start_season, options.end_season),
         options,
     )
     typer.echo(
@@ -764,6 +853,13 @@ def inspect_match_breakdown_encoder_command(
     ] = DEFAULT_MATCH_BREAKDOWN_ARTIFACT_DIR,
     output: Annotated[
         Path | None, typer.Option("--output", help="Standalone static inspection directory.")
+    ] = None,
+    baseline_artifact_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--baseline-artifact-dir",
+            help="Optional preserved artifact for keyed neighbor and score-sorting drift tables.",
+        ),
     ] = None,
     seed: Annotated[int, typer.Option("--seed", help="Deterministic sampling seed.")] = 2026,
     tsne_max_rows: Annotated[
@@ -788,6 +884,7 @@ def inspect_match_breakdown_encoder_command(
             network_node_limit=network_node_limit,
             neighbors_per_node=neighbors_per_node,
         ),
+        baseline_artifact_dir=baseline_artifact_dir,
     )
     typer.echo(
         f"Match-breakdown inspection written: {result.output_dir} "
@@ -1058,33 +1155,16 @@ def write_baseline_manifest_command(
 
 @app.command("full-season-offline")
 def full_season_offline(season: int = 2026, event_limit: int | None = None) -> None:
-    """Import a season, train the model, and write core artifacts."""
-    opts = default_options().model_copy(update={"season": season})
-    provider = _provider()
-    store = FRCDataStore()
-    events = TBAImporter.import_season(provider, store, season, event_limit=event_limit)
-    table = build_season_match_table(store, opts, event_metadata=events)
-    table, team_map = make_team_index_map(table)
-    split = make_split(
-        table,
-        opts,
-        policy=opts.full_season_split_policy,
-        validation_fraction=opts.validation_fraction,
-    )
-    stats = fit_target_stats(table, split.train_mask, opts)
-    prepared = apply_target_stats(table, stats)
-    baselines = fit_baselines(prepared, split, opts)
-    model, history, diagnostics = train_model(prepared, split, opts)
-    report = evaluate_model(model, prepared, split, stats, opts, baselines)
-    out = SEASON_ARTIFACT_ROOT / "full-season-offline"
-    out.mkdir(exist_ok=True)
-    prepared.to_csv(out / "full_season_match_table.csv", index=False)
-    history.to_csv(out / "full_season_history.csv", index=False)
-    report.continuous_metrics.to_csv(out / "full_season_continuous_metrics.csv", index=False)
+    """Explain the supported replacement for the removed duplicate runner."""
+
+    _ = (season, event_limit)
     typer.echo(
-        f"Full-season run complete: rows={len(prepared)}, teams={len(team_map)}, "
-        f"final_loss={diagnostics.final_loss:.4f}"
+        "Error: `full-season-offline` was removed in V6.1. Run "
+        "`latentstrat season build-features --season 2026` followed by "
+        "`latentstrat season train <features.parquet>`.",
+        err=True,
     )
+    raise typer.Exit(code=2)
 
 
 @app.command("inspect-embeddings")
@@ -1150,6 +1230,75 @@ def clear_cache() -> None:
             legacy_sidecar.unlink()
             removed += 1
     typer.echo(f"Caches cleared. removed={removed}")
+
+
+@venue_app.command("train")
+def experimental_venue_train(
+    ctx: typer.Context,
+    input_path: Annotated[Path, typer.Argument(help="Event feature Parquet file.")],
+    event_key: Annotated[str, typer.Option("--event-key", help="Event key to isolate.")],
+    checkpoint: Annotated[
+        Path, typer.Option("--checkpoint", help="Season checkpoint to fine-tune.")
+    ],
+    output: Annotated[
+        Path, typer.Option("--output", help="Directory for venue-mode artifacts.")
+    ] = SEASON_ARTIFACT_ROOT / "venue",
+) -> None:
+    """Train only event-delta embeddings for an explicit experimental venue run."""
+
+    ctx.invoke(
+        train_features,
+        input_path=input_path,
+        event_key=event_key,
+        checkpoint=checkpoint,
+        output=output,
+        venue_mode=True,
+    )
+
+
+@dev_app.command("migrate-layout")
+def migrate_layout(
+    apply: Annotated[
+        bool, typer.Option("--apply/--dry-run", help="Apply verified moves after preview.")
+    ] = False,
+) -> None:
+    """Preview or apply the generated-output storage migration."""
+
+    command = [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "scripts/organize_local_outputs.ps1",
+    ]
+    if apply:
+        command.append("-Apply")
+    result = subprocess.run(command, check=False)
+    if result.returncode:
+        raise typer.Exit(code=result.returncode)
+
+
+prior_app.command("build")(build_prior_features)
+prior_app.command("train")(train_prior)
+prior_app.command("inspect")(inspect_prior)
+prior_app.command("grid")(run_prior_grid_command)
+match_breakdown_app.command("sync")(sync_match_breakdowns_command)
+match_breakdown_app.command("train")(train_match_breakdown_encoder_command)
+match_breakdown_app.command("inspect")(inspect_match_breakdown_encoder_command)
+season_app.command("build-features")(build_features)
+season_app.command("train")(train_features)
+season_app.command("validate")(validate_walk_forward)
+artifact_app.command("baseline-manifest")(write_baseline_manifest_command)
+artifact_app.command("compare-predictions")(compare_world_model)
+scouting_app.command("init")(init_scouting_db)
+dev_app.command("api-smoke")(api_smoke)
+dev_app.command("smoke-test")(smoke_test)
+dev_app.command("clear-cache")(clear_cache)
+diagnostics_app.command("embeddings")(inspect_embeddings_command)
+diagnostics_app.command("evidence")(build_evidence_packet_command)
+frozen_targets_app.command("build")(build_world_model)
+venue_app.command("consolidate")(consolidate_event)
 
 
 if __name__ == "__main__":

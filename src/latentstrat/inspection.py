@@ -9,7 +9,7 @@ import pandas as pd
 
 from latentstrat.baselines import Baselines
 from latentstrat.config import LatentStratOptions, default_options
-from latentstrat.model import SetTransformerModel
+from latentstrat.season.model import SetTransformerModel
 
 
 @dataclass
@@ -241,8 +241,8 @@ def inspect_embeddings(
     team_table = build_team_embedding_table(embeddings, team_index_map, pca_score, table, baselines)
     normalized = normalize_rows(embeddings[team_table["team_index"].to_numpy(dtype=int)])
     # Reuse evaluation attention output without split labels here.
-    from latentstrat.data import Split
-    from latentstrat.evaluation import evaluate_model
+    from latentstrat.season.data import Split
+    from latentstrat.season.evaluate import evaluate_model
 
     dummy_split = Split(
         np.ones(len(table), dtype=bool),
@@ -250,7 +250,7 @@ def inspect_embeddings(
         np.zeros(len(table), dtype=bool),
         "inspection",
     )
-    from latentstrat.data import TargetStats
+    from latentstrat.season.data import TargetStats
 
     dummy_stats = TargetStats(
         [mapping.target_name for mapping in opts.target_map],

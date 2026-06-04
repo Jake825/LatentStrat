@@ -1,0 +1,40 @@
+season: 2025
+defaults: {weight: 1.0, tolerance: 1.0e-6, min_pass_rate: 0.995}
+rules:
+  - name: auto_points_sum
+    status: required
+    lhs: {autoPoints: 1}
+    rhs: {autoCoralPoints: 1, autoMobilityPoints: 1}
+  - name: teleop_points_sum
+    status: required
+    lhs: {teleopPoints: 1}
+    rhs: {teleopCoralPoints: 1, algaePoints: 1, endGameBargePoints: 1}
+  - name: total_points_sum
+    status: required
+    lhs: {totalPoints: 1}
+    rhs: {autoPoints: 1, teleopPoints: 1, foulPoints: 1, adjustPoints: 1}
+  - name: auto_coral_count_total
+    status: candidate
+    lhs: {autoCoralCount: 1}
+    rhs: {autoReef.trough: 1, autoReef.tba_botRowCount: 1, autoReef.tba_midRowCount: 1, autoReef.tba_topRowCount: 1}
+    notes: Candidate because rare TBA rows differ by one Coral.
+  - name: auto_coral_points_from_rows
+    status: candidate
+    lhs: {autoCoralPoints: 1}
+    rhs: {autoReef.trough: 3, autoReef.tba_botRowCount: 4, autoReef.tba_midRowCount: 6, autoReef.tba_topRowCount: 7}
+    notes: Candidate because rare TBA rows differ from direct row scoring.
+  - name: teleop_coral_count_total
+    status: disabled
+    lhs: {teleopCoralCount: 1}
+    rhs: {teleopReef.trough: 1, teleopReef.tba_botRowCount: 1, teleopReef.tba_midRowCount: 1, teleopReef.tba_topRowCount: 1}
+    notes: Disabled because teleop Coral counts do not satisfy this raw-row equation.
+  - name: teleop_coral_points_from_rows
+    status: disabled
+    lhs: {teleopCoralPoints: 1}
+    rhs: {teleopReef.trough: 2, teleopReef.tba_botRowCount: 3, teleopReef.tba_midRowCount: 4, teleopReef.tba_topRowCount: 5}
+    notes: Disabled because teleop Coral points do not satisfy this raw-row equation.
+  - name: reef_boolean_node_counts
+    status: disabled
+    lhs: {autoReef.tba_topRowCount: 1}
+    rhs: {autoReef.topRow.nodeA: 1}
+    notes: Disabled in V2 because algebraic rules reference numeric decoder outputs only.

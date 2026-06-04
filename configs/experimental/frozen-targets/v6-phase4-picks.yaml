@@ -1,0 +1,10 @@
+frozen_targets:
+  enabled: true
+  baseline_ref: v5.8-baseline
+  score_embedding: {enabled: false, width: 16}
+  award_embedding: {enabled: true, width: 256}
+  rank_embedding: {enabled: true, width: 16}
+  pick_embedding: {enabled: true, width: 16}
+  target_epochs: 50
+  target_learning_rate: 0.001
+  random_seed: 2026

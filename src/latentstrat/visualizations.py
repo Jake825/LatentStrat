@@ -10,7 +10,7 @@ import pandas as pd
 import torch
 
 from latentstrat.inspection import compute_pca
-from latentstrat.pretrain_loop import load_prior_embedding_table
+from latentstrat.pretraining.prior.train import load_prior_embedding_table
 
 
 def _plot_setup():

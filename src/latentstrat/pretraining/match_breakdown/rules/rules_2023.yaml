@@ -1,0 +1,19 @@
+season: 2023
+defaults: {weight: 1.0, tolerance: 1.0e-6, min_pass_rate: 0.995}
+rules:
+  - name: auto_points_sum
+    status: required
+    lhs: {autoPoints: 1}
+    rhs: {autoGamePiecePoints: 1, autoMobilityPoints: 1, autoChargeStationPoints: 1}
+  - name: teleop_points_sum
+    status: required
+    lhs: {teleopPoints: 1}
+    rhs: {teleopGamePiecePoints: 1, endGameChargeStationPoints: 1, endGameParkPoints: 1}
+  - name: total_charge_station_points
+    status: required
+    lhs: {totalChargeStationPoints: 1}
+    rhs: {autoChargeStationPoints: 1, endGameChargeStationPoints: 1}
+  - name: total_points_sum
+    status: required
+    lhs: {totalPoints: 1}
+    rhs: {autoPoints: 1, teleopPoints: 1, linkPoints: 1, foulPoints: 1, adjustPoints: 1}

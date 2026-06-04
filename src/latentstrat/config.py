@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import yaml
 from pydantic import BaseModel, ConfigDict
 
 from latentstrat.paths import OPENAI_EMBEDDING_CACHE_PATH
+
+SEASON_CONFIG_ROOT = Path("configs/season")
 
 
 class TargetMapping(BaseModel):
@@ -130,11 +135,20 @@ class PriorOpts(BaseModel):
     future_baseline_team: int = 10_900
     future_growth_per_year: int = 800
     epa_source_year: int | None = None
-    epa_rookie_baseline_z: float = -0.2
     cache_path: str = str(OPENAI_EMBEDDING_CACHE_PATH)
     device: str = "auto"
     random_seed: int = 2026
 
 
-def default_options() -> LatentStratOptions:
-    return LatentStratOptions()
+def default_options(season: int = 2026) -> LatentStratOptions:
+    """Load tracked season defaults while preserving model-level legacy fallbacks."""
+
+    config_path = SEASON_CONFIG_ROOT / f"{season}.yaml"
+    payload = (
+        yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        if config_path.exists()
+        else {}
+    )
+    values = dict(payload or {})
+    values["season"] = season
+    return LatentStratOptions.model_validate(values)

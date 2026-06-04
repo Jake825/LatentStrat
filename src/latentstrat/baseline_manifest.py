@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from latentstrat.world_model import sha256_file
+from latentstrat.artifacts import sha256_file
 
 REQUIRED_ARCHIVE_FILES = (
     "commit.txt",

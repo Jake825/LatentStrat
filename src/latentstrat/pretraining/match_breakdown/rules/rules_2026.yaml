@@ -1,0 +1,37 @@
+season: 2026
+defaults: {weight: 1.0, tolerance: 1.0e-6, min_pass_rate: 0.995}
+rules:
+  - name: total_auto_points
+    status: required
+    lhs: {totalAutoPoints: 1}
+    rhs: {hubScore.autoPoints: 1, autoTowerPoints: 1}
+  - name: total_teleop_points
+    status: required
+    lhs: {totalTeleopPoints: 1}
+    rhs: {hubScore.teleopPoints: 1, endGameTowerPoints: 1}
+  - name: total_tower_points
+    status: required
+    lhs: {totalTowerPoints: 1}
+    rhs: {autoTowerPoints: 1, endGameTowerPoints: 1}
+  - name: hub_total_points
+    status: required
+    lhs: {hubScore.totalPoints: 1}
+    rhs: {hubScore.autoPoints: 1, hubScore.teleopPoints: 1}
+  - name: hub_total_count
+    status: required
+    lhs: {hubScore.totalCount: 1}
+    rhs: {hubScore.autoCount: 1, hubScore.teleopCount: 1}
+  - name: total_points_sum
+    status: required
+    lhs: {totalPoints: 1}
+    rhs: {totalAutoPoints: 1, totalTeleopPoints: 1, foulPoints: 1, adjustPoints: 1}
+  - name: hub_total_points_expanded_subphases
+    status: disabled
+    lhs: {hubScore.totalPoints: 1}
+    rhs: {hubScore.autoPoints: 1, hubScore.teleopPoints: 1, hubScore.transitionPoints: 1, hubScore.endgamePoints: 1}
+    notes: Disabled because transition and endgame values are already reflected in TBA teleop totals.
+  - name: hub_teleop_shift_points
+    status: disabled
+    lhs: {hubScore.teleopPoints: 1}
+    rhs: {hubScore.shift1Points: 1, hubScore.shift2Points: 1, hubScore.shift3Points: 1, hubScore.shift4Points: 1}
+    notes: Disabled because shift totals do not equal TBA teleop totals.

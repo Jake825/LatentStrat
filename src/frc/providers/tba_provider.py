@@ -7,7 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from frc.models import Match, TbaAward, TbaEvent, TbaMatch, TbaTeam, _as_plain_data
+from frc.models import Match, TbaAward, TbaEvent, TbaMatch, TbaTeam
+from frc.providers.payloads import as_plain_payload
 
 TBA_API_BASE_URL = "https://www.thebluealliance.com/api/v3"
 
@@ -81,7 +82,7 @@ class TbaProvider:
 
     def _call(self, name: str, *args: Any, **kwargs: Any) -> Any:
         method = getattr(self.client, name)
-        return _as_plain_data(method(*args, **kwargs))
+        return as_plain_payload(method(*args, **kwargs))
 
     def get_json_response(
         self,
@@ -112,7 +113,7 @@ class TbaProvider:
         )
 
     def get_status(self) -> dict[str, Any]:
-        return _as_plain_data(self.client.status())
+        return as_plain_payload(self.client.status())
 
     def get_event(self, event_key: str) -> TbaEvent:
         return TbaEvent.model_validate(self._call("event", event_key))
@@ -133,7 +134,7 @@ class TbaProvider:
         ]
 
     def get_event_rankings(self, event_key: str) -> dict[str, Any]:
-        return _as_plain_data(self.client.event_rankings(event_key))
+        return as_plain_payload(self.client.event_rankings(event_key))
 
     def get_event_awards(self, event_key: str) -> list[TbaAward]:
         return [TbaAward.model_validate(item) for item in self._call("event_awards", event_key)]

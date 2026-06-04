@@ -20,6 +20,7 @@ from frc.scouting import (
 )
 from latentstrat.cli import app
 from latentstrat.config import default_options
+from latentstrat.experimental.frozen_targets import TargetSpaceOptions, WorldModelOptions
 from latentstrat.features import (
     add_award_features,
     build_event_sidecars,
@@ -33,7 +34,6 @@ from latentstrat.features import (
 )
 from latentstrat.model import init_model
 from latentstrat.secrets import load_environment
-from latentstrat.world_model import TargetSpaceOptions, WorldModelOptions
 
 
 def _feature_table(row_count=8):
@@ -163,11 +163,11 @@ def test_train_feature_table_adds_indices_and_writes_artifacts(tmp_path):
     assert not (output / "feature_zero_out_war.png").exists()
     assert not (output / "feature_embedding_drift.csv").exists()
     assert not (output / "feature_selection_value.csv").exists()
-    assert (output / "v6_checkpoint.pt").exists()
-    checkpoint = torch.load(output / "v6_checkpoint.pt", map_location="cpu", weights_only=False)
+    assert (output / "checkpoint.pt").exists()
+    checkpoint = torch.load(output / "checkpoint.pt", map_location="cpu", weights_only=False)
     assert checkpoint["checkpoint_schema_version"] == 6
     assert checkpoint["world_model"]["enabled"] is False
-    loaded = load_season_checkpoint_model(output / "v6_checkpoint.pt")
+    loaded = load_season_checkpoint_model(output / "checkpoint.pt")
     assert loaded.world_model_opts.enabled is False
     common = pd.read_csv(output / "feature_common_metrics.csv")
     assert set(common["split"]) == {"train", "validation"}
@@ -456,7 +456,7 @@ def test_train_features_cli_loads_parquet_and_writes_artifacts(tmp_path):
     assert result.exit_code == 0, result.output
     assert (output / "feature_match_table.csv").exists()
     assert (output / "feature_training_diagnostics.json").exists()
-    assert (output / "v6_checkpoint.pt").exists()
+    assert (output / "checkpoint.pt").exists()
     history = pd.read_csv(output / "feature_history.csv")
     assert "learning_rate" in history.columns
 
@@ -514,7 +514,7 @@ def test_train_features_cli_freezes_prior_embeddings_and_records_metadata(tmp_pa
     )
 
     assert result.exit_code == 0, result.output
-    checkpoint = torch.load(output / "v6_checkpoint.pt", map_location="cpu", weights_only=False)
+    checkpoint = torch.load(output / "checkpoint.pt", map_location="cpu", weights_only=False)
     assert checkpoint["split_policy"] == "stratified-event-comp"
     assert checkpoint["frozen_embedding_tables"] == ["Z_base", "Z_event"]
     assert checkpoint["sidecar_tables"] == ["playoffs", "rankings"]
@@ -568,7 +568,7 @@ def test_consolidate_event_cli_writes_embedding_store(tmp_path):
         app,
         [
             "consolidate-event",
-            str(output / "v6_checkpoint.pt"),
+            str(output / "checkpoint.pt"),
             "--event-key",
             "2026features",
             "--embedding-db",
@@ -580,7 +580,7 @@ def test_consolidate_event_cli_writes_embedding_store(tmp_path):
 
     assert result.exit_code == 0, result.output
     assert db_path.exists()
-    assert (output / "v6_checkpoint_consolidated.pt").exists()
+    assert (output / "checkpoint_consolidated.pt").exists()
 
 
 def test_feature_file_errors_are_clear(tmp_path):
@@ -604,5 +604,5 @@ def test_active_integrated_v6_checkpoint_training_requires_world_model_bundle():
         ),
     )
 
-    with pytest.raises(ValueError, match="requires world_model_bundle"):
+    with pytest.raises(ValueError, match="requires frozen_target_bundle"):
         train_feature_table(_feature_table(), opts, initial_model=model, verbose=False)

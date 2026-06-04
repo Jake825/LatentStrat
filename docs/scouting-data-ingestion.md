@@ -2,13 +2,13 @@
 tags:
   - latentstrat
   - scouting-data
-  - feature-pipeline
+  - season-training
 aliases:
   - "Scouting Data Ingestion"
   - "Scouting Import Guide"
 related:
   - "[[scouting-data-layer]]"
-  - "[[feature-pipeline]]"
+  - "[[season-training]]"
   - "[[data-sources]]"
 ---
 
@@ -19,7 +19,7 @@ This guide defines the standard pattern for writing custom importers that move r
 LatentStrat uses a data lake workflow:
 
 1. Raw scouting files are imported into `data/scouting/scouting.db`.
-2. `build-features` merges scouting rows with TBA match data.
+2. `season build-features` merges scouting rows with TBA match data.
 3. PyTorch training reads the resulting Parquet file and never queries SQLite during the training loop.
 
 ## Setup
@@ -27,7 +27,7 @@ LatentStrat uses a data lake workflow:
 Initialize the local scouting database before running importer scripts:
 
 ```powershell
-python -m latentstrat.cli init-scouting-db --path data/scouting/scouting.db
+latentstrat scouting init --path data/scouting/scouting.db
 ```
 
 Importer scripts should use the current scouting API:

@@ -2,14 +2,14 @@
 tags:
   - latentstrat
   - data-sources
-  - feature-pipeline
+  - season-training
 aliases:
   - "LatentStrat Data Sources"
 related:
-  - "[[feature-pipeline]]"
-  - "[[prior-training]]"
   - "[[season-training]]"
-  - "[[schemas-and-artifacts-reference]]"
+  - "[[prior-pretraining]]"
+  - "[[season-training]]"
+  - "[[evaluation-and-artifacts]]"
 ---
 
 # Data Sources
@@ -20,11 +20,11 @@ LatentStrat uses several data sources, but each source has a different role. The
 
 | Source | Used for | Typical commands | Timing role |
 |---|---|---|---|
-| The Blue Alliance | Teams, events, matches, score breakdowns, awards, rankings, alliances | `build-features`, `build-prior-features`, `sync-match-breakdowns` | Match spine and historical labels |
-| Statbotics | Historical normalized EPA trajectory for prior training | `build-prior-features` | Prior-season strength signal |
-| OpenAI embeddings | Narrative text targets for prior distillation | `build-prior-features` | Offline text semantics |
-| Local scouting SQLite | Optional scouting observations | `init-scouting-db`, `build-features` | Local team/event/match scouting |
-| Generated sidecars | Rankings, selections, playoff ordering | `build-features --sidecar-output-dir` | Auxiliary post-event labels |
+| The Blue Alliance | Teams, events, matches, score breakdowns, awards, rankings, alliances | `season build-features`, `pretrain prior build`, `pretrain match-breakdown sync` | Match spine and historical labels |
+| Statbotics | Historical normalized EPA trajectory for prior training | `pretrain prior build` | Prior-season strength signal |
+| OpenAI embeddings | Narrative text targets for prior distillation | `pretrain prior build` | Offline text semantics |
+| Local scouting SQLite | Optional scouting observations | `scouting init`, `season build-features` | Local team/event/match scouting |
+| Generated sidecars | Rankings, selections, playoff ordering | `season build-features --sidecar-output-dir` | Auxiliary post-event labels |
 
 ## The Blue Alliance
 
@@ -52,10 +52,11 @@ For V5.7, the 2026 mapper writes groups such as:
 
 Committed fouls are inverted because TBA reports foul points as points awarded to the opponent. If blue receives foul points, those points came from red committing fouls.
 
-V6-Lite V1 also preserves raw TBA match payloads for offline historical score-archetype training:
+Match-breakdown pretraining also preserves raw TBA match payloads for offline historical
+score-archetype training:
 
 ```text
-data/world_model/match_breakdowns.sqlite
+data/pretraining/match-breakdown/corpus.sqlite
 ```
 
 This durable corpus is separate from the disposable TBA transport cache. Synchronization defaults to normal official event types `0..5`; FOC `6` and remote `7` require explicit flags. The requested range is `2015..2026`, but the current TBA OpenAPI breakdown schemas skip `2021`, so that season is retained in the audit and excluded from encoder training.
@@ -102,11 +103,12 @@ Embeddings are cached by a stable hash of the model, dimensions, and narrative t
 
 Local scouting data is optional. It lives in `data/scouting/scouting.db` by default and is created with:
 
-```bash
-latentstrat init-scouting-db --path data/scouting/scouting.db
+```powershell
+latentstrat scouting init --path data/scouting/scouting.db
 ```
 
-When the database exists, `build-features` can merge scouting rows into the Parquet feature table. Training still reads only the Parquet file.
+When the database exists, `season build-features` can merge scouting rows into the Parquet feature
+table. Training still reads only the Parquet file.
 
 Scouting joins must preserve grain:
 
@@ -141,7 +143,7 @@ Never copy real keys into docs, logs, screenshots, or committed files.
 Common local storage paths include:
 
 - TBA request cache at `data/cache/tba.sqlite`.
-- Durable raw match-breakdown corpus at `data/world_model/match_breakdowns.sqlite`.
+- Durable raw match-breakdown corpus at `data/pretraining/match-breakdown/corpus.sqlite`.
 - Statbotics response cache at `data/cache/statbotics.sqlite`.
 - OpenAI embedding cache at `data/cache/openai_embeddings.sqlite`.
 - Scouting database at `data/scouting/scouting.db`.
@@ -155,7 +157,7 @@ The cache files are local development artifacts, not model design. Parquet featu
 
 ## Related
 
-- [Feature pipeline](feature-pipeline.md): how source data becomes Parquet feature rows.
-- [Prior training](prior-training.md): how OpenAI, Statbotics, and TBA history shape the Day Zero prior.
+- [Architecture](architecture.md): how data flows into pretraining and season training.
+- [Prior pretraining](prior-pretraining.md): how OpenAI, Statbotics, and TBA history shape the Day Zero prior.
 - [Season training](season-training.md): how match features and sidecars are used during training.
-- [Schemas and artifacts reference](schemas-and-artifacts-reference.md): column groups and generated artifact contracts.
+- [Evaluation and artifacts](evaluation-and-artifacts.md): generated artifact contracts.

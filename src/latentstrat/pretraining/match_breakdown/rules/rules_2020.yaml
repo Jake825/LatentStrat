@@ -1,0 +1,23 @@
+season: 2020
+defaults: {weight: 1.0, tolerance: 1.0e-6, min_pass_rate: 0.995}
+rules:
+  - name: auto_cell_points_from_counts
+    status: required
+    lhs: {autoCellPoints: 1}
+    rhs: {autoCellsBottom: 2, autoCellsOuter: 4, autoCellsInner: 6}
+  - name: auto_points_sum
+    status: required
+    lhs: {autoPoints: 1}
+    rhs: {autoCellPoints: 1, autoInitLinePoints: 1}
+  - name: teleop_cell_points_from_counts
+    status: required
+    lhs: {teleopCellPoints: 1}
+    rhs: {teleopCellsBottom: 1, teleopCellsOuter: 2, teleopCellsInner: 3}
+  - name: teleop_points_sum
+    status: required
+    lhs: {teleopPoints: 1}
+    rhs: {teleopCellPoints: 1, controlPanelPoints: 1, endgamePoints: 1}
+  - name: total_points_sum
+    status: required
+    lhs: {totalPoints: 1}
+    rhs: {autoPoints: 1, teleopPoints: 1, foulPoints: 1, adjustPoints: 1}

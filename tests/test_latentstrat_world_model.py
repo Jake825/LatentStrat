@@ -6,9 +6,7 @@ import pandas as pd
 import torch
 
 from latentstrat.config import default_options
-from latentstrat.model import init_model
-from latentstrat.training import model_loss
-from latentstrat.world_model import (
+from latentstrat.experimental.frozen_targets import (
     TargetSpaceOptions,
     WorldModelOptions,
     build_award_target_space,
@@ -18,6 +16,8 @@ from latentstrat.world_model import (
     paired_bootstrap_noninferiority,
     ranked_unselected_opportunities,
 )
+from latentstrat.model import init_model
+from latentstrat.training import model_loss
 
 
 def _target(enabled: bool, width: int) -> TargetSpaceOptions:

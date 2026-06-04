@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import sqlite3
 import subprocess
@@ -32,8 +33,10 @@ def test_canonical_storage_paths_are_stable():
     assert OPENAI_EMBEDDING_CACHE_PATH == Path("data/cache/openai_embeddings.sqlite")
     assert SCOUTING_DB_PATH == Path("data/scouting/scouting.db")
     assert EMBEDDING_DB_PATH == Path("data/embeddings/latentstrat_embeddings.sqlite")
-    assert MATCH_BREAKDOWN_CORPUS_PATH == Path("data/world_model/match_breakdowns.sqlite")
-    assert prior_features_path(2026) == Path("data/features/prior/prior_features_2026.parquet")
+    assert MATCH_BREAKDOWN_CORPUS_PATH == Path("data/pretraining/match-breakdown/corpus.sqlite")
+    assert prior_features_path(2026) == Path(
+        "data/features/pretraining/prior/prior_features_2026.parquet"
+    )
     assert season_features_path(2026) == Path("data/features/season/features_2026.parquet")
     assert event_features_path("2026ilch") == Path("data/features/event/features_2026ilch.parquet")
 
@@ -152,7 +155,7 @@ def test_clear_cache_removes_new_and_legacy_caches_but_keeps_features(tmp_path, 
     feature = Path("data/features/season/features_2026.parquet")
     feature.parent.mkdir(parents=True, exist_ok=True)
     feature.write_text("feature", encoding="utf-8")
-    corpus = Path("data/world_model/match_breakdowns.sqlite")
+    corpus = Path("data/pretraining/match-breakdown/corpus.sqlite")
     corpus.parent.mkdir(parents=True, exist_ok=True)
     corpus.write_text("durable corpus", encoding="utf-8")
 
@@ -211,3 +214,6 @@ def test_organize_local_outputs_dry_run_and_apply(tmp_path):
     assert (root / "data" / "cache" / "openai_embeddings.sqlite").exists()
     assert not season.exists()
     assert (root / "data" / "features" / "season" / "features_2026.parquet").exists()
+    archive_index = root / "artifacts" / "archive" / "index.json"
+    assert archive_index.exists()
+    assert len(json.loads(archive_index.read_text(encoding="utf-8"))) == 2

@@ -7,21 +7,6 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-def _as_plain_data(value: Any) -> Any:
-    """Convert tbapy/statbotics objects into nested Python containers."""
-    if isinstance(value, BaseModel):
-        return value.model_dump(by_alias=False)
-    if isinstance(value, dict):
-        return {str(k): _as_plain_data(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple, set)):
-        return [_as_plain_data(v) for v in value]
-    if hasattr(value, "__dict__"):
-        return {
-            str(k): _as_plain_data(v) for k, v in vars(value).items() if not str(k).startswith("_")
-        }
-    return value
-
-
 class PayloadModel(BaseModel):
     """Base model for external FRC payloads.
 
@@ -57,30 +42,12 @@ class MatchAlliance(PayloadModel):
     @model_validator(mode="before")
     @classmethod
     def normalize_missing_lists(cls, data: Any) -> Any:
-        data = _as_plain_data(data)
         if not isinstance(data, dict):
             return data
         for name in ("team_keys", "surrogate_team_keys", "dq_team_keys"):
             if data.get(name) is None:
                 data[name] = []
         return data
-
-
-class MatchScoreBreakdown(PayloadModel):
-    """Known score-breakdown fields with raw payload retained by callers."""
-
-    total_points: float | None = Field(default=None, alias="totalPoints")
-    total_auto_points: float | None = Field(default=None, alias="totalAutoPoints")
-    total_teleop_points: float | None = Field(default=None, alias="totalTeleopPoints")
-    total_tower_points: float | None = Field(default=None, alias="totalTowerPoints")
-    auto_tower_points: float | None = Field(default=None, alias="autoTowerPoints")
-    end_game_tower_points: float | None = Field(default=None, alias="endGameTowerPoints")
-    foul_points: float | None = Field(default=None, alias="foulPoints")
-    major_foul_count: float | None = Field(default=None, alias="majorFoulCount")
-    minor_foul_count: float | None = Field(default=None, alias="minorFoulCount")
-    energized_achieved: bool | None = Field(default=None, alias="energizedAchieved")
-    supercharged_achieved: bool | None = Field(default=None, alias="superchargedAchieved")
-    traversal_achieved: bool | None = Field(default=None, alias="traversalAchieved")
 
 
 class TbaTeam(PayloadModel):
@@ -93,12 +60,6 @@ class TbaTeam(PayloadModel):
     state_prov: str | None = None
     country: str | None = None
 
-    @model_validator(mode="before")
-    @classmethod
-    def normalize_raw(cls, data: Any) -> Any:
-        return _as_plain_data(data)
-
-
 class TbaEvent(PayloadModel):
     key: str = ""
     name: str = ""
@@ -108,21 +69,9 @@ class TbaEvent(PayloadModel):
     start_date: str | None = None
     end_date: str | None = None
 
-    @model_validator(mode="before")
-    @classmethod
-    def normalize_raw(cls, data: Any) -> Any:
-        return _as_plain_data(data)
-
-
 class TbaAwardRecipient(PayloadModel):
     team_key: str | None = None
     awardee: str | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def normalize_raw(cls, data: Any) -> Any:
-        return _as_plain_data(data)
-
 
 class TbaAward(PayloadModel):
     name: str = ""
@@ -134,10 +83,9 @@ class TbaAward(PayloadModel):
     @model_validator(mode="before")
     @classmethod
     def normalize_raw(cls, data: Any) -> Any:
-        raw = _as_plain_data(data)
-        if not isinstance(raw, dict):
-            return raw
-        normalized = dict(raw)
+        if not isinstance(data, dict):
+            return data
+        normalized = dict(data)
         recipients = normalized.get("recipient_list") or []
         normalized["recipient_list"] = [
             TbaAwardRecipient.model_validate(recipient) for recipient in recipients
@@ -161,11 +109,10 @@ class TbaMatch(PayloadModel):
     @model_validator(mode="before")
     @classmethod
     def normalize_raw(cls, data: Any) -> Any:
-        raw = _as_plain_data(data)
-        if not isinstance(raw, dict):
-            return raw
-        normalized = dict(raw)
-        normalized["raw"] = raw
+        if not isinstance(data, dict):
+            return data
+        normalized = dict(data)
+        normalized["raw"] = data
         alliances = normalized.get("alliances") or {}
         if isinstance(alliances, dict):
             normalized["alliances"] = {
@@ -182,7 +129,7 @@ class TbaMatch(PayloadModel):
         if not self.score_breakdown:
             return {}
         value = self.score_breakdown.get(color, {})
-        return _as_plain_data(value) if isinstance(value, dict) else {}
+        return value if isinstance(value, dict) else {}
 
 
 class Match(PayloadModel):

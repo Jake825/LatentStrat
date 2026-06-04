@@ -1,0 +1,29 @@
+season: 2016
+defaults: {weight: 1.0, tolerance: 1.0e-6, min_pass_rate: 0.995}
+rules:
+  - name: auto_points_sum
+    status: required
+    lhs: {autoPoints: 1}
+    rhs: {autoBoulderPoints: 1, autoCrossingPoints: 1, autoReachPoints: 1}
+  - name: teleop_points_sum
+    status: required
+    lhs: {teleopPoints: 1}
+    rhs: {teleopBoulderPoints: 1, teleopCrossingPoints: 1, teleopChallengePoints: 1, teleopScalePoints: 1, breachPoints: 1, capturePoints: 1}
+  - name: auto_boulder_points_from_counts
+    status: required
+    lhs: {autoBoulderPoints: 1}
+    rhs: {autoBouldersLow: 5, autoBouldersHigh: 10}
+  - name: teleop_boulder_points_from_counts
+    status: required
+    lhs: {teleopBoulderPoints: 1}
+    rhs: {teleopBouldersLow: 2, teleopBouldersHigh: 5}
+  - name: total_points_sum
+    status: candidate
+    lhs: {totalPoints: 1}
+    rhs: {autoPoints: 1, teleopPoints: 1, foulPoints: 1, adjustPoints: 1}
+    notes: Rare TBA outliers are retained in the raw audit.
+  - name: teleop_crossing_points_from_counts
+    status: disabled
+    lhs: {teleopCrossingPoints: 1}
+    rhs: {position1crossings: 5, position2crossings: 5, position3crossings: 5, position4crossings: 5, position5crossings: 5}
+    notes: Disabled because TBA crossing counters do not map directly to scored teleop crossings.

@@ -9,23 +9,27 @@ CACHE_ROOT = DATA_ROOT / "cache"
 SCOUTING_ROOT = DATA_ROOT / "scouting"
 EMBEDDING_ROOT = DATA_ROOT / "embeddings"
 FEATURE_ROOT = DATA_ROOT / "features"
-PRIOR_FEATURE_ROOT = FEATURE_ROOT / "prior"
+PRETRAINING_DATA_ROOT = DATA_ROOT / "pretraining"
+MATCH_BREAKDOWN_DATA_ROOT = PRETRAINING_DATA_ROOT / "match-breakdown"
+PRETRAINING_FEATURE_ROOT = FEATURE_ROOT / "pretraining"
+PRIOR_FEATURE_ROOT = PRETRAINING_FEATURE_ROOT / "prior"
+MATCH_BREAKDOWN_FEATURE_ROOT = PRETRAINING_FEATURE_ROOT / "match-breakdown"
 SEASON_FEATURE_ROOT = FEATURE_ROOT / "season"
 EVENT_FEATURE_ROOT = FEATURE_ROOT / "event"
 SIDECAR_ROOT = DATA_ROOT / "sidecars"
-WORLD_MODEL_DATA_ROOT = DATA_ROOT / "world_model"
-WORLD_MODEL_FEATURE_ROOT = FEATURE_ROOT / "world_model"
 
 ARTIFACT_ROOT = Path("artifacts")
-PRIOR_ARTIFACT_ROOT = ARTIFACT_ROOT / "prior"
-PRIOR_GRID_ARTIFACT_ROOT = ARTIFACT_ROOT / "prior-grid"
+PRETRAINING_ARTIFACT_ROOT = ARTIFACT_ROOT / "pretraining"
+PRIOR_ARTIFACT_ROOT = PRETRAINING_ARTIFACT_ROOT / "prior"
+PRIOR_GRID_ARTIFACT_ROOT = PRETRAINING_ARTIFACT_ROOT / "prior-grid"
+MATCH_BREAKDOWN_ARTIFACT_ROOT = PRETRAINING_ARTIFACT_ROOT / "match-breakdown"
+EXPERIMENTAL_ARTIFACT_ROOT = ARTIFACT_ROOT / "experimental"
+EXPERIMENTAL_FROZEN_TARGET_ARTIFACT_ROOT = EXPERIMENTAL_ARTIFACT_ROOT / "frozen-targets"
 SEASON_ARTIFACT_ROOT = ARTIFACT_ROOT / "season"
 WALK_FORWARD_ARTIFACT_ROOT = ARTIFACT_ROOT / "walk-forward"
 SMOKE_ARTIFACT_ROOT = ARTIFACT_ROOT / "smoke"
 EVIDENCE_ARTIFACT_ROOT = ARTIFACT_ROOT / "evidence"
 INSPECTION_ARTIFACT_ROOT = ARTIFACT_ROOT / "inspection"
-WORLD_MODEL_ARTIFACT_ROOT = ARTIFACT_ROOT / "world_model"
-MATCH_BREAKDOWN_ARTIFACT_ROOT = WORLD_MODEL_ARTIFACT_ROOT / "match_breakdown"
 
 RUNS_ROOT = Path("runs")
 
@@ -34,7 +38,7 @@ STATBOTICS_CACHE_PATH = CACHE_ROOT / "statbotics.sqlite"
 OPENAI_EMBEDDING_CACHE_PATH = CACHE_ROOT / "openai_embeddings.sqlite"
 SCOUTING_DB_PATH = SCOUTING_ROOT / "scouting.db"
 EMBEDDING_DB_PATH = EMBEDDING_ROOT / "latentstrat_embeddings.sqlite"
-MATCH_BREAKDOWN_CORPUS_PATH = WORLD_MODEL_DATA_ROOT / "match_breakdowns.sqlite"
+MATCH_BREAKDOWN_CORPUS_PATH = MATCH_BREAKDOWN_DATA_ROOT / "corpus.sqlite"
 
 
 def prior_features_path(season: int) -> Path:
@@ -49,16 +53,14 @@ def event_features_path(event_key: str) -> Path:
     return EVENT_FEATURE_ROOT / f"features_{event_key}.parquet"
 
 
-def sidecar_dir(version: str, season: int) -> Path:
-    return SIDECAR_ROOT / f"{version}_{season}"
-
-
 def match_breakdown_features_path(start_season: int, end_season: int) -> Path:
     return (
-        WORLD_MODEL_FEATURE_ROOT
+        MATCH_BREAKDOWN_FEATURE_ROOT
         / f"match_breakdown_alliances_{start_season}_{end_season}.parquet"
     )
 
 
-def match_breakdown_artifact_dir(start_season: int, end_season: int) -> Path:
-    return MATCH_BREAKDOWN_ARTIFACT_ROOT / f"v1_{start_season}_{end_season}"
+def match_breakdown_artifact_dir(
+    start_season: int, end_season: int, artifact_version: str = "v1"
+) -> Path:
+    return MATCH_BREAKDOWN_ARTIFACT_ROOT / f"{artifact_version}_{start_season}_{end_season}"

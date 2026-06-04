@@ -1,0 +1,37 @@
+season: 2022
+defaults: {weight: 1.0, tolerance: 1.0e-6, min_pass_rate: 0.995}
+rules:
+  - name: auto_cargo_total
+    status: required
+    lhs: {autoCargoTotal: 1}
+    rhs: {autoCargoLowerNear: 1, autoCargoLowerFar: 1, autoCargoLowerBlue: 1, autoCargoLowerRed: 1, autoCargoUpperNear: 1, autoCargoUpperFar: 1, autoCargoUpperBlue: 1, autoCargoUpperRed: 1}
+  - name: teleop_cargo_total
+    status: required
+    lhs: {teleopCargoTotal: 1}
+    rhs: {teleopCargoLowerNear: 1, teleopCargoLowerFar: 1, teleopCargoLowerBlue: 1, teleopCargoLowerRed: 1, teleopCargoUpperNear: 1, teleopCargoUpperFar: 1, teleopCargoUpperBlue: 1, teleopCargoUpperRed: 1}
+  - name: match_cargo_total
+    status: required
+    lhs: {matchCargoTotal: 1}
+    rhs: {autoCargoTotal: 1, teleopCargoTotal: 1}
+  - name: auto_points_sum
+    status: required
+    lhs: {autoPoints: 1}
+    rhs: {autoCargoPoints: 1, autoTaxiPoints: 1}
+  - name: teleop_points_sum
+    status: required
+    lhs: {teleopPoints: 1}
+    rhs: {teleopCargoPoints: 1, endgamePoints: 1}
+  - name: total_points_sum
+    status: required
+    lhs: {totalPoints: 1}
+    rhs: {autoPoints: 1, teleopPoints: 1, foulPoints: 1, adjustPoints: 1}
+  - name: auto_cargo_points_from_counts
+    status: disabled
+    lhs: {autoCargoPoints: 1}
+    rhs: {autoCargoLowerNear: 2, autoCargoLowerFar: 2, autoCargoLowerBlue: 2, autoCargoLowerRed: 2, autoCargoUpperNear: 4, autoCargoUpperFar: 4, autoCargoUpperBlue: 4, autoCargoUpperRed: 4}
+    notes: Disabled because raw TBA rows include scoring semantics not captured by this direct equation.
+  - name: teleop_cargo_points_from_counts
+    status: disabled
+    lhs: {teleopCargoPoints: 1}
+    rhs: {teleopCargoLowerNear: 1, teleopCargoLowerFar: 1, teleopCargoLowerBlue: 1, teleopCargoLowerRed: 1, teleopCargoUpperNear: 2, teleopCargoUpperFar: 2, teleopCargoUpperBlue: 2, teleopCargoUpperRed: 2}
+    notes: Disabled because raw TBA rows include scoring semantics not captured by this direct equation.

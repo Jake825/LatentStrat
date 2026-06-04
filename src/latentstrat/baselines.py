@@ -10,7 +10,7 @@ import scipy.sparse as sp
 from sklearn.linear_model import Ridge
 
 from latentstrat.config import LatentStratOptions, default_options
-from latentstrat.data import Split, target_matrix
+from latentstrat.season.data import Split, target_matrix
 
 
 @dataclass

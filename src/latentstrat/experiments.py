@@ -10,11 +10,17 @@ import pandas as pd
 
 from latentstrat.baselines import Baselines, fit_baselines
 from latentstrat.config import LatentStratOptions, default_options
-from latentstrat.data import Split, TargetStats, apply_target_stats, fit_target_stats, make_split
-from latentstrat.evaluation import EvaluationReport, evaluate_model
 from latentstrat.inspection import inspect_embeddings
 from latentstrat.paths import EVIDENCE_ARTIFACT_ROOT
-from latentstrat.training import TrainingDiagnostics, train_model
+from latentstrat.season.data import (
+    Split,
+    TargetStats,
+    apply_target_stats,
+    fit_target_stats,
+    make_split,
+)
+from latentstrat.season.evaluate import EvaluationReport, evaluate_model
+from latentstrat.season.train import TrainingDiagnostics, train_model
 
 
 @dataclass

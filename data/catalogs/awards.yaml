@@ -1,0 +1,73 @@
+# Official descriptions are sourced from https://www.firstinspires.org/resources/library/frc/awards.
+# Variants are checked-in paraphrases used to make the frozen semantic prototype less wording-specific.
+awards:
+  - id: impact
+    supervised_category: Impact
+    tba_types: [0]
+    name_patterns: [impact, chairman]
+    supervised_targets: {impact: 1.0, ei: 1.0}
+    family: team_attribute
+    description: The FIRST Impact Award honors the team that best represents a model for other teams to emulate and best embodies the purpose and goals of FIRST.
+    variants:
+      - A model FIRST Robotics Competition team with broad, sustained impact that other teams can emulate.
+      - A team that embodies the purpose and goals of FIRST through exemplary outreach, culture, and impact.
+  - id: ei
+    supervised_category: EI
+    tba_types: [9]
+    name_patterns: [engineering inspiration]
+    supervised_targets: {impact: 0.0, ei: 1.0}
+    family: team_attribute
+    description: The Engineering Inspiration Award celebrates outstanding success in advancing respect and appreciation for engineering within a team's school or organization and community.
+    variants:
+      - A team that expands respect and appreciation for engineering in its organization and community.
+      - Outstanding engineering inspiration through community and school impact.
+  - id: auto
+    supervised_category: Auto
+    tba_types: [74]
+    name_patterns: [autonomous]
+    supervised_targets: {auto: 1.0}
+    family: machine_creativity_innovation
+    description: The Autonomous Award celebrates consistent, reliable, high-performance robot operation during autonomous actions in match play.
+    variants:
+      - Reliable autonomous sensing, positioning, mechanism control, and task execution.
+      - Consistent high-performance autonomous robot behavior during matches.
+  - id: quality
+    supervised_category: Quality
+    tba_types: [18]
+    name_patterns: [quality]
+    supervised_targets: {quality: 1.0}
+    family: machine_creativity_innovation
+    description: The Quality Award celebrates machine robustness in concept and fabrication.
+    variants:
+      - A robust robot whose design and fabrication demonstrate quality.
+      - Machine reliability and build quality expressed through sound construction.
+  - id: design
+    supervised_category: Design
+    tba_types: [17]
+    name_patterns: [industrial design]
+    supervised_targets: {design: 1.0}
+    family: machine_creativity_innovation
+    description: The Industrial Design Award celebrates a machine that balances form, function, and aesthetics through industrial design principles.
+    variants:
+      - Industrial design that integrates robot form, function, and visual aesthetics.
+      - A machine with deliberate, effective, and visually coherent industrial design.
+  - id: control
+    supervised_category: Control
+    tba_types: [29]
+    name_patterns: [innovation in control]
+    supervised_targets: {control: 1.0}
+    family: machine_creativity_innovation
+    description: The Innovation in Control Award celebrates an innovative electrical, mechanical, or software control system that provides unique machine functions.
+    variants:
+      - Innovative robot control using electrical, mechanical, or software components.
+      - A distinctive control-system application that enables unique machine behavior.
+  - id: excellence
+    supervised_category: Excellence
+    tba_types: [21]
+    name_patterns: [excellence in engineering, engineering excellence]
+    supervised_targets: {excellence: 1.0}
+    family: machine_creativity_innovation
+    description: The Excellence in Engineering Award celebrates a machine whose engineering solution is designed so components work together seamlessly.
+    variants:
+      - An integrated engineering solution whose components work together effectively.
+      - Machine engineering excellence through coherent subsystem integration.
