@@ -108,32 +108,34 @@ def cosine_neighbors(
 
 
 def _world_options(payload: dict[str, Any]) -> WorldModelOptions:
-    if payload.get("checkpoint_schema_version") == 6:
+    if payload.get("checkpoint_schema_version") in {6, 7}:
         return WorldModelOptions.model_validate(payload.get("world_model") or {})
     return WorldModelOptions(enabled=False)
 
 
 def build_season_model(payload: dict[str, Any]) -> SetTransformerModel:
     state = payload.get("model_state_dict")
-    if not isinstance(state, dict) or "Z_base.weight" not in state or "Z_event.weight" not in state:
+    if not isinstance(state, dict) or "Z_base.weight" not in state:
         raise ValueError("Checkpoint does not contain a supported season model state.")
     opts = LatentStratOptions.model_validate(
         payload.get("options", default_options().model_dump(mode="json"))
     )
     base_weight = state["Z_base.weight"]
-    event_weight = state["Z_event.weight"]
+    event_weight = state.get("Z_event.weight")
     model = init_model(
         int(base_weight.shape[0]),
         int(base_weight.shape[1]),
         len(opts.target_map),
         len(opts.binary_targets),
         opts,
-        num_event_teams=int(event_weight.shape[0]),
+        num_event_teams=int(event_weight.shape[0]) if event_weight is not None else 1,
         num_endgame_classes=len(opts.endgame_class_order),
         num_awards=len(opts.award_targets),
         world_model_opts=_world_options(payload),
     )
-    model.load_state_dict(state, strict=payload.get("checkpoint_schema_version") == 6)
+    model.load_state_dict(
+        state, strict=payload.get("checkpoint_schema_version") in {6, 7}
+    )
     model.eval()
     return model
 
@@ -164,7 +166,10 @@ def checkpoint_feature_compatibility(
     event = state.get("Z_event.weight")
     if not torch.is_tensor(base) or base.ndim != 2:
         reasons.append("checkpoint has no two-dimensional Z_base table")
-    if not torch.is_tensor(event) or event.ndim != 2:
+    state_model = (payload.get("options") or {}).get("state_model", "base-plus-event")
+    if state_model != "static-z-base" and (
+        not torch.is_tensor(event) or event.ndim != 2
+    ):
         reasons.append("checkpoint has no two-dimensional Z_event table")
     if torch.is_tensor(base) and torch.is_tensor(event) and base.shape[1] != event.shape[1]:
         reasons.append("base and event embedding dimensions disagree")
@@ -247,6 +252,10 @@ def season_embedding_frame(
 def season_event_trajectory_frame(
     payload: dict[str, Any],
 ) -> tuple[pd.DataFrame, tuple[str, ...]]:
+    if (payload.get("options") or {}).get("state_model") == "static-z-base":
+        raise ValueError(
+            "Static Z_base checkpoints have no event states or temporal trajectories."
+        )
     model = build_season_model(payload)
     base_map = {
         str(key): int(value)

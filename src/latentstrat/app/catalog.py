@@ -118,6 +118,8 @@ def _kind_for(path: Path) -> ArtifactKind | None:
         ):
             return ArtifactKind.PRIOR_CHECKPOINT
         return ArtifactKind.SEASON_CHECKPOINT
+    if path.suffix.lower() == ".pt" and "checkpoints" in lower_parts:
+        return ArtifactKind.SEASON_CHECKPOINT
     if name in {"v5_checkpoint.pt", "full_season_checkpoint.pt"}:
         return ArtifactKind.SEASON_CHECKPOINT
     if name in {"model.pt", "eval_model.pt"} and "match-breakdown" in lower_parts:
@@ -141,6 +143,16 @@ def _kind_for(path: Path) -> ArtifactKind | None:
         "feature_training_diagnostics.json",
         "prior_training_history.csv",
         "training_history.csv",
+        "auxiliary_metrics.csv",
+        "parameter_utilization.csv",
+        "initialization_selection.csv",
+        "optimization_grid.csv",
+        "development_confirmation.csv",
+        "development_selection.json",
+        "hierarchical_bootstrap.csv",
+        "interaction_decisions.csv",
+        "external_comparison.csv",
+        "external_verdict.json",
         "validation_report.json",
         "walk_forward_history.csv",
     }:

@@ -119,9 +119,7 @@ def _v57_score_targets_2026(breakdown: dict[str, Any]) -> dict[str, float]:
     }
 
 
-def v57_score_targets_for_breakdown(
-    season: int, breakdown: dict[str, Any]
-) -> dict[str, float]:
+def v57_score_targets_for_breakdown(season: int, breakdown: dict[str, Any]) -> dict[str, float]:
     """Return generic V5.7 match-spine targets for a season-specific breakdown."""
 
     if int(season) == 2026:
@@ -140,9 +138,7 @@ def v57_continuous_target_names(opts: LatentStratOptions | None = None) -> list[
 
 def v57_binary_target_names(opts: LatentStratOptions | None = None) -> list[str]:
     opts = opts or default_options()
-    return _alliance_columns(
-        tuple(opts.bonus_binary_targets) + tuple(opts.special_binary_targets)
-    )
+    return _alliance_columns(tuple(opts.bonus_binary_targets) + tuple(opts.special_binary_targets))
 
 
 def _normalize_endgame_status(value: Any) -> str:
@@ -584,6 +580,8 @@ def _team_key_to_v56_base_idx(team_key: str, *, max_team_number: int = V56_MAX_T
 
 def make_v5_team_index_maps(
     table: pd.DataFrame,
+    *,
+    compact_base: bool = False,
 ) -> tuple[pd.DataFrame, dict[str, int], dict[str, int]]:
     key_columns = _team_key_columns(table)
     missing = [column for column in key_columns if column not in table.columns]
@@ -599,7 +597,11 @@ def make_v5_team_index_maps(
             if pd.notna(value) and str(value)
         }
     )
-    index_map = {key: _team_key_to_v56_base_idx(key) for key in keys}
+    index_map = (
+        {key: idx + 1 for idx, key in enumerate(keys)}
+        if compact_base
+        else {key: _team_key_to_v56_base_idx(key) for key in keys}
+    )
     event_pairs = sorted(
         {
             (str(row["event_key"]), str(row[column]))
@@ -609,8 +611,7 @@ def make_v5_team_index_maps(
         }
     )
     event_index_map = {
-        f"{event_key}::{team_key}": idx + 1
-        for idx, (event_key, team_key) in enumerate(event_pairs)
+        f"{event_key}::{team_key}": idx + 1 for idx, (event_key, team_key) in enumerate(event_pairs)
     }
     out = table.copy()
     for column in key_columns:
@@ -652,9 +653,7 @@ def _stratified_event_comp_validation_mask(
 ) -> np.ndarray:
     missing = [column for column in ("event_key", "comp_level") if column not in table.columns]
     if missing:
-        raise KeyError(
-            "stratified-event-comp split requires columns: " + ", ".join(missing)
-        )
+        raise KeyError("stratified-event-comp split requires columns: " + ", ".join(missing))
     strata = pd.DataFrame(
         {
             "row_index": np.arange(len(table)),

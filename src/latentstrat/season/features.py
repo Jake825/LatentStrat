@@ -251,9 +251,7 @@ def add_award_features(
     if table.empty:
         return table.copy()
     out = table.copy()
-    slot_prefixes = [
-        f"{color}_team_{slot}" for color in ("red", "blue") for slot in (1, 2, 3)
-    ]
+    slot_prefixes = [f"{color}_team_{slot}" for color in ("red", "blue") for slot in (1, 2, 3)]
     for prefix in slot_prefixes:
         for axis in opts.award_targets:
             out[f"{prefix}_award_{axis}"] = np.nan
@@ -345,9 +343,7 @@ def _ranking_maps(rankings: pd.DataFrame) -> dict[str, dict[str, int]]:
     return maps
 
 
-def _passed_over_team(
-    rank_map: dict[str, int], selected: set[str], pick_team_key: str
-) -> str:
+def _passed_over_team(rank_map: dict[str, int], selected: set[str], pick_team_key: str) -> str:
     pick_rank = rank_map.get(pick_team_key)
     if pick_rank is None:
         return ""
@@ -710,7 +706,8 @@ def train_feature_table(
             table, sidecar_tables, loaded_world_model
         )
     indexed, team_index_map, team_event_index_map = make_v5_team_index_maps(
-        _validate_feature_table(table)
+        _validate_feature_table(table),
+        compact_base=opts.state_model == "static-z-base",
     )
     if venue_mode and venue_event_key is not None:
         indexed = indexed[indexed["event_key"].astype(str) == str(venue_event_key)].reset_index(
@@ -721,16 +718,18 @@ def train_feature_table(
     v57_target_stats = fit_v57_target_stats(indexed, split.train_mask, opts)
     prepared = apply_v57_target_stats(apply_target_stats(indexed, target_stats), v57_target_stats)
     baselines = fit_baselines(prepared, split, opts)
-    indexed_sidecars = index_sidecar_tables(
-        attached_sidecars, team_index_map, team_event_index_map
-    )
+    indexed_sidecars = index_sidecar_tables(attached_sidecars, team_index_map, team_event_index_map)
     prior_vectors_applied = 0
     training_model = initial_model
     if prior_checkpoint is not None:
         prior_table = load_prior_embedding_table(prior_checkpoint)
         if training_model is None:
             training_model = init_model(
-                int(prior_table.shape[0]),
+                (
+                    max(team_index_map.values(), default=0) + 1
+                    if opts.state_model == "static-z-base"
+                    else int(prior_table.shape[0])
+                ),
                 opts.latent_dim,
                 len(opts.target_map),
                 len(opts.binary_targets),
@@ -744,6 +743,7 @@ def train_feature_table(
             training_model,
             prior_checkpoint,
             latent_dim=opts.latent_dim,
+            team_index_map=(team_index_map if opts.state_model == "static-z-base" else None),
         )
     frozen_embedding_tables = ("Z_base", "Z_event") if freeze_team_embeddings else ()
     model, history, diagnostics = train_model(
@@ -768,9 +768,7 @@ def train_feature_table(
             )
         ),
     )
-    report = evaluate_model(
-        model, prepared, split, target_stats, opts, baselines, v57_target_stats
-    )
+    report = evaluate_model(model, prepared, split, target_stats, opts, baselines, v57_target_stats)
     result = FeatureTrainingResult(
         table=indexed,
         prepared=prepared,
@@ -871,9 +869,7 @@ def write_feature_training_artifacts(result: FeatureTrainingResult, output_dir: 
         for name, table in result.sidecar_tables.items():
             table.to_csv(out / f"feature_{name}_sidecar.csv", index=False)
     result.report.set_attention.to_csv(out / "feature_set_attention.csv", index=False)
-    result.report.zero_out_diagnostics.to_csv(
-        out / "feature_zero_out_diagnostics.csv", index=False
-    )
+    result.report.zero_out_diagnostics.to_csv(out / "feature_zero_out_diagnostics.csv", index=False)
     write_feature_artifact_plots(result, out)
     write_feature_phase_visuals(
         model=result.model,
@@ -887,31 +883,31 @@ def write_feature_training_artifacts(result: FeatureTrainingResult, output_dir: 
         output_dir=out,
     )
     checkpoint = {
-            "model_state_dict": result.model.state_dict(),
-            "options": result.model.opts.model_dump(mode="json"),
-            "target_stats": {
-                "target_names": result.target_stats.target_names,
-                "mu": result.target_stats.mu.tolist(),
-                "sigma": result.target_stats.sigma.tolist(),
-                "is_constant": result.target_stats.is_constant.tolist(),
-            },
-            "v57_target_stats": {
-                "target_names": result.v57_target_stats.target_names,
-                "mu": result.v57_target_stats.mu.tolist(),
-                "sigma": result.v57_target_stats.sigma.tolist(),
-                "is_constant": result.v57_target_stats.is_constant.tolist(),
-            }
-            if result.v57_target_stats is not None
-            else None,
-            "team_base_index_map": result.team_index_map,
-            "team_event_index_map": result.team_event_index_map,
-            "prior_checkpoint": result.prior_checkpoint,
-            "prior_vectors_applied": result.prior_vectors_applied,
-            "split_policy": result.split_policy,
-            "split_fallback_reason": result.split_fallback_reason,
-            "frozen_embedding_tables": list(result.frozen_embedding_tables),
-            "sidecar_tables": sorted(result.sidecar_tables) if result.sidecar_tables else [],
+        "model_state_dict": result.model.state_dict(),
+        "options": result.model.opts.model_dump(mode="json"),
+        "target_stats": {
+            "target_names": result.target_stats.target_names,
+            "mu": result.target_stats.mu.tolist(),
+            "sigma": result.target_stats.sigma.tolist(),
+            "is_constant": result.target_stats.is_constant.tolist(),
+        },
+        "v57_target_stats": {
+            "target_names": result.v57_target_stats.target_names,
+            "mu": result.v57_target_stats.mu.tolist(),
+            "sigma": result.v57_target_stats.sigma.tolist(),
+            "is_constant": result.v57_target_stats.is_constant.tolist(),
         }
+        if result.v57_target_stats is not None
+        else None,
+        "team_base_index_map": result.team_index_map,
+        "team_event_index_map": result.team_event_index_map,
+        "prior_checkpoint": result.prior_checkpoint,
+        "prior_vectors_applied": result.prior_vectors_applied,
+        "split_policy": result.split_policy,
+        "split_fallback_reason": result.split_fallback_reason,
+        "frozen_embedding_tables": list(result.frozen_embedding_tables),
+        "sidecar_tables": sorted(result.sidecar_tables) if result.sidecar_tables else [],
+    }
     world_model_options = result.world_model_options or WorldModelOptions(enabled=False)
     checkpoint["checkpoint_schema_version"] = 6
     checkpoint["world_model"] = world_model_options.model_dump(mode="json")

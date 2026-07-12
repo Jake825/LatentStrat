@@ -59,6 +59,7 @@ class LossMetrics:
     foul_loss: float = 0.0
     bonus_loss: float = 0.0
     special_loss: float = 0.0
+    auto_loss: float = 0.0
     rank_loss: float = 0.0
     playoff_loss: float = 0.0
     selection_loss: float = 0.0
@@ -88,6 +89,7 @@ TASK_NAMES = (
     "continuous",
     "win",
     "endgame",
+    "auto",
     "awards",
     "atomic",
     "foul",
@@ -120,6 +122,7 @@ class MatchTensorDataset(Dataset):
         v57_cont_targets: Tensor | None = None,
         v57_bin_targets: Tensor | None = None,
         wm_award_targets: Tensor | None = None,
+        auto_targets: Tensor | None = None,
     ) -> None:
         self.red_team_idx = red_team_idx
         self.blue_team_idx = blue_team_idx
@@ -145,6 +148,11 @@ class MatchTensorDataset(Dataset):
             wm_award_targets
             if wm_award_targets is not None
             else torch.empty((len(red_team_idx), 6, 0), dtype=torch.float32)
+        )
+        self.auto_targets = (
+            auto_targets
+            if auto_targets is not None
+            else torch.empty((len(red_team_idx), 0), dtype=torch.long)
         )
 
     @classmethod
@@ -173,11 +181,10 @@ class MatchTensorDataset(Dataset):
             else np.empty((len(table), 0), dtype=float)
         )
         endgame_targets = endgame_target_matrix(table, opts)
+        auto_targets = auto_target_matrix(table, opts)
         award_targets = award_target_tensor(table, opts)
         world_model_opts = world_model_opts or WorldModelOptions()
-        wm_award_targets = world_award_target_tensor(
-            table, world_model_opts.award_embedding.width
-        )
+        wm_award_targets = world_award_target_tensor(table, world_model_opts.award_embedding.width)
         return cls(
             red_team_idx=torch.as_tensor(matrices[0], dtype=torch.long),
             blue_team_idx=torch.as_tensor(matrices[1], dtype=torch.long),
@@ -192,6 +199,7 @@ class MatchTensorDataset(Dataset):
             v57_cont_targets=torch.as_tensor(v57_cont_targets, dtype=torch.float32),
             v57_bin_targets=torch.as_tensor(v57_bin_targets, dtype=torch.float32),
             wm_award_targets=torch.as_tensor(wm_award_targets, dtype=torch.float32),
+            auto_targets=torch.as_tensor(auto_targets, dtype=torch.long),
         )
 
     def __len__(self) -> int:
@@ -212,6 +220,7 @@ class MatchTensorDataset(Dataset):
             self.v57_cont_targets[index],
             self.v57_bin_targets[index],
             self.wm_award_targets[index],
+            self.auto_targets[index],
         )
 
 
@@ -555,6 +564,19 @@ def endgame_target_matrix(table: pd.DataFrame, opts: LatentStratOptions) -> np.n
     return result
 
 
+def auto_target_matrix(table: pd.DataFrame, opts: LatentStratOptions) -> np.ndarray:
+    mapping = {name: idx for idx, name in enumerate(opts.auto_class_order)}
+    columns = _slot_columns("auto_status")
+    result = np.zeros((len(table), 6), dtype=np.int64)
+    for idx, column in enumerate(columns):
+        if column not in table.columns:
+            continue
+        result[:, idx] = [
+            mapping.get(str(value), 0) if pd.notna(value) else 0 for value in table[column]
+        ]
+    return result
+
+
 def award_target_tensor(table: pd.DataFrame, opts: LatentStratOptions) -> np.ndarray:
     result = np.full((len(table), 6, len(opts.award_targets)), np.nan, dtype=np.float32)
     slot_prefixes = [f"{color}_team_{slot}" for color in ("red", "blue") for slot in (1, 2, 3)]
@@ -631,6 +653,8 @@ def active_event_embedding_l2(
     blue_event_idx: Tensor,
     coefficient: float,
 ) -> Tensor:
+    if not hasattr(model, "Z_event"):
+        return torch.zeros((), dtype=model.Z_base.weight.dtype, device=red_event_idx.device)
     return _active_embedding_l2(
         model.Z_event,
         torch.cat([red_event_idx, blue_event_idx], dim=1),
@@ -692,6 +716,7 @@ def model_loss(
     v57_cont_targets: Tensor | None = None,
     v57_bin_targets: Tensor | None = None,
     wm_award_targets: Tensor | None = None,
+    auto_targets: Tensor | None = None,
 ) -> tuple[Tensor, LossMetrics, object]:
     opts = opts or default_options()
     pred = (forward_model or model)(
@@ -741,6 +766,24 @@ def model_loss(
             raw_endgame_loss = zero
             endgame_term = zero
 
+    if auto_targets is None or predictions["auto"].numel() == 0:
+        raw_auto_loss = zero
+        auto_term = zero
+        auto_active = False
+    else:
+        cumulative = ordinal_targets_to_cumulative(auto_targets, len(opts.auto_class_order))
+        valid = ~slot_missing
+        if torch.any(valid):
+            raw_auto_loss = F.binary_cross_entropy_with_logits(
+                predictions["auto"][valid], cumulative[valid]
+            )
+            auto_term = model.balance_loss("auto", raw_auto_loss, True)
+            auto_active = True
+        else:
+            raw_auto_loss = zero
+            auto_term = zero
+            auto_active = False
+
     if award_targets is None or predictions["award"].numel() == 0:
         raw_award_loss = zero
         award_term = zero
@@ -782,9 +825,7 @@ def model_loss(
         raw_foul_loss, foul_active = zero, False
     foul_term = model.balance_loss("foul", raw_foul_loss, foul_active)
     if bonus_targets.numel() and predictions["bonus"].numel():
-        raw_bonus_loss, bonus_active = _masked_bce_with_logits(
-            predictions["bonus"], bonus_targets
-        )
+        raw_bonus_loss, bonus_active = _masked_bce_with_logits(predictions["bonus"], bonus_targets)
     else:
         raw_bonus_loss, bonus_active = zero, False
     bonus_term = model.balance_loss("bonus", raw_bonus_loss, bonus_active)
@@ -830,6 +871,7 @@ def model_loss(
         cont_term
         + bin_term
         + endgame_term
+        + auto_term
         + award_term
         + atomic_term
         + foul_term
@@ -853,6 +895,7 @@ def model_loss(
         foul_loss=float(raw_foul_loss.detach().cpu()),
         bonus_loss=float(raw_bonus_loss.detach().cpu()),
         special_loss=float(raw_special_loss.detach().cpu()),
+        auto_loss=float(raw_auto_loss.detach().cpu()) if auto_active else math.nan,
         wm_award_loss=float(raw_wm_award_loss.detach().cpu()),
     )
     return total, metrics, pred
@@ -906,6 +949,8 @@ def create_tensorboard_writer(log_dir: str) -> Any:
 
 
 def freeze_for_venue_mode(model: SetTransformerModel) -> None:
+    if not hasattr(model, "Z_event"):
+        raise ValueError("venue_mode is unavailable for static-z-base models.")
     for parameter in model.parameters():
         parameter.requires_grad = False
     model.Z_event.weight.requires_grad = True
@@ -913,7 +958,8 @@ def freeze_for_venue_mode(model: SetTransformerModel) -> None:
 
 def freeze_team_embedding_tables(model: SetTransformerModel) -> None:
     model.Z_base.weight.requires_grad = False
-    model.Z_event.weight.requires_grad = False
+    if hasattr(model, "Z_event"):
+        model.Z_event.weight.requires_grad = False
 
 
 def _make_loader(
@@ -959,7 +1005,8 @@ def _loss_from_batch(
         v57_cont,
         v57_bin,
         wm_award,
-    ) = batch
+    ) = batch[:13]
+    auto = batch[13] if len(batch) > 13 else None
     return model_loss(
         model,
         red,
@@ -978,6 +1025,7 @@ def _loss_from_batch(
         v57_cont_targets=v57_cont,
         v57_bin_targets=v57_bin,
         wm_award_targets=wm_award,
+        auto_targets=auto,
     )
 
 
@@ -988,9 +1036,7 @@ def _rank_loss_from_batch(
     higher_score = model.team_value(higher, higher_event)
     lower_score = model.team_value(lower, lower_event)
     target = torch.ones_like(higher_score)
-    return F.margin_ranking_loss(
-        higher_score, lower_score, target, margin=float(opts.rank_margin)
-    )
+    return F.margin_ranking_loss(higher_score, lower_score, target, margin=float(opts.rank_margin))
 
 
 def _playoff_loss_from_batch(
@@ -1040,6 +1086,7 @@ def _metrics_to_losses(metrics: LossMetrics) -> dict[str, float]:
         "continuous": metrics.continuous_loss,
         "win": metrics.binary_loss,
         "endgame": metrics.endgame_loss,
+        "auto": metrics.auto_loss,
         "awards": metrics.award_loss,
         "atomic": metrics.atomic_loss,
         "foul": metrics.foul_loss,
@@ -1068,8 +1115,7 @@ def _accumulate_loss(
 
 def _epoch_task_means(sums: dict[str, float], weights: dict[str, float]) -> dict[str, float]:
     return {
-        name: (sums[name] / weights[name] if weights[name] > 0 else math.nan)
-        for name in TASK_NAMES
+        name: (sums[name] / weights[name] if weights[name] > 0 else math.nan) for name in TASK_NAMES
     }
 
 
@@ -1079,28 +1125,96 @@ def _write_feature_tensorboard_epoch(
     model: SetTransformerModel,
     row: dict[str, float | int],
     task_means: dict[str, float],
+    task_counts: dict[str, float],
+    validation_task_means: dict[str, float],
+    validation_task_counts: dict[str, float],
     active_sidecars: set[str],
 ) -> None:
     epoch = int(row["epoch"])
+    writer.add_scalar("Loss/Train/Total", float(row["train_loss"]), epoch)
     writer.add_scalar("Loss/Train_Total", float(row["train_loss"]), epoch)
     validation = float(row["validation_loss"])
     if math.isfinite(validation):
+        writer.add_scalar("Loss/Validation/Total", validation, epoch)
         writer.add_scalar("Loss/Validation_Total", validation, epoch)
-    learning_rate = float(row.get("learning_rate", math.nan))
-    if math.isfinite(learning_rate):
-        writer.add_scalar("LR/base", learning_rate, epoch)
+    for key, raw_value in row.items():
+        if not key.startswith("learning_rate_group_"):
+            continue
+        value = float(raw_value)
+        if math.isfinite(value):
+            writer.add_scalar(
+                f"LearningRate/group_{key.removeprefix('learning_rate_group_')}",
+                value,
+                epoch,
+            )
+            if key == "learning_rate_group_0":
+                writer.add_scalar("LR/base", value, epoch)
     for task_name, value in task_means.items():
         if math.isfinite(value):
             writer.add_scalar(f"LossRaw/{task_name}", value, epoch)
+            writer.add_scalar(f"Loss/Train/{task_name}", value, epoch)
+        validation_value = validation_task_means.get(task_name, math.nan)
+        if math.isfinite(validation_value):
+            writer.add_scalar(f"Loss/Validation/{task_name}", validation_value, epoch)
         writer.add_scalar(
             f"Active/{task_name}",
             1.0 if (math.isfinite(value) or task_name in active_sidecars) else 0.0,
+            epoch,
+        )
+        writer.add_scalar(f"ActiveCount/Train/{task_name}", task_counts.get(task_name, 0), epoch)
+        writer.add_scalar(
+            f"ActiveCount/Validation/{task_name}",
+            validation_task_counts.get(task_name, 0),
             epoch,
         )
     for task_name, parameter in model.loss_balancer.log_vars.items():
         log_var = float(parameter.detach().cpu())
         writer.add_scalar(f"LogVar/{task_name}", log_var, epoch)
         writer.add_scalar(f"Weights/{task_name}_precision", math.exp(-log_var), epoch)
+    scalar_fields = {
+        "Runtime/EpochSeconds": "epoch_seconds",
+        "Runtime/SamplesPerSecond": "samples_per_second",
+        "Runtime/OptimizerSteps": "optimizer_steps",
+        "Optimization/Season/PreclipGradientNormMean": "preclip_grad_norm_mean",
+        "Optimization/Season/PreclipGradientNormMax": "preclip_grad_norm_max",
+        "Optimization/Season/ClippingFraction": "clipping_fraction",
+        "Parameters/Nominal": "nominal_parameter_count",
+        "Parameters/Trainable": "trainable_parameter_count",
+        "Parameters/GradientReceiving": "gradient_receiving_parameter_count",
+        "Data/TrainRows": "train_rows",
+        "Data/ValidationRows": "validation_rows",
+        "Data/TrainEvents": "train_events",
+        "Data/ValidationEvents": "validation_events",
+        "Data/ActiveTeams": "active_team_rows",
+        "State/ZBase/ActiveRows": "active_team_rows",
+        "State/ZBase/NormMean": "z_base_norm_mean",
+        "State/ZBase/NormStd": "z_base_norm_std",
+        "State/ZBase/NormP05": "z_base_norm_p05",
+        "State/ZBase/NormP50": "z_base_norm_p50",
+        "State/ZBase/NormP95": "z_base_norm_p95",
+        "State/ZBase/GhostNorm": "z_base_ghost_norm",
+        "State/ZBase/UpdateNormMean": "z_base_update_norm_mean",
+        "Metrics/Train/ScoreMAE": "train_score_mae",
+        "Metrics/Train/ScoreRMSE": "train_score_rmse",
+        "Metrics/Train/ScoreDifferentialMAE": "train_score_differential_mae",
+        "Metrics/Train/ScoreDifferentialRMSE": "train_score_differential_rmse",
+        "Metrics/Train/WinnerAccuracy": "train_winner_accuracy",
+        "Metrics/Train/WinnerBrier": "train_winner_brier",
+        "Metrics/Train/WinnerLogLoss": "train_winner_log_loss",
+        "Metrics/Train/WinnerECE": "train_winner_ece",
+        "Metrics/Validation/ScoreMAE": "validation_score_mae",
+        "Metrics/Validation/ScoreRMSE": "validation_score_rmse",
+        "Metrics/Validation/ScoreDifferentialMAE": "validation_score_differential_mae",
+        "Metrics/Validation/ScoreDifferentialRMSE": "validation_score_differential_rmse",
+        "Metrics/Validation/WinnerAccuracy": "validation_winner_accuracy",
+        "Metrics/Validation/WinnerBrier": "validation_winner_brier",
+        "Metrics/Validation/WinnerLogLoss": "validation_winner_log_loss",
+        "Metrics/Validation/WinnerECE": "validation_winner_ece",
+    }
+    for tag, field in scalar_fields.items():
+        value = float(row.get(field, math.nan))
+        if math.isfinite(value):
+            writer.add_scalar(tag, value, epoch)
 
 
 def _sidecar_loader(
@@ -1177,9 +1291,7 @@ def evaluate_loss(
         for batch in data_loader:
             batch = batch_to_device(batch, device)
             with torch.amp.autocast(device_type="cuda", enabled=amp_enabled):
-                loss, _, _ = _loss_from_batch(
-                    model, batch, opts, positive_weights, active_model
-                )
+                loss, _, _ = _loss_from_batch(model, batch, opts, positive_weights, active_model)
             batch_size = int(batch[0].shape[0])
             total_loss += float(loss.detach().cpu()) * batch_size
             total_rows += batch_size
@@ -1187,6 +1299,229 @@ def evaluate_loss(
         model.train()
         active_model.train()
     return total_loss / max(total_rows, 1)
+
+
+def evaluate_task_means(
+    model: SetTransformerModel,
+    data_loader: DataLoader,
+    opts: LatentStratOptions,
+    positive_weights: Tensor,
+    device: torch.device,
+    *,
+    forward_model: torch.nn.Module | None = None,
+    amp_enabled: bool = False,
+) -> tuple[dict[str, float], dict[str, float]]:
+    sums, weights = _empty_epoch_accumulators()
+    was_training = model.training
+    model.eval()
+    active_model = forward_model or model
+    active_model.eval()
+    with torch.inference_mode():
+        for batch in data_loader:
+            batch = batch_to_device(batch, device)
+            with torch.amp.autocast(device_type="cuda", enabled=amp_enabled):
+                _, metrics, _ = _loss_from_batch(model, batch, opts, positive_weights, active_model)
+            batch_rows = int(batch[0].shape[0])
+            for task_name, value in _metrics_to_losses(metrics).items():
+                _accumulate_loss(sums, weights, task_name, value, batch_rows)
+    if was_training:
+        model.train()
+        active_model.train()
+    return _epoch_task_means(sums, weights), weights
+
+
+def evaluate_forecast_metrics(
+    model: SetTransformerModel,
+    data_loader: DataLoader,
+    device: torch.device,
+    target_mu: Tensor,
+    target_sigma: Tensor,
+    *,
+    forward_model: torch.nn.Module | None = None,
+    amp_enabled: bool = False,
+) -> dict[str, float]:
+    predicted_scores = []
+    actual_scores = []
+    probabilities = []
+    outcomes = []
+    was_training = model.training
+    model.eval()
+    active_model = forward_model or model
+    active_model.eval()
+    with torch.inference_mode():
+        for batch in data_loader:
+            batch = batch_to_device(batch, device)
+            with torch.amp.autocast(device_type="cuda", enabled=amp_enabled):
+                output = active_model(
+                    batch[0],
+                    batch[1],
+                    red_event_idx=batch[2],
+                    blue_event_idx=batch[3],
+                    red_missing_mask=batch[4],
+                    blue_missing_mask=batch[5],
+                )
+            continuous = output.cont_z * target_sigma + target_mu
+            actual_continuous = batch[6] * target_sigma + target_mu
+            if continuous.shape[1] >= 4:
+                predicted_scores.append(
+                    torch.stack(
+                        [continuous[:, :2].sum(dim=1), continuous[:, 2:4].sum(dim=1)],
+                        dim=1,
+                    ).cpu()
+                )
+                actual_scores.append(
+                    torch.stack(
+                        [
+                            actual_continuous[:, :2].sum(dim=1),
+                            actual_continuous[:, 2:4].sum(dim=1),
+                        ],
+                        dim=1,
+                    ).cpu()
+                )
+            if output.bin_logits.shape[1] and batch[7].shape[1]:
+                probabilities.append(torch.sigmoid(output.bin_logits[:, 0]).cpu())
+                outcomes.append(batch[7][:, 0].cpu())
+    if was_training:
+        model.train()
+        active_model.train()
+    result = {
+        "score_mae": math.nan,
+        "score_rmse": math.nan,
+        "score_differential_mae": math.nan,
+        "score_differential_rmse": math.nan,
+        "winner_accuracy": math.nan,
+        "winner_brier": math.nan,
+        "winner_log_loss": math.nan,
+        "winner_ece": math.nan,
+    }
+    if predicted_scores:
+        predicted = torch.cat(predicted_scores).numpy()
+        actual = torch.cat(actual_scores).numpy()
+        valid = np.isfinite(predicted) & np.isfinite(actual)
+        errors = predicted - actual
+        if valid.any():
+            result["score_mae"] = float(np.mean(np.abs(errors[valid])))
+            result["score_rmse"] = float(np.sqrt(np.mean(errors[valid] ** 2)))
+        predicted_difference = predicted[:, 0] - predicted[:, 1]
+        actual_difference = actual[:, 0] - actual[:, 1]
+        diff_valid = np.isfinite(predicted_difference) & np.isfinite(actual_difference)
+        if diff_valid.any():
+            diff_error = predicted_difference[diff_valid] - actual_difference[diff_valid]
+            result["score_differential_mae"] = float(np.mean(np.abs(diff_error)))
+            result["score_differential_rmse"] = float(np.sqrt(np.mean(diff_error**2)))
+    if probabilities:
+        probability = torch.cat(probabilities).numpy()
+        outcome = torch.cat(outcomes).numpy()
+        valid = np.isfinite(probability) & np.isfinite(outcome)
+        if valid.any():
+            probability = np.clip(probability[valid], 1e-7, 1 - 1e-7)
+            outcome = outcome[valid]
+            result["winner_accuracy"] = float(np.mean((probability >= 0.5) == (outcome >= 0.5)))
+            result["winner_brier"] = float(np.mean((probability - outcome) ** 2))
+            result["winner_log_loss"] = float(
+                np.mean(-(outcome * np.log(probability) + (1 - outcome) * np.log(1 - probability)))
+            )
+            edges = np.linspace(0, 1, 11)
+            bin_index = np.clip(np.digitize(probability, edges[1:-1], right=True), 0, 9)
+            result["winner_ece"] = float(
+                sum(
+                    float((bin_index == index).mean())
+                    * abs(
+                        float(probability[bin_index == index].mean())
+                        - float(outcome[bin_index == index].mean())
+                    )
+                    for index in range(10)
+                    if np.any(bin_index == index)
+                )
+            )
+    return result
+
+
+def _z_base_statistics(
+    model: SetTransformerModel,
+    active_indices: Tensor,
+    initial_z_base: Tensor,
+) -> dict[str, float | int]:
+    active = torch.unique(active_indices.flatten()).long()
+    active = active[(active >= 0) & (active < model.Z_base.num_embeddings)]
+    values = model.Z_base.weight.detach()[active]
+    initial = initial_z_base.to(values.device)[active]
+    norms = torch.linalg.vector_norm(values, dim=1)
+    updates = torch.linalg.vector_norm(values - initial, dim=1)
+    quantiles = torch.quantile(norms.float(), torch.tensor([0.05, 0.5, 0.95], device=norms.device))
+    return {
+        "active_team_rows": int(active.numel()),
+        "z_base_norm_mean": float(norms.mean().cpu()),
+        "z_base_norm_std": float(norms.std(unbiased=False).cpu()),
+        "z_base_norm_p05": float(quantiles[0].cpu()),
+        "z_base_norm_p50": float(quantiles[1].cpu()),
+        "z_base_norm_p95": float(quantiles[2].cpu()),
+        "z_base_ghost_norm": float(torch.linalg.vector_norm(model.Z_base.weight[0].detach()).cpu()),
+        "z_base_update_norm_mean": float(updates.mean().cpu()),
+    }
+
+
+def _write_parameter_histograms(
+    writer: Any,
+    model: SetTransformerModel,
+    active_indices: Tensor,
+    initial_z_base: Tensor,
+    *,
+    step: int,
+    gradients: dict[str, Tensor] | None = None,
+) -> None:
+    if not hasattr(writer, "add_histogram"):
+        return
+    active = torch.unique(active_indices.flatten()).long()
+    active = active[(active >= 0) & (active < model.Z_base.num_embeddings)]
+    values = model.Z_base.weight.detach()[active].cpu()
+    initial = initial_z_base[active.cpu()].cpu()
+    writer.add_histogram("State/ZBase/ActiveNorms", torch.linalg.vector_norm(values, dim=1), step)
+    writer.add_histogram(
+        "State/ZBase/UpdateNorms",
+        torch.linalg.vector_norm(values - initial, dim=1),
+        step,
+    )
+    for module_name in ("sab", "cross", "pma", "cont_head", "bin_head"):
+        module = getattr(model, module_name, None)
+        if module is None:
+            continue
+        for name, parameter in module.named_parameters():
+            writer.add_histogram(
+                f"Parameters/{module_name}/{name.replace('.', '/')}",
+                parameter.detach().cpu(),
+                step,
+            )
+    for name, gradient in (gradients or {}).items():
+        writer.add_histogram(f"Gradients/{name.replace('.', '/')}", gradient.detach().cpu(), step)
+
+
+def _parameter_utilization_by_module(
+    model: SetTransformerModel, gradient_receiving_names: set[str]
+) -> dict[str, dict[str, int]]:
+    modules: dict[str, dict[str, int]] = {}
+    head_prefixes = {
+        "cont_head",
+        "atomic_head",
+        "foul_head",
+        "bonus_head",
+        "special_head",
+        "bin_head",
+        "endgame_head",
+        "award_head",
+        "team_value_head",
+        "alliance_value_head",
+    }
+    for name, parameter in model.named_parameters():
+        prefix = name.split(".", 1)[0]
+        module = "prediction_heads" if prefix in head_prefixes else prefix
+        row = modules.setdefault(module, {"nominal": 0, "trainable": 0, "gradient_receiving": 0})
+        row["nominal"] += parameter.numel()
+        if parameter.requires_grad:
+            row["trainable"] += parameter.numel()
+        if name in gradient_receiving_names:
+            row["gradient_receiving"] += parameter.numel()
+    return modules
 
 
 def _training_source_fingerprint(table: pd.DataFrame, split: Split) -> str:
@@ -1275,6 +1610,17 @@ def train_model(
     )
     train_eval_loader = _make_loader(dataset, train_rows, opts, shuffle=False, device=device)
     validation_loader = _make_loader(dataset, validation_rows, opts, shuffle=False, device=device)
+    target_names = [mapping.target_name for mapping in opts.target_map]
+    if all(name in table.columns for name in target_names):
+        raw_targets = table.iloc[train_rows][target_names].apply(pd.to_numeric, errors="coerce")
+        target_mu_np = raw_targets.mean(axis=0).to_numpy(float, copy=True)
+        target_sigma_np = raw_targets.std(axis=0, ddof=0).to_numpy(float, copy=True)
+        target_sigma_np[~np.isfinite(target_sigma_np) | (target_sigma_np == 0)] = 1.0
+    else:
+        target_mu_np = np.zeros(len(target_names), dtype=float)
+        target_sigma_np = np.ones(len(target_names), dtype=float)
+    target_mu = torch.as_tensor(target_mu_np, dtype=torch.float32, device=device)
+    target_sigma = torch.as_tensor(target_sigma_np, dtype=torch.float32, device=device)
 
     scheduler = build_lr_scheduler(
         optimizer,
@@ -1318,6 +1664,7 @@ def train_model(
     iteration = 0
     rows = []
     start_epoch = 1
+    initial_z_base: Tensor | None = None
     if resume_checkpoint is not None:
         payload = load_resume_checkpoint(resume_checkpoint)
         validate_resume_checkpoint(
@@ -1345,8 +1692,61 @@ def train_model(
         controller.optimizer_step = iteration
         start_epoch = int(payload["completed_epoch"]) + 1
         initial_loss = float(extra_state.get("initial_loss", initial_loss))
+        stored_initial_z_base = extra_state.get("initial_z_base")
+        if torch.is_tensor(stored_initial_z_base):
+            initial_z_base = stored_initial_z_base.detach().cpu().clone()
+
+    active_base_indices = torch.cat(
+        [dataset.red_team_idx[train_rows], dataset.blue_team_idx[train_rows]], dim=1
+    )
+    if initial_z_base is None:
+        initial_z_base = model.Z_base.weight.detach().cpu().clone()
+    nominal_parameter_count = sum(parameter.numel() for parameter in model.parameters())
+    trainable_parameter_count = sum(
+        parameter.numel() for parameter in model.parameters() if parameter.requires_grad
+    )
+    gradient_receiving_names: set[str] = set()
+    last_gradients: dict[str, Tensor] = {}
+    gradient_hooks = []
+    collect_observability = tensorboard_writer is not None or opts.state_model == "static-z-base"
+    if collect_observability:
+        for parameter_name, parameter in model.named_parameters():
+            if not parameter.requires_grad:
+                continue
+
+            def record_gradient(gradient: Tensor, *, name: str = parameter_name) -> Tensor:
+                if torch.isfinite(gradient).any() and torch.count_nonzero(gradient).item() > 0:
+                    gradient_receiving_names.add(name)
+                    if name.startswith(("sab.", "cross.", "pma.", "cont_head.", "bin_head.")):
+                        values = gradient.detach().flatten().cpu()
+                        if values.numel() > 50_000:
+                            indices = torch.linspace(
+                                0, values.numel() - 1, 50_000, dtype=torch.long
+                            )
+                            values = values[indices]
+                        last_gradients[name] = values
+                return gradient
+
+            gradient_hooks.append(parameter.register_hook(record_gradient))
+    train_events = (
+        int(table.iloc[train_rows]["event_key"].nunique()) if "event_key" in table.columns else 0
+    )
+    validation_events = (
+        int(table.iloc[validation_rows]["event_key"].nunique())
+        if len(validation_rows) and "event_key" in table.columns
+        else 0
+    )
+    if tensorboard_writer is not None:
+        _write_parameter_histograms(
+            tensorboard_writer,
+            model,
+            active_base_indices,
+            initial_z_base,
+            step=0,
+        )
 
     for epoch in range(start_epoch, opts.epochs + 1):
+        gradient_receiving_names.clear()
         epoch_started = time.perf_counter()
         epoch_step_start = len(controller.step_results)
         model.train()
@@ -1363,9 +1763,7 @@ def train_model(
                 )
                 batch_rows = int(batch[0].shape[0])
                 for task_name, loss_value in _metrics_to_losses(metrics).items():
-                    _accumulate_loss(
-                        task_sums, task_weights, task_name, loss_value, batch_rows
-                    )
+                    _accumulate_loss(task_sums, task_weights, task_name, loss_value, batch_rows)
                 for name, iterator in sidecar_iters.items():
                     sidecar_batch = batch_to_device(next(iterator), device)
                     if name == "rank":
@@ -1416,13 +1814,71 @@ def train_model(
                 forward_model=forward_model,
                 amp_enabled=amp_enabled,
             )
+        validation_task_means: dict[str, float] = {name: math.nan for name in TASK_NAMES}
+        validation_task_counts: dict[str, float] = {name: 0.0 for name in TASK_NAMES}
+        if len(validation_rows) and collect_observability:
+            validation_task_means, validation_task_counts = evaluate_task_means(
+                model,
+                validation_loader,
+                opts,
+                positive_weights,
+                device,
+                forward_model=forward_model,
+                amp_enabled=amp_enabled,
+            )
+        train_forecast_metrics: dict[str, float] = {}
+        validation_forecast_metrics: dict[str, float] = {}
+        if collect_observability:
+            train_forecast_metrics = evaluate_forecast_metrics(
+                model,
+                train_eval_loader,
+                device,
+                target_mu,
+                target_sigma,
+                forward_model=forward_model,
+                amp_enabled=amp_enabled,
+            )
+            validation_forecast_metrics = {name: math.nan for name in train_forecast_metrics}
+            if len(validation_rows):
+                validation_forecast_metrics = evaluate_forecast_metrics(
+                    model,
+                    validation_loader,
+                    device,
+                    target_mu,
+                    target_sigma,
+                    forward_model=forward_model,
+                    amp_enabled=amp_enabled,
+                )
         task_means = _epoch_task_means(task_sums, task_weights)
         row = {
             "epoch": epoch,
             "train_loss": train_loss,
             "validation_loss": validation_loss,
             "learning_rate": epoch_learning_rate,
+            "train_rows": len(train_rows),
+            "validation_rows": len(validation_rows),
+            "train_events": train_events,
+            "validation_events": validation_events,
+            "nominal_parameter_count": nominal_parameter_count,
+            "trainable_parameter_count": trainable_parameter_count,
+            "gradient_receiving_parameter_count": sum(
+                parameter.numel()
+                for name, parameter in model.named_parameters()
+                if name in gradient_receiving_names
+            ),
         }
+        for group_index, group in enumerate(optimizer.param_groups):
+            row[f"learning_rate_group_{group_index}"] = float(group["lr"])
+        row.update(_z_base_statistics(model, active_base_indices, initial_z_base))
+        for module, utilization in _parameter_utilization_by_module(
+            model, gradient_receiving_names
+        ).items():
+            for kind, count in utilization.items():
+                row[f"module_{module}_{kind}_parameter_count"] = count
+        row.update({f"train_{name}": value for name, value in train_forecast_metrics.items()})
+        row.update(
+            {f"validation_{name}": value for name, value in validation_forecast_metrics.items()}
+        )
         row.update(
             epoch_runtime_metrics(
                 started_at=epoch_started,
@@ -1432,6 +1888,9 @@ def train_model(
         )
         for task_name, value in task_means.items():
             row[f"{task_name}_loss"] = value
+            row[f"{task_name}_active_count"] = task_weights[task_name]
+            row[f"validation_{task_name}_loss"] = validation_task_means[task_name]
+            row[f"validation_{task_name}_active_count"] = validation_task_counts[task_name]
         for task_name, parameter in model.loss_balancer.log_vars.items():
             log_var = float(parameter.detach().cpu())
             row[f"{task_name}_log_var"] = log_var
@@ -1443,6 +1902,9 @@ def train_model(
                 model=model,
                 row=row,
                 task_means=task_means,
+                task_counts=task_weights,
+                validation_task_means=validation_task_means,
+                validation_task_counts=validation_task_counts,
                 active_sidecars=set(sidecar_loaders),
             )
 
@@ -1458,8 +1920,7 @@ def train_model(
             else:
                 patience_counter += 1
                 stopped = (
-                    opts.use_early_stopping
-                    and patience_counter >= opts.early_stopping_patience
+                    opts.use_early_stopping and patience_counter >= opts.early_stopping_patience
                 )
         if (
             resume_output is not None
@@ -1487,6 +1948,7 @@ def train_model(
                         "best_validation": best_validation,
                         "patience_counter": patience_counter,
                         "initial_loss": initial_loss,
+                        "initial_z_base": initial_z_base,
                     },
                 ),
             )
@@ -1518,6 +1980,17 @@ def train_model(
             forward_model=forward_model,
             amp_enabled=amp_enabled,
         )
+    if tensorboard_writer is not None:
+        _write_parameter_histograms(
+            tensorboard_writer,
+            model,
+            active_base_indices,
+            initial_z_base,
+            step=int(rows[-1]["epoch"]) if rows else 0,
+            gradients=last_gradients,
+        )
+    for hook in gradient_hooks:
+        hook.remove()
     history = pd.DataFrame(rows)
     diagnostics = TrainingDiagnostics(
         initial_loss=initial_loss,

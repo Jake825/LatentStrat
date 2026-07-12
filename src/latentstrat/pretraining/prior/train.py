@@ -24,6 +24,7 @@ from latentstrat.pretraining.prior.features import (
     read_prior_feature_table,
 )
 from latentstrat.pretraining.prior.model import TeamPriorDistiller, prior_distillation_losses
+from latentstrat.season.data import team_number_from_key
 from latentstrat.training_runtime import (
     OptimizationController,
     TrainingRuntimeConfig,
@@ -107,9 +108,7 @@ class PriorTensorDataset(Dataset):
             else [f"frc{value}" for value in team_numbers]
         )
         self.vectors = torch.as_tensor(np.stack(vectors, axis=0), dtype=torch.float32)
-        norm_epa = table[list(NORM_EPA_TARGET_COLUMNS)].apply(
-            pd.to_numeric, errors="coerce"
-        )
+        norm_epa = table[list(NORM_EPA_TARGET_COLUMNS)].apply(pd.to_numeric, errors="coerce")
         norm_epa_observed = table[list(NORM_EPA_OBSERVED_COLUMNS)].astype(bool)
         observed_count = int(norm_epa_observed.to_numpy(dtype=bool).sum())
         if observed_count == 0:
@@ -125,16 +124,12 @@ class PriorTensorDataset(Dataset):
         culture = table[list(CULTURE_TARGET_COLUMNS)].apply(pd.to_numeric, errors="coerce")
         if not np.isfinite(culture.to_numpy(dtype=np.float32)).all():
             raise ValueError("V5.6.4 cultural target values must be finite.")
-        self.target_norm_epa = torch.as_tensor(
-            norm_epa.to_numpy(dtype=np.float32, copy=True)
-        )
+        self.target_norm_epa = torch.as_tensor(norm_epa.to_numpy(dtype=np.float32, copy=True))
         self.norm_epa_observed = torch.as_tensor(
             norm_epa_observed.to_numpy(dtype=bool, copy=True),
             dtype=torch.bool,
         )
-        self.target_culture = torch.as_tensor(
-            culture.to_numpy(dtype=np.float32, copy=True)
-        )
+        self.target_culture = torch.as_tensor(culture.to_numpy(dtype=np.float32, copy=True))
 
     def __len__(self) -> int:
         return int(self.vectors.shape[0])
@@ -259,9 +254,7 @@ def train_prior_model(
         checkpoint_every_epochs=opts.checkpoint_every_epochs,
         optimizer_log_interval=opts.optimizer_log_interval,
     )
-    seed_everything(
-        opts.random_seed, deterministic_algorithms=opts.deterministic_algorithms
-    )
+    seed_everything(opts.random_seed, deterministic_algorithms=opts.deterministic_algorithms)
     dataset = PriorTensorDataset(table, opts)
     device = _resolve_device(opts.device)
     model = TeamPriorDistiller(opts).to(device)
@@ -571,6 +564,7 @@ def apply_prior_checkpoint_to_model(
     prior_checkpoint: str | Path,
     *,
     latent_dim: int,
+    team_index_map: dict[str, int] | None = None,
 ) -> int:
     embedding_table = load_prior_embedding_table(prior_checkpoint)
     if int(embedding_table.shape[1]) != int(latent_dim):
@@ -581,6 +575,27 @@ def apply_prior_checkpoint_to_model(
         raise ValueError(
             f"Model Z_base width {model.Z_base.weight.shape[1]} does not match {latent_dim}."
         )
+    if team_index_map is not None:
+        with torch.no_grad():
+            model.Z_base.weight[0].copy_(
+                embedding_table[0].to(
+                    dtype=model.Z_base.weight.dtype,
+                    device=model.Z_base.weight.device,
+                )
+            )
+            copied = 0
+            for team_key, target_index in team_index_map.items():
+                source_index = team_number_from_key(team_key)
+                if source_index >= embedding_table.shape[0]:
+                    continue
+                model.Z_base.weight[int(target_index)].copy_(
+                    embedding_table[source_index].to(
+                        dtype=model.Z_base.weight.dtype,
+                        device=model.Z_base.weight.device,
+                    )
+                )
+                copied += 1
+        return copied
     if int(model.Z_base.weight.shape[0]) < int(embedding_table.shape[0]):
         raise ValueError(
             "Model Z_base is smaller than the V5.6 prior dictionary; initialize the model "

@@ -23,14 +23,14 @@ def _init_from_state(
     world_model_opts: WorldModelOptions,
 ) -> SetTransformerModel:
     base_weight = state["Z_base.weight"]
-    event_weight = state["Z_event.weight"]
+    event_weight = state.get("Z_event.weight")
     return init_model(
         base_weight.shape[0],
         base_weight.shape[1],
         len(opts.target_map),
         len(opts.binary_targets),
         opts,
-        num_event_teams=event_weight.shape[0],
+        num_event_teams=event_weight.shape[0] if event_weight is not None else 1,
         num_endgame_classes=len(opts.endgame_class_order),
         num_awards=len(opts.award_targets),
         world_model_opts=world_model_opts,
@@ -53,8 +53,8 @@ def load_v5_checkpoint_model(checkpoint_path: str | Path) -> SetTransformerModel
 
 def load_v6_checkpoint_model(checkpoint_path: str | Path) -> SetTransformerModel:
     checkpoint = load_checkpoint_payload(checkpoint_path)
-    if checkpoint.get("checkpoint_schema_version") != 6:
-        raise ValueError("Expected a schema-6 seasonal checkpoint.")
+    if checkpoint.get("checkpoint_schema_version") not in {6, 7}:
+        raise ValueError("Expected a schema-6 or schema-7 seasonal checkpoint.")
     opts = LatentStratOptions.model_validate(checkpoint["options"])
     world_model_opts = WorldModelOptions.model_validate(checkpoint["world_model"])
     model = _init_from_state(
@@ -68,7 +68,7 @@ def load_v6_checkpoint_model(checkpoint_path: str | Path) -> SetTransformerModel
 
 def load_season_checkpoint_model(checkpoint_path: str | Path) -> SetTransformerModel:
     checkpoint = load_checkpoint_payload(checkpoint_path)
-    if checkpoint.get("checkpoint_schema_version") == 6:
+    if checkpoint.get("checkpoint_schema_version") in {6, 7}:
         return load_v6_checkpoint_model(checkpoint_path)
     return load_v5_checkpoint_model(checkpoint_path)
 

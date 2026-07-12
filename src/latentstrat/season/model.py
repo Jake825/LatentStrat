@@ -107,6 +107,10 @@ class ForwardOutput:
         return self.predictions["endgame"]
 
     @property
+    def auto_logits(self) -> Tensor:
+        return self.predictions["auto"]
+
+    @property
     def award_logits(self) -> Tensor:
         return self.predictions["award"]
 
@@ -202,9 +206,7 @@ class PMA(nn.Module):
         self, h: Tensor, key_padding_mask: Tensor | None = None, mode: str = "learned"
     ) -> tuple[Tensor, Tensor]:
         if mode == "uniform":
-            weights = torch.ones(
-                (h.shape[0], 1, h.shape[1]), dtype=h.dtype, device=h.device
-            )
+            weights = torch.ones((h.shape[0], 1, h.shape[1]), dtype=h.dtype, device=h.device)
             if key_padding_mask is not None:
                 weights = weights.masked_fill(key_padding_mask[:, None, :].bool(), 0.0)
             denom = weights.sum(dim=-1, keepdim=True).clamp_min(torch.finfo(h.dtype).eps)
@@ -230,6 +232,17 @@ class SiameseWinHead(nn.Module):
         diff = z_red - z_blue
         interaction = torch.cat([diff.abs(), z_red * z_blue], dim=-1)
         return self.score(diff * self.gate(interaction))
+
+
+class AdditiveWinHead(nn.Module):
+    """Strictly additive anti-symmetric win head."""
+
+    def __init__(self, latent_dim: int) -> None:
+        super().__init__()
+        self.score = nn.Linear(latent_dim, 1, bias=False)
+
+    def forward(self, z_red: Tensor, z_blue: Tensor) -> Tensor:
+        return self.score(z_red - z_blue)
 
 
 class OrdinalEndgameHead(nn.Module):
@@ -347,10 +360,14 @@ class SetTransformerModel(nn.Module):
         self.world_model_opts.active_spaces()
 
         self.Z_base = nn.Embedding(max(num_teams, 1), latent_dim)
-        self.Z_event = nn.Embedding(max(num_event_teams or num_teams, 1), latent_dim, padding_idx=0)
+        if opts.state_model == "base-plus-event":
+            self.Z_event = nn.Embedding(
+                max(num_event_teams or num_teams, 1), latent_dim, padding_idx=0
+            )
         self.team_embedding = self.Z_base
         nn.init.normal_(self.Z_base.weight, mean=0.0, std=0.02)
-        nn.init.zeros_(self.Z_event.weight)
+        if hasattr(self, "Z_event"):
+            nn.init.zeros_(self.Z_event.weight)
 
         block_args = {
             "num_heads": opts.attention_heads,
@@ -358,21 +375,30 @@ class SetTransformerModel(nn.Module):
             "ffn_dropout": opts.ffn_dropout,
             "layer_norm_epsilon": opts.set_layer_norm_epsilon,
         }
-        self.sab = SAB(latent_dim, opts.set_ffn_dim, **block_args)
-        self.cross = CROSS(latent_dim, opts.set_ffn_dim, **block_args)
-        self.pma = PMA(latent_dim, opts.set_ffn_dim, **block_args)
+        if opts.match_architecture in {"teammate-set", "full-match"}:
+            self.sab = SAB(latent_dim, opts.set_ffn_dim, **block_args)
+            self.pma = PMA(latent_dim, opts.set_ffn_dim, **block_args)
+        if opts.match_architecture == "full-match":
+            self.cross = CROSS(latent_dim, opts.set_ffn_dim, **block_args)
 
         self.cont_head = nn.Linear(latent_dim, max(num_cont_targets // 2, 1))
         self.atomic_head = nn.Linear(latent_dim, max(len(opts.atomic_count_targets), 1))
         self.foul_head = nn.Linear(latent_dim, max(len(opts.foul_targets), 1))
         self.bonus_head = nn.Linear(latent_dim, max(len(opts.bonus_binary_targets), 1))
         self.special_head = nn.Linear(latent_dim, max(len(opts.special_binary_targets), 1))
-        self.bin_head = SiameseWinHead(latent_dim)
+        self.bin_head = (
+            AdditiveWinHead(latent_dim)
+            if opts.match_architecture == "additive"
+            else SiameseWinHead(latent_dim)
+        )
         self.endgame_head = OrdinalEndgameHead(latent_dim, self.num_endgame_classes)
+        if opts.state_model == "static-z-base":
+            self.auto_head = OrdinalEndgameHead(latent_dim, len(opts.auto_class_order))
         self.award_head = JudgesRoomHead(latent_dim, self.num_awards)
         self.team_value_head = TeamValueHead(latent_dim)
         self.alliance_value_head = AllianceValueHead(latent_dim)
-        self.delta_integration_gate = DeltaIntegrationGate(latent_dim)
+        if opts.state_model == "base-plus-event":
+            self.delta_integration_gate = DeltaIntegrationGate(latent_dim)
         self.award_prototype_predictor = nn.Linear(
             latent_dim, self.world_model_opts.award_embedding.width
         )
@@ -382,34 +408,36 @@ class SetTransformerModel(nn.Module):
         self.selection_embedding_predictor = nn.Linear(
             2 * latent_dim, self.world_model_opts.pick_embedding.width
         )
-        self.loss_balancer = HomoscedasticTaskBalancer(
-            (
-                "continuous",
-                "win",
-                "endgame",
-                "awards",
-                "atomic",
-                "foul",
-                "bonus",
-                "special",
-                "rank",
-                "playoff",
-                "selection",
-                "wm_award",
-                "wm_rank",
-                "wm_pick",
-            )
-        )
+        task_names = [
+            "continuous",
+            "win",
+            "endgame",
+            "awards",
+            "atomic",
+            "foul",
+            "bonus",
+            "special",
+            "rank",
+            "playoff",
+            "selection",
+            "wm_award",
+            "wm_rank",
+            "wm_pick",
+        ]
+        if opts.state_model == "static-z-base":
+            task_names.insert(3, "auto")
+        self.loss_balancer = HomoscedasticTaskBalancer(tuple(task_names))
 
     def balance_loss(self, task_name: str, loss: Tensor, active: bool) -> Tensor:
         return self.loss_balancer(task_name, loss, active)
 
-    def team_latent(
-        self, team_base_idx: Tensor, team_event_idx: Tensor | None = None
-    ) -> Tensor:
+    def team_latent(self, team_base_idx: Tensor, team_event_idx: Tensor | None = None) -> Tensor:
         base_idx = team_base_idx.long().clamp_min(0)
+        z_base = self.Z_base(base_idx)
+        if self.opts.state_model == "static-z-base":
+            return z_base
         event_idx = torch.zeros_like(base_idx) if team_event_idx is None else team_event_idx.long()
-        return self.Z_base(base_idx) + self.Z_event(event_idx.clamp_min(0))
+        return z_base + self.Z_event(event_idx.clamp_min(0))
 
     def team_value(self, team_base_idx: Tensor, team_event_idx: Tensor | None = None) -> Tensor:
         return self.team_value_head(self.team_latent(team_base_idx, team_event_idx))
@@ -441,8 +469,11 @@ class SetTransformerModel(nn.Module):
         attention_mask = torch.zeros(
             team_base_idx.shape, dtype=torch.bool, device=team_base_idx.device
         )
-        context, _ = self.sab(h, attention_mask)
-        z_alliance, _ = self.pma_pool(context, attention_mask, pma_mode)
+        if self.opts.match_architecture == "additive":
+            z_alliance = h.sum(dim=1)
+        else:
+            context, _ = self.sab(h, attention_mask)
+            z_alliance, _ = self.pma_pool(context, attention_mask, pma_mode)
         return self.alliance_value_head(z_alliance)
 
     def _random_dropout_mask(self, missing_mask: Tensor) -> Tensor:
@@ -478,15 +509,25 @@ class SetTransformerModel(nn.Module):
         effective_missing = explicit_missing | dropout_mask
         routed_base_idx = torch.where(effective_missing, torch.zeros_like(base_idx), base_idx)
         routed_event_idx = torch.where(effective_missing, torch.zeros_like(event_idx), event_idx)
-        x = self.Z_base(routed_base_idx.clamp_min(0)) + self.Z_event(
-            routed_event_idx.clamp_min(0)
-        )
+        x = self.Z_base(routed_base_idx.clamp_min(0))
+        if self.opts.state_model == "base-plus-event":
+            x = x + self.Z_event(routed_event_idx.clamp_min(0))
         return x, effective_missing, dropout_mask
 
     def pma_pool(
         self, h: Tensor, missing_mask: Tensor | None = None, pma_mode: str = "learned"
     ) -> tuple[Tensor, Tensor]:
         return self.pma(h, missing_mask, pma_mode)
+
+    @staticmethod
+    def _additive_pool(h: Tensor) -> tuple[Tensor, Tensor]:
+        weights = torch.full(
+            (h.shape[0], 1, h.shape[1]),
+            1.0 / max(h.shape[1], 1),
+            dtype=h.dtype,
+            device=h.device,
+        )
+        return h.sum(dim=1), weights
 
     def forward(
         self,
@@ -510,13 +551,21 @@ class SetTransformerModel(nn.Module):
         red_attention_mask = torch.zeros_like(red_effective_missing, dtype=torch.bool)
         blue_attention_mask = torch.zeros_like(blue_effective_missing, dtype=torch.bool)
 
-        red_context, _ = self.sab(red_set, red_attention_mask)
-        blue_context, _ = self.sab(blue_set, blue_attention_mask)
-        red_interacted, _ = self.cross(red_context, blue_context, blue_attention_mask)
-        blue_interacted, _ = self.cross(blue_context, red_context, red_attention_mask)
-
-        z_red, red_weights = self.pma_pool(red_interacted, red_attention_mask, pma_mode)
-        z_blue, blue_weights = self.pma_pool(blue_interacted, blue_attention_mask, pma_mode)
+        if self.opts.match_architecture == "additive":
+            red_interacted = red_set
+            blue_interacted = blue_set
+            z_red, red_weights = self._additive_pool(red_interacted)
+            z_blue, blue_weights = self._additive_pool(blue_interacted)
+        else:
+            red_context, _ = self.sab(red_set, red_attention_mask)
+            blue_context, _ = self.sab(blue_set, blue_attention_mask)
+            if self.opts.match_architecture == "full-match":
+                red_interacted, _ = self.cross(red_context, blue_context, blue_attention_mask)
+                blue_interacted, _ = self.cross(blue_context, red_context, red_attention_mask)
+            else:
+                red_interacted, blue_interacted = red_context, blue_context
+            z_red, red_weights = self.pma_pool(red_interacted, red_attention_mask, pma_mode)
+            z_blue, blue_weights = self.pma_pool(blue_interacted, blue_attention_mask, pma_mode)
         diff = z_red - z_blue
         z_match = torch.cat([z_red, z_blue, diff, diff.abs(), z_red * z_blue], dim=1)
         cont = torch.cat([self.cont_head(z_red), self.cont_head(z_blue)], dim=1)
@@ -545,6 +594,11 @@ class SetTransformerModel(nn.Module):
                     "bonus": bonus[:, : self.num_bonus_targets],
                     "special": special[:, : self.num_special_targets],
                     "endgame": self.endgame_head(slot_context),
+                    "auto": (
+                        self.auto_head(slot_context)
+                        if hasattr(self, "auto_head")
+                        else slot_context.new_empty((slot_context.shape[0], 6, 0))
+                    ),
                     "award": self.award_head(slot_context),
                     "wm_award": self.award_prototype_predictor(
                         torch.cat([red_set, blue_set], dim=1)
@@ -591,10 +645,19 @@ def init_model(
 def optimizer_parameter_groups(model: SetTransformerModel, opts: LatentStratOptions) -> list[dict]:
     """Build AdamW groups while keeping embeddings on active-row custom L2."""
 
-    def parameter_ids(*modules: nn.Module) -> set[int]:
-        return {id(parameter) for module in modules for parameter in module.parameters()}
+    def parameter_ids(*modules: nn.Module | None) -> set[int]:
+        return {
+            id(parameter)
+            for module in modules
+            if module is not None
+            for parameter in module.parameters()
+        }
 
-    set_ids = parameter_ids(model.sab, model.cross, model.pma)
+    set_ids = parameter_ids(
+        getattr(model, "sab", None),
+        getattr(model, "cross", None),
+        getattr(model, "pma", None),
+    )
     head_ids = parameter_ids(
         model.cont_head,
         model.atomic_head,
@@ -603,16 +666,18 @@ def optimizer_parameter_groups(model: SetTransformerModel, opts: LatentStratOpti
         model.special_head,
         model.bin_head,
         model.endgame_head,
+        getattr(model, "auto_head", None),
         model.award_head,
         model.team_value_head,
         model.alliance_value_head,
-        model.delta_integration_gate,
+        getattr(model, "delta_integration_gate", None),
         model.award_prototype_predictor,
         model.rank_outcome_predictor,
         model.selection_embedding_predictor,
     )
-    no_decay_ids = parameter_ids(model.Z_base, model.Z_event, model.loss_balancer)
-    no_decay_ids.add(id(model.pma.seed))
+    no_decay_ids = parameter_ids(model.Z_base, getattr(model, "Z_event", None), model.loss_balancer)
+    if hasattr(model, "pma"):
+        no_decay_ids.add(id(model.pma.seed))
     for module in model.modules():
         if isinstance(module, nn.LayerNorm):
             no_decay_ids.update(id(parameter) for parameter in module.parameters())

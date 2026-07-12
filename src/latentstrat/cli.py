@@ -34,6 +34,11 @@ from latentstrat.season.data import (
 from latentstrat.season.evaluate import evaluate_model
 from latentstrat.season.metrics import write_prediction_evaluation
 from latentstrat.season.statbotics_baseline import build_statbotics_prediction_artifact
+from latentstrat.season.reference_study import run_reference_study
+from latentstrat.season.reliability_study import (
+    finalize_reliability_statbotics,
+    run_reliability_study,
+)
 from latentstrat.dev.diagnostics import build_evidence_packet, inspect_embeddings
 from latentstrat.experimental.venue import consolidate_event_checkpoint
 from latentstrat.season.features import (
@@ -730,6 +735,166 @@ def build_statbotics_baseline_command(
         _statbotics_provider(), season, destination, page_size=page_size
     )
     typer.echo(f"Statbotics baseline written: {artifact} manifest={manifest}")
+
+
+def validate_reference_2026_command(
+    features: Annotated[Path, typer.Option("--features", help="2026 feature Parquet.")],
+    events: Annotated[
+        Path, typer.Option("--events", help="2026 event metadata with event_type.")
+    ],
+    prior_checkpoint: Annotated[
+        Path, typer.Option("--prior-checkpoint", help="Leakage-safe pre-2026 prior checkpoint.")
+    ],
+    output: Annotated[
+        Path, typer.Option("--output", help="Self-contained reference-study directory.")
+    ] = Path("artifacts/reference/2026-static-z-base"),
+    statbotics: Annotated[
+        Path | None, typer.Option("--statbotics", help="Optional 2026 pre-match baseline.")
+    ] = None,
+    rankings_sidecar: Annotated[
+        Path | None, typer.Option("--rankings-sidecar")
+    ] = None,
+    selections_sidecar: Annotated[
+        Path | None, typer.Option("--selections-sidecar")
+    ] = None,
+    playoffs_sidecar: Annotated[
+        Path | None, typer.Option("--playoffs-sidecar")
+    ] = None,
+    epochs: Annotated[int, typer.Option("--epochs", min=1)] = 20,
+    budget_minutes: Annotated[float, typer.Option("--budget-minutes", min=1)] = 100,
+    bootstrap_resamples: Annotated[
+        int, typer.Option("--bootstrap-resamples", min=1)
+    ] = 2_000,
+    tensorboard: Annotated[
+        bool, typer.Option("--tensorboard/--no-tensorboard")
+    ] = True,
+    tensorboard_logdir: Annotated[
+        Path, typer.Option("--tensorboard-logdir")
+    ] = Path("runs/reference-2026-static"),
+    smoke: Annotated[
+        bool,
+        typer.Option(
+            "--smoke/--full-study",
+            help="Run a one-fold, at-most-two-epoch browser-acceptance smoke study.",
+        ),
+    ] = True,
+) -> None:
+    """Run the guarded 2026 static robot-state reference study."""
+
+    sidecars = {
+        name: path
+        for name, path in (
+            ("rankings", rankings_sidecar),
+            ("selections", selections_sidecar),
+            ("playoffs", playoffs_sidecar),
+        )
+        if path is not None
+    }
+    result = run_reference_study(
+        features,
+        events,
+        output,
+        prior_checkpoint=prior_checkpoint,
+        sidecar_paths=sidecars,
+        statbotics_path=statbotics,
+        tensorboard_root=tensorboard_logdir if tensorboard else None,
+        epochs=epochs,
+        budget_minutes=budget_minutes,
+        bootstrap_resamples=bootstrap_resamples,
+        smoke=smoke,
+    )
+    typer.echo(
+        f"Reference study complete: {result.output_dir} "
+        f"initialization={result.selected_initialization}"
+    )
+    if result.tensorboard_logdir:
+        typer.echo(f"TensorBoard: tensorboard --logdir={result.tensorboard_logdir}")
+
+
+def run_static_reliability_study_command(
+    features: Annotated[Path, typer.Option("--features", help="2026 feature Parquet.")],
+    events: Annotated[
+        Path, typer.Option("--events", help="2026 event metadata with event_type.")
+    ],
+    prior_checkpoint: Annotated[
+        Path, typer.Option("--prior-checkpoint", help="Leakage-safe pre-2026 prior checkpoint.")
+    ],
+    output: Annotated[
+        Path, typer.Option("--output", help="Self-contained reliability-study directory.")
+    ] = Path("artifacts/reference/2026-static-reliability"),
+    statbotics: Annotated[
+        Path | None, typer.Option("--statbotics", help="Optional verified pre-match artifact.")
+    ] = None,
+    rankings_sidecar: Annotated[Path | None, typer.Option("--rankings-sidecar")] = None,
+    selections_sidecar: Annotated[Path | None, typer.Option("--selections-sidecar")] = None,
+    playoffs_sidecar: Annotated[Path | None, typer.Option("--playoffs-sidecar")] = None,
+    max_epochs: Annotated[int, typer.Option("--max-epochs", min=1)] = 40,
+    budget_minutes: Annotated[float, typer.Option("--budget-minutes", min=1)] = 240,
+    bootstrap_resamples: Annotated[
+        int, typer.Option("--bootstrap-resamples", min=1)
+    ] = 5_000,
+    tensorboard: Annotated[bool, typer.Option("--tensorboard/--no-tensorboard")] = True,
+    tensorboard_logdir: Annotated[
+        Path, typer.Option("--tensorboard-logdir")
+    ] = Path("runs/reference-2026-static-reliability"),
+    smoke: Annotated[
+        bool,
+        typer.Option(
+            "--smoke/--full-study",
+            help="Run one seed, one fold, and at most two epochs before the full campaign.",
+        ),
+    ] = True,
+) -> None:
+    """Run the development-frozen 2026 static architecture reliability study."""
+
+    sidecars = {
+        name: path
+        for name, path in (
+            ("rankings", rankings_sidecar),
+            ("selections", selections_sidecar),
+            ("playoffs", playoffs_sidecar),
+        )
+        if path is not None
+    }
+    result = run_reliability_study(
+        features,
+        events,
+        output,
+        prior_checkpoint=prior_checkpoint,
+        sidecar_paths=sidecars,
+        statbotics_path=statbotics,
+        tensorboard_root=tensorboard_logdir if tensorboard else None,
+        max_epochs=max_epochs,
+        budget_minutes=budget_minutes,
+        bootstrap_resamples=bootstrap_resamples,
+        smoke=smoke,
+    )
+    typer.echo(
+        f"Reliability study complete: {result.output_dir} "
+        f"clip={result.selected_max_grad_norm:g} epochs={result.selected_epochs} "
+        f"conclusion={result.conclusion_status}"
+    )
+    if result.tensorboard_logdir:
+        typer.echo(f"TensorBoard: tensorboard --logdir={result.tensorboard_logdir}")
+
+
+def finalize_static_reliability_command(
+    study: Annotated[
+        Path, typer.Option("--study", help="Completed reliability-study directory.")
+    ],
+    statbotics: Annotated[
+        Path, typer.Option("--statbotics", help="Verified pre-match Statbotics Parquet.")
+    ],
+    bootstrap_resamples: Annotated[
+        int, typer.Option("--bootstrap-resamples", min=1)
+    ] = 5_000,
+) -> None:
+    """Finalize Statbotics evidence from saved reliability predictions without training."""
+
+    manifest = finalize_reliability_statbotics(
+        study, statbotics, bootstrap_resamples=bootstrap_resamples
+    )
+    typer.echo(f"Reliability Statbotics evidence finalized: {manifest}")
 
 
 @app.command("build-world-model")
@@ -1531,10 +1696,13 @@ match_breakdown_app.command("inspect")(inspect_match_breakdown_encoder_command)
 season_app.command("build-features")(build_features)
 season_app.command("train")(train_features)
 season_app.command("validate")(validate_walk_forward)
+season_app.command("validate-reference-2026")(validate_reference_2026_command)
+season_app.command("run-static-reliability-study")(run_static_reliability_study_command)
 season_app.command("build-statbotics-baseline")(build_statbotics_baseline_command)
 artifact_app.command("baseline-manifest")(write_baseline_manifest_command)
 artifact_app.command("compare-predictions")(compare_world_model)
 artifact_app.command("evaluate-predictions")(evaluate_predictions_command)
+artifact_app.command("finalize-static-reliability")(finalize_static_reliability_command)
 scouting_app.command("init")(init_scouting_db)
 dev_app.command("api-smoke")(api_smoke)
 dev_app.command("smoke-test")(smoke_test)

@@ -12,10 +12,12 @@ import pytest
 import torch
 
 from latentstrat.app.analysis import (
+    build_season_model,
     checkpoint_feature_compatibility,
     compute_pca,
     cosine_neighbors,
     diagnose_match,
+    season_embedding_frame,
     season_event_trajectory_frame,
 )
 from latentstrat.app.catalog import discover_workspace, verify_artifact_provenance
@@ -92,6 +94,39 @@ def _feature_row() -> dict:
     }
 
 
+def test_static_reference_checkpoint_suppresses_event_state_claims():
+    opts = default_options().model_copy(
+        update={
+            "latent_dim": 4,
+            "attention_heads": 1,
+            "set_ffn_dim": 8,
+            "state_model": "static-z-base",
+            "match_architecture": "full-match",
+        }
+    )
+    model = init_model(8, 4, len(opts.target_map), len(opts.binary_targets), opts)
+    payload = {
+        "checkpoint_schema_version": 7,
+        "model_state_dict": model.state_dict(),
+        "options": opts.model_dump(mode="json"),
+        "world_model": WorldModelOptions(enabled=False).model_dump(mode="json"),
+        "team_base_index_map": {f"frc{number}": number for number in range(1, 7)},
+        "team_event_index_map": {},
+    }
+
+    restored = build_season_model(payload)
+    frame, columns, basis = season_embedding_frame(payload)
+    compatibility = checkpoint_feature_compatibility(payload, pd.DataFrame([_feature_row()]))
+
+    assert not hasattr(restored, "Z_event")
+    assert len(frame) == 6
+    assert len(columns) == 4
+    assert basis == "base"
+    assert compatibility.compatible
+    with pytest.raises(ValueError, match="no event states"):
+        season_event_trajectory_frame(payload)
+
+
 def _complete_workspace(root: Path) -> None:
     feature_path = root / "data" / "features" / "season" / "features_2026.parquet"
     feature_path.parent.mkdir(parents=True)
@@ -120,9 +155,9 @@ def _complete_workspace(root: Path) -> None:
             for model, value in (("latentstrat", 0.2), ("statbotics", 0.25))
         ]
     ).to_csv(evaluation / "metrics.csv", index=False)
-    pd.DataFrame(
-        {"epoch": [1, 2], "train_loss": [2.0, 1.0], "validation_loss": [2.2, 1.2]}
-    ).to_csv(evaluation / "training_history.csv", index=False)
+    pd.DataFrame({"epoch": [1, 2], "train_loss": [2.0, 1.0], "validation_loss": [2.2, 1.2]}).to_csv(
+        evaluation / "training_history.csv", index=False
+    )
     (evaluation / "manifest.json").write_text(
         json.dumps(
             {

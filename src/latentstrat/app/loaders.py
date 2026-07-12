@@ -348,6 +348,13 @@ def checkpoint_summary(path: Path, payload: dict[str, Any]) -> CheckpointSummary
         "frozen_embedding_tables": payload.get("frozen_embedding_tables") or [],
         "sidecar_tables": payload.get("sidecar_tables") or [],
         "provenance": payload.get("provenance"),
+        "study_contract": payload.get("study_contract"),
+        "state_model": options.get("state_model"),
+        "match_architecture": options.get("match_architecture"),
+        "initialization": payload.get("initialization"),
+        "fold_number": payload.get("fold_number"),
+        "test_week": payload.get("test_week"),
+        "active_z_base_rows": len(payload.get("active_z_base_rows") or []),
     }
     return CheckpointSummary(
         path=path,

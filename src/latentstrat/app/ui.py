@@ -207,11 +207,36 @@ def status_ribbon(text: str, tone: str = "yellow") -> None:
     )
 
 
-def _artifact_select(label: str, kinds: tuple[ArtifactKind, ...], key: str) -> ArtifactRef | None:
+def _artifact_select(
+    label: str,
+    kinds: tuple[ArtifactKind, ...],
+    key: str,
+    *,
+    preferred_path_token: str | None = None,
+) -> ArtifactRef | None:
     artifacts = _get_catalog().of_kind(*kinds)
     if not artifacts:
         st.info(f"No {label.lower()} artifacts were found in the configured workspace.")
         return None
+    if preferred_path_token:
+        artifacts = tuple(
+            sorted(
+                artifacts,
+                key=lambda artifact: (
+                    0 if preferred_path_token in artifact.path.as_posix() else 1,
+                    artifact.path.as_posix(),
+                ),
+            )
+        )
+    requested = str(st.query_params.get("artifact", ""))
+    requested_index = next(
+        (
+            index
+            for index, artifact in enumerate(artifacts)
+            if requested and requested in artifact.path.as_posix()
+        ),
+        0,
+    )
     selected_id = st.selectbox(
         label,
         [artifact.artifact_id for artifact in artifacts],
@@ -220,7 +245,8 @@ def _artifact_select(label: str, kinds: tuple[ArtifactKind, ...], key: str) -> A
             for artifact in artifacts
             if artifact.artifact_id == artifact_id
         ),
-        key=key,
+        key=f"{key}.{requested or 'default'}",
+        index=requested_index,
     )
     return _get_catalog().by_id(selected_id)
 
@@ -278,7 +304,9 @@ def render_workspace() -> None:
         verify_id = st.selectbox(
             "Artifact provenance check",
             [artifact.artifact_id for artifact in catalog.artifacts],
-            format_func=lambda value: catalog.by_id(value).path.relative_to(catalog.root).as_posix(),
+            format_func=lambda value: (
+                catalog.by_id(value).path.relative_to(catalog.root).as_posix()
+            ),
         )
         if st.button("Verify declared SHA-256", icon=":material/verified:"):
             selected = catalog.by_id(verify_id)
@@ -331,7 +359,9 @@ def render_data() -> None:
             table = _parquet(*_signature_args(artifact))
             with rows_tab:
                 filtered = _filtered_matches(table, "data")
-                st.caption(f"Showing {min(len(filtered), 1_000):,} of {len(filtered):,} filtered rows.")
+                st.caption(
+                    f"Showing {min(len(filtered), 1_000):,} of {len(filtered):,} filtered rows."
+                )
                 st.dataframe(filtered.head(1_000), hide_index=True, width="stretch", height=520)
             with coverage_tab:
                 profile_table = profile_dataframe(table).sort_values(
@@ -419,23 +449,148 @@ def _run_directories() -> list[Path]:
         "prior_training_history.csv",
         "training_history.csv",
         "walk_forward_history.csv",
+        "optimization_grid.csv",
+        "development_selection.json",
     }
-    return sorted({artifact.path.parent for artifact in catalog.artifacts if artifact.path.name in names})
+    directories = {
+        artifact.path.parent for artifact in catalog.artifacts if artifact.path.name in names
+    }
+
+    def priority(path: Path) -> tuple[int, str]:
+        manifest_path = path / "manifest.json"
+        workflow = load_json(manifest_path).get("workflow") if manifest_path.exists() else None
+        rank = {
+            "season.reference-2026-static-reliability": 0,
+            "season.reference-2026-static": 1,
+        }.get(workflow, 2)
+        return (rank, path.as_posix())
+
+    return sorted(directories, key=priority)
 
 
 def render_evaluation() -> None:
-    context_bar("Runs + Evaluation", "Probabilistic evidence before latent interpretation", "Evidence")
+    context_bar(
+        "Runs + Evaluation", "Probabilistic evidence before latent interpretation", "Evidence"
+    )
     directories = _run_directories()
     if not directories:
         st.info("No supported evaluation directories were found.")
         return
+    reference_index = next(
+        (
+            index
+            for index, path in enumerate(directories)
+            if (path / "manifest.json").exists()
+            and load_json(path / "manifest.json").get("workflow")
+            in {"season.reference-2026-static-reliability", "season.reference-2026-static"}
+        ),
+        0,
+    )
     selected = st.selectbox(
         "Evaluation run",
         directories,
+        index=reference_index,
         format_func=lambda path: path.relative_to(_get_catalog().root).as_posix(),
+        key="evaluation.run.v2",
     )
-    manifest = load_json(selected / "manifest.json") if (selected / "manifest.json").exists() else {}
+    manifest = (
+        load_json(selected / "manifest.json") if (selected / "manifest.json").exists() else {}
+    )
     promotion = manifest.get("promotion") if isinstance(manifest.get("promotion"), dict) else {}
+    resolved = (
+        manifest.get("resolved_config") if isinstance(manifest.get("resolved_config"), dict) else {}
+    )
+    workflow = manifest.get("workflow")
+    is_reliability = workflow == "season.reference-2026-static-reliability"
+    is_static_reference = workflow == "season.reference-2026-static"
+    is_reference = is_reliability or is_static_reference
+    if is_reference:
+        complete = bool(resolved.get("complete"))
+        conclusion_ready = bool(resolved.get("conclusion_ready", complete))
+        rejection = (
+            resolved.get("rejection") if isinstance(resolved.get("rejection"), dict) else {}
+        )
+        if is_reliability and resolved.get("stage") == "development-rejected":
+            status_ribbon("Development gate rejected - no test matrix", "yellow")
+        elif is_reliability and complete and not conclusion_ready:
+            status_ribbon("Complete neural matrix - awaiting Statbotics", "yellow")
+        else:
+            status_ribbon(
+                "Complete reliability matrix"
+                if is_reliability and complete
+                else (
+                    "Complete reference matrix"
+                    if complete
+                    else "Incomplete reference matrix - conclusions suppressed"
+                ),
+                "blue" if complete and conclusion_ready else "yellow",
+            )
+        summary_columns = st.columns(6)
+        summary_columns[0].metric("Season", resolved.get("season", "—"))
+        summary_columns[1].metric("State", resolved.get("state_model", "—"))
+        summary_columns[2].metric("Latent dim", resolved.get("latent_dim", "—"))
+        summary_columns[3].metric(
+            "Seeds",
+            ", ".join(map(str, resolved.get("seeds", [resolved.get("seed", "—")]))),
+        )
+        summary_columns[4].metric(
+            "Primary weeks",
+            ", ".join(map(str, resolved.get("primary_weeks", resolved.get("test_weeks", []))))
+            or "—",
+        )
+        summary_columns[5].metric("Promotion", "NO")
+        if is_reliability:
+            st.caption(
+                f"Initialization: {resolved.get('initialization', 'unselected')} | "
+                f"clip={resolved.get('selected_max_grad_norm', rejection.get('selected_max_grad_norm', 'unselected'))} | "
+                f"epochs={resolved.get('selected_epochs', 'unselected')} | "
+                f"stress week={resolved.get('stress_week', 'unrecorded')} | "
+                f"known-as-of: {resolved.get('known_as_of_policy', 'unrecorded')}"
+            )
+            if rejection:
+                st.warning(
+                    f"{rejection.get('status', 'development-rejected')}: "
+                    f"{rejection.get('reason', 'The development gate rejected this run.')}"
+                )
+        else:
+            st.caption(
+                f"Initialization: {resolved.get('selected_initialization', 'unselected')} | "
+                f"Known-as-of: {resolved.get('known_as_of_policy', 'unrecorded')}"
+            )
+        if manifest.get("sources"):
+            with st.expander("Source paths and hashes"):
+                st.json(manifest["sources"])
+        initialization_path = selected / "initialization_selection.csv"
+        if initialization_path.exists():
+            st.subheader("Development-only initialization selection")
+            st.caption(
+                "Week 4 selected initialization only. It is intentionally separated from final test evidence."
+            )
+            st.dataframe(load_csv(initialization_path), hide_index=True, width="stretch")
+        if is_reliability:
+            selection_path = selected / "development_selection.json"
+            if selection_path.exists():
+                st.subheader("Development-only optimization selection")
+                st.caption(
+                    "Week 4 alone selects clipping and fixed training duration. Test weeks do not "
+                    "select epochs."
+                )
+                st.json(load_json(selection_path))
+            grid_path = selected / "optimization_grid.csv"
+            if grid_path.exists():
+                st.subheader("Development optimization grid")
+                st.caption(
+                    "All rows are week-4 development evidence. Rejected grids remain available "
+                    "for diagnosing metric and optimization conflicts."
+                )
+                st.dataframe(
+                    load_csv(grid_path), hide_index=True, width="stretch", height=360
+                )
+            confirmation_path = selected / "development_confirmation.csv"
+            if confirmation_path.exists():
+                st.dataframe(
+                    load_csv(confirmation_path), hide_index=True, width="stretch", height=300
+                )
     if promotion.get("eligible") is False or "v5.8" in selected.as_posix().lower():
         status_ribbon("Development evidence — not eligible for promotion", "yellow")
     elif promotion.get("eligible") is True:
@@ -450,9 +605,7 @@ def render_evaluation() -> None:
         "feature_continuous_metrics.csv",
         "feature_binary_metrics.csv",
     ]
-    tabs = st.tabs(
-        ["History", "Metrics", "Calibration", "Uncertainty", "Coverage", "Provenance"]
-    )
+    tabs = st.tabs(["History", "Metrics", "Calibration", "Uncertainty", "Coverage", "Provenance"])
     with tabs[0]:
         history_path = next(
             (
@@ -472,12 +625,18 @@ def render_evaluation() -> None:
         else:
             history = load_csv(history_path)
             plotted_history = history
+            if "seed" in history and history["seed"].nunique() > 1:
+                seed_value = st.selectbox("History seed", sorted(history["seed"].unique()))
+                plotted_history = plotted_history[plotted_history["seed"] == seed_value]
+            if "model" in history and history["model"].nunique() > 1:
+                model_value = st.selectbox("History model", sorted(history["model"].unique()))
+                plotted_history = plotted_history[plotted_history["model"] == model_value]
             if "fold_number" in history and history["fold_number"].nunique() > 1:
                 fold = st.selectbox(
                     "History fold",
                     sorted(history["fold_number"].dropna().unique()),
                 )
-                plotted_history = history[history["fold_number"] == fold]
+                plotted_history = plotted_history[plotted_history["fold_number"] == fold]
             x = next((name for name in ("epoch", "step", "fold_number") if name in history), None)
             losses = [
                 name
@@ -507,9 +666,45 @@ def render_evaluation() -> None:
                     "value",
                 }.issubset(metrics.columns):
                     aggregate = metrics[metrics["scope"] == "aggregate"]
-                    evidence = aggregate.pivot_table(
+                    scoreboard = aggregate
+                    if is_reliability:
+                        scoreboard = scoreboard[
+                            scoreboard["seed"].astype(str).eq("ensemble")
+                            & scoreboard["probability_variant"].isin(
+                                ["raw", "not-applicable"]
+                            )
+                        ]
+                    evidence = scoreboard.pivot_table(
                         index="metric", columns="model", values="value", aggfunc="first"
                     ).reset_index()
+                    if "direction" in scoreboard:
+                        directions = scoreboard[["metric", "direction"]].drop_duplicates("metric")
+                        evidence = evidence.merge(directions, on="metric", how="left")
+                    st.subheader("Primary matched-subset scoreboard")
+                    st.caption(
+                        "Direction is explicit: lower favors smaller losses; higher favors accuracy. "
+                        "Aggregate values are observation weighted through the underlying match rows."
+                    )
+                    st.dataframe(evidence, hide_index=True, width="stretch")
+                    if is_reliability:
+                        st.caption(
+                            "The scoreboard uses the three-seed ensemble on primary weeks 6 and 8. "
+                            "Raw probabilities drive architecture decisions; week 10 is stress-only."
+                        )
+                    scope_options = [
+                        value
+                        for value in (
+                            "test",
+                            "event",
+                            "observation_slice",
+                            "development",
+                        )
+                        if value in set(metrics["scope"])
+                    ]
+                    if scope_options:
+                        detail_scope = st.selectbox("Metric detail scope", scope_options)
+                        detail = metrics[metrics["scope"] == detail_scope]
+                        st.dataframe(detail, hide_index=True, width="stretch", height=360)
                     if {"latentstrat", "statbotics"}.issubset(evidence.columns):
                         evidence["latentstrat_minus_statbotics"] = (
                             evidence["latentstrat"] - evidence["statbotics"]
@@ -535,6 +730,28 @@ def render_evaluation() -> None:
                         st.plotly_chart(figure, width="stretch")
                 st.dataframe(metrics, hide_index=True, width="stretch")
                 found = True
+        auxiliary_path = selected / "auxiliary_metrics.csv"
+        if auxiliary_path.exists():
+            st.subheader("Official auxiliary outcomes")
+            st.caption(
+                "Ranking, alliance-selection, playoff, and award probes are separate from match-forecast evidence."
+            )
+            st.dataframe(load_csv(auxiliary_path), hide_index=True, width="stretch")
+        utilization_path = selected / "parameter_utilization.csv"
+        if utilization_path.exists():
+            st.subheader("Parameter utilization")
+            st.dataframe(load_csv(utilization_path), hide_index=True, width="stretch")
+        external_path = selected / "external_comparison.csv"
+        if external_path.exists():
+            st.subheader("External Statbotics comparison")
+            external = load_csv(external_path)
+            if external.empty:
+                st.warning("Statbotics evidence is required before the final conclusion.")
+            else:
+                st.dataframe(external, hide_index=True, width="stretch")
+                verdict_path = selected / "external_verdict.json"
+                if verdict_path.exists():
+                    st.json(load_json(verdict_path))
         if not found:
             st.info("No supported metric CSV is present in this run.")
     with tabs[2]:
@@ -544,10 +761,24 @@ def render_evaluation() -> None:
         if path.exists():
             calibration = load_csv(path)
             st.dataframe(calibration, hide_index=True, width="stretch")
-            x = next((name for name in ("mean_prediction", "mean_probability") if name in calibration), None)
-            y = next((name for name in ("observed_rate", "fraction_positive") if name in calibration), None)
+            x = next(
+                (name for name in ("mean_prediction", "mean_probability") if name in calibration),
+                None,
+            )
+            y = next(
+                (name for name in ("observed_rate", "fraction_positive") if name in calibration),
+                None,
+            )
             if x and y:
-                fig = px.line(calibration, x=x, y=y, color="model" if "model" in calibration else None)
+                fig = px.line(
+                    calibration,
+                    x=x,
+                    y=y,
+                    color="model" if "model" in calibration else None,
+                    line_dash=(
+                        "probability_variant" if "probability_variant" in calibration else None
+                    ),
+                )
                 fig.add_shape(type="line", x0=0, y0=0, x1=1, y1=1, line={"dash": "dash"})
                 st.plotly_chart(fig, width="stretch")
         else:
@@ -555,8 +786,76 @@ def render_evaluation() -> None:
     with tabs[3]:
         path = selected / "paired_bootstrap.csv"
         if path.exists():
-            st.dataframe(load_csv(path), hide_index=True, width="stretch")
-            st.caption("Negative LatentStrat-minus-Statbotics loss deltas favor LatentStrat.")
+            uncertainty = load_csv(path)
+            st.dataframe(uncertainty, hide_index=True, width="stretch")
+            st.caption("Negative candidate-minus-baseline loss deltas favor the candidate.")
+            decisions_path = selected / "interaction_decisions.csv"
+            if is_reliability and decisions_path.exists():
+                decisions = load_csv(decisions_path)
+                if not bool(resolved.get("conclusion_ready")):
+                    st.warning(
+                        "Interaction decisions are provisional until the exact matched Statbotics "
+                        "comparison is complete."
+                    )
+                st.subheader("Interaction evidence classification")
+                st.dataframe(decisions, hide_index=True, width="stretch")
+                hierarchical_path = selected / "hierarchical_bootstrap.csv"
+                if hierarchical_path.exists():
+                    st.subheader("Hierarchical seed-event bootstrap")
+                    st.dataframe(
+                        load_csv(hierarchical_path), hide_index=True, width="stretch"
+                    )
+            elif (
+                is_reference
+                and resolved.get("complete")
+                and {
+                    "candidate",
+                    "baseline",
+                    "metric",
+                    "test_week",
+                    "delta_mean",
+                    "probability_of_improvement",
+                }.issubset(uncertainty.columns)
+            ):
+                tolerance = {"winner_brier": 0.005, "winner_log_loss": 0.01}
+                conclusions = []
+                for keys, comparison in uncertainty.groupby(["candidate", "baseline", "metric"]):
+                    supported_weeks = int((comparison["probability_of_improvement"] >= 0.80).sum())
+                    metric_name = str(keys[2])
+                    if metric_name == "score_differential_squared_error" and {
+                        "candidate_loss_mean",
+                        "baseline_loss_mean",
+                    }.issubset(comparison.columns):
+                        harmful_weeks = int(
+                            (
+                                comparison["candidate_loss_mean"].clip(lower=0).pow(0.5)
+                                > 1.02 * comparison["baseline_loss_mean"].clip(lower=0).pow(0.5)
+                            ).sum()
+                        )
+                    else:
+                        practical = tolerance.get(metric_name, float("inf"))
+                        harmful_weeks = int((comparison["delta_mean"] > practical).sum())
+                    label = (
+                        "supported"
+                        if supported_weeks >= 2
+                        else ("harmful" if harmful_weeks >= 2 else "uncertain")
+                    )
+                    conclusions.append(
+                        {
+                            "candidate": keys[0],
+                            "baseline": keys[1],
+                            "metric": keys[2],
+                            "classification": label,
+                            "supporting_weeks": supported_weeks,
+                            "harmful_weeks": harmful_weeks,
+                        }
+                    )
+                st.subheader("Interaction evidence classification")
+                st.dataframe(pd.DataFrame(conclusions), hide_index=True, width="stretch")
+            elif is_reference:
+                st.info(
+                    "Architectural conclusions are hidden until the complete matrix is present."
+                )
         else:
             st.info("No event-cluster paired bootstrap artifact is present.")
     with tabs[4]:
@@ -578,7 +877,8 @@ def render_model() -> None:
             ArtifactKind.PRIOR_CHECKPOINT,
             ArtifactKind.MATCH_BREAKDOWN_CHECKPOINT,
         ),
-        "model.checkpoint",
+        "model.checkpoint.reference-v1",
+        preferred_path_token="artifacts/reference/",
     )
     if artifact is None:
         return
@@ -593,6 +893,42 @@ def render_model() -> None:
     cols[1].metric("Schema", summary.schema_version or "historical")
     cols[2].metric("Latent dimensions", summary.latent_dim or "—")
     cols[3].metric("Parameters", f"{summary.parameter_count:,}")
+    utilization_path = next(
+        (
+            parent / "parameter_utilization.csv"
+            for parent in artifact.path.parents
+            if (parent / "parameter_utilization.csv").exists()
+        ),
+        None,
+    )
+    if utilization_path is not None:
+        utilization = load_csv(utilization_path)
+        architecture = summary.metadata.get("match_architecture")
+        test_week = summary.metadata.get("test_week")
+        if "model" in utilization and architecture:
+            utilization = utilization[utilization["model"].astype(str) == str(architecture)]
+        if "test_week" in utilization and test_week is not None:
+            utilization = utilization[
+                pd.to_numeric(utilization["test_week"], errors="coerce") == int(test_week)
+            ]
+        if not utilization.empty:
+            total_rows = (
+                utilization[utilization["module"].astype(str) == "<all>"]
+                if "module" in utilization
+                else utilization
+            )
+            total = total_rows.iloc[0]
+            utilization_columns = st.columns(4)
+            utilization_columns[0].metric("Nominal", f"{int(total['nominal_parameters']):,}")
+            utilization_columns[1].metric("Trainable", f"{int(total['trainable_parameters']):,}")
+            utilization_columns[2].metric(
+                "Gradient receiving",
+                f"{int(total['gradient_receiving_parameters']):,}",
+            )
+            utilization_columns[3].metric("Active Z_base rows", int(total["active_z_base_rows"]))
+            if "module" in utilization:
+                st.caption("Final refit parameter utilization by module")
+                st.dataframe(utilization, hide_index=True, width="stretch")
     metadata_tab, parameters_tab, options_tab = st.tabs(["Metadata", "Parameters", "Options"])
     with metadata_tab:
         st.json(summary.metadata)
@@ -634,10 +970,32 @@ def _embedding_source():
     if not artifacts:
         st.info("No supported embedding artifacts were found.")
         return None
+    artifacts = tuple(
+        sorted(
+            artifacts,
+            key=lambda artifact: (
+                0 if "artifacts/reference/" in artifact.path.as_posix() else 1,
+                artifact.path.as_posix(),
+            ),
+        )
+    )
+    requested = str(st.query_params.get("artifact", ""))
+    requested_index = next(
+        (
+            index
+            for index, artifact in enumerate(artifacts)
+            if requested and requested in artifact.path.as_posix()
+        ),
+        0,
+    )
     artifact_id = st.selectbox(
         "Embedding source",
         [artifact.artifact_id for artifact in artifacts],
-        format_func=lambda value: _get_catalog().by_id(value).path.relative_to(_get_catalog().root).as_posix(),
+        format_func=lambda value: (
+            _get_catalog().by_id(value).path.relative_to(_get_catalog().root).as_posix()
+        ),
+        index=requested_index,
+        key=f"embeddings.source.reference-v1.{requested or 'default'}",
     )
     return _get_catalog().by_id(artifact_id)
 
@@ -662,10 +1020,18 @@ def render_embeddings() -> None:
                 label = "Prior team embeddings"
             else:
                 event_map = payload.get("team_event_index_map") or {}
-                event_keys = sorted({str(key).split("::", 1)[0] for key in event_map if "::" in str(key)})
-                representation = st.selectbox(
-                    "Representation", ["Base table", "All event states", *event_keys]
+                event_keys = sorted(
+                    {str(key).split("::", 1)[0] for key in event_map if "::" in str(key)}
                 )
+                is_static = (payload.get("options") or {}).get("state_model") == "static-z-base"
+                choices = (
+                    ["Base table"] if is_static else ["Base table", "All event states", *event_keys]
+                )
+                representation = st.selectbox("Representation", choices)
+                if is_static:
+                    st.info(
+                        "Static Z_base reference: event trajectories and temporal-state claims are unavailable by design."
+                    )
                 if representation == "All event states":
                     frame, vector_columns = season_event_trajectory_frame(payload)
                     trajectory_mode = True
@@ -694,7 +1060,9 @@ def render_embeddings() -> None:
         + ", ".join(f"PC{index + 1}: {value:.1%}" for index, value in enumerate(variance))
     )
     coordinates = pca.coordinates
-    plot = coordinates if len(coordinates) <= 15_000 else coordinates.sample(15_000, random_state=2026)
+    plot = (
+        coordinates if len(coordinates) <= 15_000 else coordinates.sample(15_000, random_state=2026)
+    )
     hover = next((name for name in ("team_key", "match_key", "row_id") if name in plot), None)
     color = "season" if "season" in plot and plot["season"].nunique() > 1 else None
     fig = px.scatter(plot, x="PC1", y="PC2", color=color, hover_name=hover, opacity=0.72)
@@ -719,7 +1087,9 @@ def render_embeddings() -> None:
             "Points follow event-key order because event dates are not persisted in this "
             "checkpoint. Treat the line as an event-state diagnostic, not a time-causal path."
         )
-    label_column = next((name for name in ("team_key", "row_id", "match_key") if name in frame), None)
+    label_column = next(
+        (name for name in ("team_key", "row_id", "match_key") if name in frame), None
+    )
     if label_column:
         options = frame.index.tolist()
         query = st.selectbox(
@@ -728,7 +1098,11 @@ def render_embeddings() -> None:
             format_func=lambda index: str(frame.loc[index, label_column]),
         )
         neighbors = cosine_neighbors(space, frame.reset_index(drop=True), int(query), limit=12)
-        shown = [column for column in ("cosine_similarity", label_column, "season", "event_key", "alliance") if column in neighbors]
+        shown = [
+            column
+            for column in ("cosine_similarity", label_column, "season", "event_key", "alliance")
+            if column in neighbors
+        ]
         st.dataframe(neighbors[shown], hide_index=True, width="stretch")
     st.caption(
         "PCA and cosine neighbors generate hypotheses. Coordinates are not robot traits, causal "
@@ -757,7 +1131,7 @@ def _scoreboard(red_score: float | None, blue_score: float | None, probability: 
         '<div class="ls-score ls-score--red"><div class="ls-score__label">Predicted red</div>'
         f'<div class="ls-score__value">{red_text}</div></div>'
         '<div class="ls-score__center"><strong>FORECAST</strong>'
-        f'<span>Red win {probability:.1%}</span></div>'
+        f"<span>Red win {probability:.1%}</span></div>"
         '<div class="ls-score ls-score--blue"><div class="ls-score__label">Predicted blue</div>'
         f'<div class="ls-score__value">{blue_text}</div></div>'
         "</div>",
@@ -798,7 +1172,8 @@ def _score_breakdown(row: pd.Series) -> pd.DataFrame:
     return pd.DataFrame(rows).drop_duplicates("breakdown").head(40)
 
 
-def _saved_prediction(match_key: str) -> pd.Series | None:
+def _saved_predictions(match_key: str) -> pd.DataFrame:
+    frames = []
     for artifact in _get_catalog().of_kind(ArtifactKind.PREDICTIONS):
         try:
             table = _parquet(*_signature_args(artifact))
@@ -808,22 +1183,34 @@ def _saved_prediction(match_key: str) -> pd.Series | None:
             continue
         rows = table[table["match_key"].astype(str) == match_key]
         if not rows.empty:
-            result = rows.iloc[0].copy()
-            result["_source_path"] = str(artifact.path)
-            return result
-    return None
+            rows = rows.copy()
+            rows["_source_path"] = str(artifact.path)
+            frames.append(rows)
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
 def render_match() -> None:
     context_bar("Match", "Preview → prediction → result", "Diagnostic")
-    feature = _artifact_select("Feature table", (ArtifactKind.FEATURE_TABLE,), "match.feature")
+    feature = _artifact_select(
+        "Feature table",
+        (ArtifactKind.FEATURE_TABLE,),
+        "match.feature.reference-v1",
+        preferred_path_token="data/features/season/features_v58_2026.parquet",
+    )
     checkpoint = _artifact_select(
-        "Season checkpoint", (ArtifactKind.SEASON_CHECKPOINT,), "match.checkpoint"
+        "Season checkpoint",
+        (ArtifactKind.SEASON_CHECKPOINT,),
+        "match.checkpoint.reference-v1",
+        preferred_path_token="artifacts/reference/",
     )
     if feature is None:
         return
     table = _parquet(*_signature_args(feature))
-    required = {"event_key", "match_key", *[f"{color}_team_{slot}_key" for color in ("red", "blue") for slot in range(1, 4)]}
+    required = {
+        "event_key",
+        "match_key",
+        *[f"{color}_team_{slot}_key" for color in ("red", "blue") for slot in range(1, 4)],
+    }
     if not required.issubset(table.columns):
         st.error("Selected feature table does not satisfy the match-spine schema.")
         return
@@ -836,7 +1223,33 @@ def render_match() -> None:
     blue = tuple(str(row[f"blue_team_{slot}_key"]) for slot in range(1, 4))
     _team_board(red, blue, match_key)
 
-    saved = _saved_prediction(match_key)
+    saved_options = _saved_predictions(match_key)
+    saved = None
+    if not saved_options.empty:
+        labels = []
+        for index, candidate in saved_options.iterrows():
+            identity = [
+                str(candidate[name])
+                for name in (
+                    "model",
+                    "architecture",
+                    "seed",
+                    "prediction_level",
+                    "initialization",
+                    "fold_number",
+                    "test_week",
+                )
+                if name in candidate and pd.notna(candidate[name])
+            ]
+            labels.append(
+                f"{index}: " + " · ".join(identity or [Path(str(candidate["_source_path"])).name])
+            )
+        selected_prediction = st.selectbox(
+            "Saved prediction variant",
+            list(range(len(saved_options))),
+            format_func=lambda index: labels[index],
+        )
+        saved = saved_options.iloc[int(selected_prediction)]
     actual_red, actual_blue = _actual_scores(row)
     if saved is not None:
         saved_red = saved.get("pred_red_total_score", saved.get("statbotics_pred_red_score"))
@@ -845,14 +1258,31 @@ def render_match() -> None:
             "pred_red_win_probability", saved.get("statbotics_pred_red_win_probability")
         )
         if pd.notna(saved_probability):
-            status_ribbon("Saved prediction artifact — use its manifest for evidence status", "blue")
+            status_ribbon(
+                "Saved prediction artifact — use its manifest for evidence status", "blue"
+            )
             _scoreboard(
                 float(saved_red) if pd.notna(saved_red) else None,
                 float(saved_blue) if pd.notna(saved_blue) else None,
                 float(saved_probability),
             )
             evidence = [str(saved["_source_path"])]
-            for name in ("known_as_of", "val_week", "fold_number", "checkpoint_path"):
+            for name in (
+                "model",
+                "architecture",
+                "initialization",
+                "seed",
+                "prediction_level",
+                "evidence_role",
+                "known_as_of",
+                "test_week",
+                "val_week",
+                "fold_number",
+                "calibration_method",
+                "calibration_source_weeks",
+                "calibration_source_rows",
+                "checkpoint_path",
+            ):
                 if name in saved and pd.notna(saved[name]):
                     evidence.append(f"{name}={saved[name]}")
             st.caption(" · ".join(evidence))
@@ -916,7 +1346,9 @@ def render_match() -> None:
                 )
                 error_cols[2].metric(
                     "Actual winner",
-                    "TIE" if actual_red == actual_blue else ("RED" if actual_red > actual_blue else "BLUE"),
+                    "TIE"
+                    if actual_red == actual_blue
+                    else ("RED" if actual_red > actual_blue else "BLUE"),
                 )
             pma = pd.DataFrame(
                 {

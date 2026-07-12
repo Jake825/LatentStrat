@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict
@@ -23,6 +24,8 @@ class LatentStratOptions(BaseModel):
     season: int = 2026
     smoke_event_key: str = "2026ilch"
     latent_dim: int = 16
+    state_model: Literal["base-plus-event", "static-z-base"] = "base-plus-event"
+    match_architecture: Literal["additive", "teammate-set", "full-match"] = "full-match"
     attention_heads: int = 1
     attention_dropout: float = 0.0
     ffn_dropout: float = 0.0
@@ -74,6 +77,7 @@ class LatentStratOptions(BaseModel):
         "blue_teleop_pts",
     )
     endgame_class_order: tuple[str, ...] = ("None", "Level1", "Level2", "Level3")
+    auto_class_order: tuple[str, ...] = ("None", "Level1", "Level2", "Level3")
     award_targets: tuple[str, ...] = (
         "impact",
         "ei",
@@ -164,9 +168,7 @@ def default_options(season: int = 2026) -> LatentStratOptions:
 
     config_path = SEASON_CONFIG_ROOT / f"{season}.yaml"
     payload = (
-        yaml.safe_load(config_path.read_text(encoding="utf-8"))
-        if config_path.exists()
-        else {}
+        yaml.safe_load(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
     )
     values = dict(payload or {})
     values["season"] = season
