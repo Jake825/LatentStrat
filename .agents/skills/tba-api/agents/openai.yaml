@@ -1,7 +1,7 @@
 interface:
   display_name: "TBA API"
-  short_description: "Work with FRC data from The Blue Alliance"
-  default_prompt: "Use $tba-api to fetch, normalize, and analyze FRC event data with tbapy."
+  short_description: "Retrieve FRC data from The Blue Alliance"
+  default_prompt: "Use $tba-api to retrieve or normalize FRC data from The Blue Alliance."
 
 policy:
   allow_implicit_invocation: true

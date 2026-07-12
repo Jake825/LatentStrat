@@ -1,58 +1,26 @@
-# Command Docs Checklist
+# Command Documentation Checklist
 
-Use this before documenting commands, dependencies, or environment variables.
-
-## Verify Commands
-
-Inspect command definitions before writing examples:
+Inspect command definitions and live help before writing examples:
 
 ```powershell
-python -m latentstrat.cli --help
 latentstrat --help
+latentstrat pretrain --help
+latentstrat season --help
+latentstrat artifacts --help
+latentstrat scouting --help
+latentstrat dev --help
 ```
 
-Use the command form already used by surrounding docs unless the task specifically changes it.
+Use the narrowest subgroup help for options. The supported top-level families are `pretrain`, `season`, `artifacts`, `scouting`, and `dev`; `experimental` is an explicitly non-canonical top-level family, while diagnostics are nested under `dev`. Prefer grouped commands over deprecated flat compatibility aliases, and do not revive tombstoned workflows in new docs.
 
-## Project Configuration
+## Configuration
 
-Use `pyproject.toml` for:
+- Read package metadata, Python requirements, dependencies, and console entry points from `pyproject.toml`.
+- Use `TBA_API_KEY` for live The Blue Alliance access; never publish real secret values.
+- Confirm paths against `src/latentstrat/paths.py` and active documentation.
 
-- Package name.
-- Python version requirement.
-- Runtime dependencies.
-- Optional dev dependencies.
-- Console script entry points.
-- Ruff and pytest configuration.
+## Validation
 
-Use `environment.yml` only when documenting Conda setup.
-
-## Environment Variables
-
-Current key environment variable:
-
-- `TBA_API_KEY`: used for live The Blue Alliance ingestion.
-
-Do not document `TBA_AUTH_KEY` for LatentStrat examples.
-
-## Validation Commands
-
-For docs-only changes:
-
-```powershell
-git diff --check
-```
-
-For skill changes:
-
-```powershell
-python C:\Users\Jelle\.codex\skills\.system\skill-creator\scripts\quick_validate.py .agents\skills\<skill-name>
-```
-
-For runtime Python changes:
-
-```powershell
-ruff check .
-pytest
-```
-
-If only a narrow runtime area changed, targeted tests are acceptable when reported clearly.
+- Documentation-only changes: `git diff --check` plus any relevant command help.
+- Skill changes: run the skill-creator `quick_validate.py` against every changed skill.
+- Runtime changes: run targeted tests first, then the broader Ruff and pytest checks proportional to risk.

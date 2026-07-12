@@ -1,0 +1,7 @@
+interface:
+  display_name: "LatentStrat Scouting Ingestion"
+  short_description: "Audit and import FRC scouting data"
+  default_prompt: "Use $latentstrat-scouting-ingestion to audit and import this scouting source."
+
+policy:
+  allow_implicit_invocation: true

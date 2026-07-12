@@ -1,7 +1,0 @@
-interface:
-  display_name: "Scouting Source Audit"
-  short_description: "Profile messy FRC scouting files"
-  default_prompt: "Use $scouting-source-audit to profile this scouting file and produce a LatentStrat mapping report."
-
-policy:
-  allow_implicit_invocation: true

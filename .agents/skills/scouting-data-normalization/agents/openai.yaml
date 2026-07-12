@@ -1,7 +1,0 @@
-interface:
-  display_name: "Scouting Normalization"
-  short_description: "Normalize messy FRC scouting data"
-  default_prompt: "Use $scouting-data-normalization to map messy scouting columns into LatentStrat-ready fields."
-
-policy:
-  allow_implicit_invocation: true

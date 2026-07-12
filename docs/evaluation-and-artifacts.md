@@ -16,6 +16,29 @@ Use walk-forward paired predictions for season-model promotion:
 Calibration matters independently from winner accuracy. A model can rank winners more accurately
 while producing worse probabilities.
 
+## Statbotics Comparison
+
+Build a leakage-safe baseline from Statbotics pre-match `pred` fields:
+
+```powershell
+latentstrat season build-statbotics-baseline `
+  --season 2026 `
+  --output data/baselines/statbotics/statbotics_predictions_2026.parquet
+```
+
+Compare it with an existing LatentStrat prediction artifact without loading or training a model:
+
+```powershell
+latentstrat artifacts evaluate-predictions `
+  --candidate artifacts/baselines/v5.8/walk-forward/walk_forward_predictions.parquet `
+  --statbotics data/baselines/statbotics/statbotics_predictions_2026.parquet `
+  --output artifacts/evaluation/v58-vs-statbotics
+```
+
+The evaluator uses exact `match_key` intersections and reports unmatched coverage without imputation. Tied matches remain in score metrics and are excluded from winner accuracy, Brier score, log loss, and calibration. Score MAE/MSE/RMSE, score-differential metrics, probability metrics, ten-bin calibration, and observation-weighted weekly and aggregate results are written alongside paired predictions.
+
+Paired uncertainty uses an event-cluster bootstrap. Deltas are LatentStrat minus Statbotics; negative deltas mean lower loss. The interval reflects variation across the events represented in the artifact, not uncertainty about all possible FRC seasons.
+
 ## Manifest Contract
 
 New artifact directories write `manifest.json` containing:
@@ -53,3 +76,5 @@ The V5.8 tagged replay remains the season-model comparison boundary:
 baselines/v5.8-baseline.json
 artifacts/baselines/v5.8/
 ```
+
+The replay is reproducible historical development evidence, not unbiased promotion evidence: its fold checkpoints selected the best epoch using the same held-out weeks represented in the reported predictions. New Statbotics comparisons therefore write `promotion_eligible=false` until the nested temporal protocol in the [roadmap](roadmap.md) is implemented.

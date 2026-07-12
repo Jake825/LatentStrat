@@ -139,4 +139,4 @@ When turning spatial scouting data into LatentStrat features, choose a represent
 - Consider alliance-relative mirrored coordinates for comparing red and blue behavior from each alliance's perspective.
 - Preserve raw source columns separately from normalized model features when debugging imports.
 
-Do not mix field-relative and alliance-relative coordinates in the same feature column. Use `$latentstrat-feature-pipeline` for Parquet/tensor boundaries and `$frc-time-aware-analysis` before using spatial observations as pre-match model inputs.
+Do not mix field-relative and alliance-relative coordinates in the same feature column. Validate Parquet/tensor boundaries separately, and establish observation timing before using spatial scouting values as pre-match inputs.

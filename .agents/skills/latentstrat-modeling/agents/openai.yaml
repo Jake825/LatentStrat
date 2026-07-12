@@ -1,0 +1,7 @@
+interface:
+  display_name: "LatentStrat Modeling"
+  short_description: "Develop and evaluate LatentStrat models"
+  default_prompt: "Use $latentstrat-modeling to change or evaluate the LatentStrat season model."
+
+policy:
+  allow_implicit_invocation: true

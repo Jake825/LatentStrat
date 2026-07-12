@@ -1,33 +1,24 @@
 ---
 name: latentstrat-feature-pipeline
-description: Use when building, reviewing, or documenting LatentStrat feature tables from TBA, Statbotics, scouting, or other FRC data sources into Pandas/PyArrow Parquet files for train-features. Covers the TBA match-table spine, left joins, team slot columns, make_team_index_map, dtype and tensor boundaries, missing data, split-safe normalization, and feature-table validation.
+description: Build or review LatentStrat season feature-table code that turns FRC match data into Pandas/PyArrow Parquet and model-ready tensors. Use for the match spine, joins, team slots, dtypes, indexing, missingness, and split-safe transformations. Do not use for provider-only API work, scouting importer/schema work, model internals, metric interpretation, or documentation-only tasks.
 ---
 
 # LatentStrat Feature Pipeline
 
-Use this skill for work that turns raw FRC data into the Parquet feature tables consumed by LatentStrat training.
+Work from the canonical season pipeline in `src/latentstrat/season/features.py` and `src/latentstrat/season/data.py`. Treat `src/latentstrat/features.py` and `src/latentstrat/data.py` as deprecated V6.1 aliases.
 
-## Core Directives
+## Invariants
 
-1. Treat the TBA match table as the dataset spine. Join enrichment data onto existing match rows and team slots; do not let scouting or external analytics create the primary row set.
-2. Prefer Pandas/PyArrow-friendly extraction for ML workflows. Keep API pulls normalized into columns that can be validated and written to Parquet.
-3. Preserve key grain. Match-level features join by `match_key`; event features join by `event_key`; team-event and team-match features must also align with a specific team slot.
-4. Keep team keys as `frc####` strings in persisted Parquet. `make_team_index_map` creates contiguous nullable `Int64` index columns during training, and that mapping is per training run.
-5. Do not blanket-cast Parquet columns to `float32`. Nullable ints, timestamps, strings, and categorical columns are intentionally preserved. Convert tensor-bound values deliberately at the PyTorch dataset boundary.
-6. Preserve temporal integrity. Use `$frc-time-aware-analysis` for `known_as_of` rules and do not use post-match or post-event facts as pre-match features.
+- Preserve the TBA match table as the row spine and enrich it with left joins at explicit match, event, team-event, or team-match grain.
+- Persist team keys as `frc####` strings; create run-local integer mappings only at the training boundary.
+- Preserve nullable integers, strings, timestamps, masks, and categorical values in Parquet. Convert tensor-bound values deliberately.
+- Keep missingness observable and validate all six team slots.
+- Fit normalization and other learned transforms on training data only.
+- Reject post-match or post-event facts as inputs to earlier predictions.
 
 ## References
 
-- Read `references/match-spine-and-joins.md` for the feature-table spine, scouting merge prefixes, and join grain.
-- Read `references/parquet-and-dtypes.md` for PyArrow boundaries, persisted dtypes, and tensor conversion rules.
-- Read `references/team-indexing-and-tensors.md` for `make_team_index_map`, team slot tensors, and missing team constraints.
-- Read `references/missing-data-and-validation.md` for incomplete sources, imputation discipline, and validation checks.
-
-## Coordinate With Other Skills
-
-- Use `$tba-api` for TBA keys, schedules, matches, rankings, awards, and raw score breakdowns.
-- Use `$statbotics` for EPA interpretation and optional external enrichment.
-- Use `$latentstrat-scouting-db` for SQLite scouting schema and merge prefixes.
-- Use `$frc-time-aware-analysis` before deciding whether a feature was available at prediction time.
-- Use `$pytorch-set-transformer` when changing tensor shapes or model-facing feature contracts.
-- Use `$latentstrat-model-evaluation` when deciding whether a feature improved model quality.
+- Read `references/match-spine-and-joins.md` for row grain and joins.
+- Read `references/parquet-and-dtypes.md` for persisted schema and tensor conversion.
+- Read `references/team-indexing-and-tensors.md` for team maps and slot contracts.
+- Read `references/missing-data-and-validation.md` for missingness and checks.

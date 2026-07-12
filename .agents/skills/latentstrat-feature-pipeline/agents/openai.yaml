@@ -1,7 +1,7 @@
 interface:
   display_name: "LatentStrat Feature Pipeline"
-  short_description: "Build ML-ready Parquet feature tables"
-  default_prompt: "Use $latentstrat-feature-pipeline to build LatentStrat feature tables from FRC data into Parquet."
+  short_description: "Build season Parquet and tensor inputs"
+  default_prompt: "Use $latentstrat-feature-pipeline to change or review the LatentStrat season feature pipeline."
 
 policy:
   allow_implicit_invocation: true

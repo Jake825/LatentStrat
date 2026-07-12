@@ -1,172 +1,38 @@
 # LatentStrat Documentation Map
 
-Use this reference to place documentation in the right file.
+Use `docs/index.md` as the active-document index. Pages under `docs/archive/` describe superseded designs and commands.
 
-## README.md
+## Entry Points
 
-Use for:
+- `README.md`: purpose, installation, supported workflow, repository layout, storage, and links.
+- `docs/index.md`: active documentation navigation.
+- `docs/V6.1.md`: supported V6.1 contract and compatibility window.
+- `docs/rebuild-from-scratch.md`: end-to-end runnable rebuild path.
+- `docs/cli-reference.md`: grouped command surface and discovery guidance.
 
-- Project purpose.
-- Installation.
-- Secret setup.
-- Common commands.
-- High-level workflow.
+## Current Behavior
 
-Keep it short. Link deeper details to `docs/`.
+- `docs/architecture.md`: active boundaries, season model, and checkpoint flow.
+- `docs/current-state.md`: recommended stack, canonical paths, evidence, and caveats.
+- `docs/data-sources.md`: TBA, Statbotics, OpenAI, scouting, sidecars, secrets, and caches.
+- `docs/season-training.md`: season feature, training, and validation workflow.
+- `docs/prior-pretraining.md`: Day Zero prior inputs, commands, and artifact contract.
+- `docs/match-breakdown-pretraining.md`: historical match-breakdown corpus, training, and inspection.
 
-## docs/training-and-validation.md
+## Evaluation and Operations
 
-Use for:
+- `docs/evaluation-and-artifacts.md`: metrics, Statbotics comparison, manifests, artifact paths, and interpretation limits.
+- `docs/experiment-ledger.md`: local run evidence and open follow-ups.
+- `docs/roadmap.md`: future milestones; never present these as implemented behavior.
+- `docs/streamlit-app.md`: read-only research workbench behavior and validation.
+- `docs/changelog.md`: version and commit timeline, including clearly marked unreleased work.
 
-- High-level feature-building workflow.
-- Training from Parquet.
-- Splits, target normalization, and validation boundaries.
-- Baselines, controls, and evaluation context.
+## Scouting and Teaching
 
-Coordinate with `$frc-time-aware-analysis` for leakage and timing language.
-
-## docs/current-state.md
-
-Use for:
-
-- The canonical current implementation snapshot.
-- Promoted prior and walk-forward artifacts.
-- Current caveats and local validation status.
-
-Update this whenever model defaults, promoted artifacts, or current caveats
-change.
-
-## docs/changelog.md
-
-Use for:
-
-- Mapping semantic LatentStrat versions to Git commits.
-- Recording unreleased or working-tree version states.
-- Explaining how to inspect older code snapshots.
-
-Update this whenever a named version, public CLI, model behavior, training
-default, or promoted artifact recommendation changes.
-
-## docs/experiment-ledger.md
-
-Use for:
-
-- Run-by-run local experiment evidence.
-- Artifact paths, inputs, epochs/folds, outcomes, and design lessons.
-- Comparing prior and walk-forward runs without crowding narrative docs.
-
-## docs/cli-reference.md
-
-Use for:
-
-- Current `latentstrat` command surface.
-- Command examples and recommended modern paths.
-- Explaining underused diagnostic, evidence, venue, and cache commands.
-
-## docs/schemas-and-artifacts-reference.md
-
-Use for:
-
-- Generated Parquet schemas.
-- Sidecar schemas.
-- Artifact CSV contracts and local artifact row counts.
-
-## docs/feature-pipeline.md
-
-Use for:
-
-- TBA match-table spine.
-- Scouting merge prefixes and join grain.
-- PyArrow Parquet boundaries.
-- Team indexing and tensor conversion.
-- Missing-data expectations for feature construction.
-
-Coordinate with `$latentstrat-feature-pipeline`.
-
-## docs/model-structure.md
-
-Use for:
-
-- Neural model architecture.
-- Tensor shapes.
-- Prediction heads.
-- Model internals needed for maintainers.
-
-## docs/model-architecture-reference.md
-
-Use for:
-
-- Exact tensor shapes.
-- Layer dimensions and parameter counts.
-- Loss equations and metric formulas.
-
-## docs/model-selection.md
-
-Use for:
-
-- Selecting model variants.
-- Comparing baselines and controls.
-- Choosing evaluation criteria.
-
-## docs/model-evaluation.md
-
-Use for:
-
-- Metric interpretation.
-- Calibration, Brier score, and log loss.
-- Current baselines and controls.
-- Evidence packet outputs.
-- Reading embedding diagnostics alongside metrics.
-
-Coordinate with `$latentstrat-model-evaluation`.
-
-## docs/embedding-inspection.md
-
-Use for:
-
-- Team embedding inspection.
-- Diagnostics and interpretation.
-- Evidence packet context.
-
-## docs/student-primer.md
-
-Use for:
-
-- High-school-student-friendly explanations.
-- Plain-language definitions of LatentStrat concepts.
-- First-click path before technical references.
-
-## docs/scouting-data-layer.md
-
-Use for:
-
-- Scouting database purpose.
-- SQLModel table overview.
-- Feature merge behavior.
-- Leakage discipline for scouting fields.
-
-Coordinate with `$latentstrat-scouting-db`.
-
-## docs/scouting-data-ingestion.md
-
-Use for:
-
-- Importer examples.
-- CSV/spreadsheet ingestion.
-- `session.merge` patterns.
-- Scouting key normalization.
-
-Coordinate with `$scouting-adapter-writer` and `$scouting-data-normalization`.
+- `docs/scouting-data-layer.md`: SQLModel schema, feature merge, and leakage discipline.
+- `docs/scouting-data-ingestion.md`: normalization and importer examples.
+- `docs/student-primer.md`: accessible explanations for students and new contributors.
 
 ## Maintenance Rule
 
-When model or training behavior changes, update the narrowest specific doc and
-also check whether these source-of-truth docs need edits:
-
-- `docs/current-state.md`
-- `docs/changelog.md`
-- `docs/model-architecture-reference.md`
-- `docs/experiment-ledger.md`
-
-If the exact commit SHA is not known yet, mark changelog rows as `Unreleased`
-or `Pending commit` and replace them with a SHA after the work is committed.
+Update the narrowest page that owns the behavior. Also inspect `docs/current-state.md`, `docs/changelog.md`, `docs/cli-reference.md`, and `docs/index.md` when a public command, supported workflow, artifact contract, or promoted recommendation changes.

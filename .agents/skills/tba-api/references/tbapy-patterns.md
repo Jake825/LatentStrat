@@ -97,7 +97,7 @@ For ML workflows, prefer DataFrame-oriented extraction that can feed the LatentS
 - Use left joins when adding scouting or external analytics so missing enrichment does not drop official matches.
 - Write feature tables through the project feature pipeline so PyArrow dtypes, nullable columns, and training-derived columns are handled consistently.
 
-Use `$latentstrat-feature-pipeline` for Parquet boundaries, team indexing, and tensor-ready feature contracts.
+Keep provider extraction separate from Parquet schema, team indexing, and tensor conversion so each boundary can be validated independently.
 
 ## Handling Historical Quirks
 

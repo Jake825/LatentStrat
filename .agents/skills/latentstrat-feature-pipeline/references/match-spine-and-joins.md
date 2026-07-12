@@ -38,9 +38,9 @@ Keep these prefixes stable when documenting or reviewing feature tables. If a ne
 
 ## Optional External Enrichment
 
-Statbotics data can be an external feature source, but do not assume it is already implemented as a baseline or required feature path. If using Statbotics:
+Statbotics data can be an external feature source and also has a separate saved-prediction baseline workflow. Do not confuse baseline predictions with required model inputs. If using Statbotics as enrichment:
 
 - Inspect returned keys before hard-coding EPA paths.
 - Join by shared keys such as `match_key`, `event_key`, and `team`.
 - Preserve whether a field is pre-match, post-match, current, or endpoint/version-dependent.
-- Validate feature timing with `$frc-time-aware-analysis`.
+- Validate every field against the prediction timestamp before joining it.

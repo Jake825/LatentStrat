@@ -81,7 +81,7 @@ For LatentStrat ML workflows, normalize Statbotics responses into Pandas DataFra
 - Treat EPA fields as endpoint/version-dependent until keys are inspected.
 - Preserve the DataFrame/Parquet boundary; do not convert all numeric columns to `float32` during enrichment.
 
-Use `$latentstrat-feature-pipeline` for team slot joins, PyArrow behavior, and tensor-bound dtype conversion. Use `$latentstrat-model-evaluation` before claiming Statbotics is an in-repo baseline; the current implemented baselines are mean and ridge match-OPR.
+Keep provider retrieval separate from team-slot joins, PyArrow behavior, and tensor-bound dtype conversion. LatentStrat now implements a saved pre-match Statbotics baseline in addition to its mean and ridge match-OPR controls; compare it only on exact shared match keys.
 
 ## Leakage-Safe Feature Extraction
 

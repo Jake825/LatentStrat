@@ -1,7 +1,7 @@
 interface:
   display_name: "FRC Game Manual"
-  short_description: "Search and interpret FRC rules"
-  default_prompt: "Use $frc-game-manual to answer this FRC rules question with citations to the manual."
+  short_description: "Interpret official FRC rules and updates"
+  default_prompt: "Use $frc-game-manual to answer this FRC rules question from official sources."
 
 policy:
-  allow_implicit_invocation: true
+  allow_implicit_invocation: false

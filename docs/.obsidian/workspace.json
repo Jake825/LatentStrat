@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "embedding-inspection.md",
+                "file": "archive/Set Transformer.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "embedding-inspection"
+              "title": "Set Transformer"
             }
           }
         ]
@@ -185,6 +185,11 @@
   },
   "active": "c8998773c87768e7",
   "lastOpenFiles": [
+    "architecture.md",
+    "archive/Set Transformer.md",
+    "archive/model-structure.md",
+    "current-state.md",
+    "V6.1.md",
     "experiment-ledger.md",
     "ghost robot.md",
     "training-and-validation.md",
@@ -197,7 +202,6 @@
     "data-sources.md",
     "prior-training.md",
     "schemas-and-artifacts-reference.md",
-    "current-state.md",
     "project-history.md",
     "V5.7.md",
     "Welcome.md"

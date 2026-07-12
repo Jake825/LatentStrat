@@ -1,7 +1,7 @@
 interface:
   display_name: "Documentation Maintainer"
-  short_description: "Maintain LatentStrat Markdown docs"
-  default_prompt: "Use $documentation-maintainer to update README and docs so they match LatentStrat behavior."
+  short_description: "Maintain LatentStrat docs and vault notes"
+  default_prompt: "Use $documentation-maintainer to update LatentStrat documentation from current repository behavior."
 
 policy:
   allow_implicit_invocation: true

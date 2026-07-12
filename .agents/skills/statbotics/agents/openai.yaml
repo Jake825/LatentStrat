@@ -1,7 +1,7 @@
 interface:
   display_name: "Statbotics"
-  short_description: "Use FRC EPA and Statbotics analytics"
-  default_prompt: "Use $statbotics to query EPA, prevent data leakage, and build FRC prediction features."
+  short_description: "Use EPA and Statbotics baseline data"
+  default_prompt: "Use $statbotics to retrieve or interpret Statbotics data for LatentStrat."
 
 policy:
   allow_implicit_invocation: true

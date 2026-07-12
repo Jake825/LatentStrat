@@ -1,0 +1,7 @@
+interface:
+  display_name: "LatentStrat Temporal Integrity"
+  short_description: "Audit known-as-of and leakage boundaries"
+  default_prompt: "Use $latentstrat-temporal-integrity to audit the timing and leakage boundaries of this analysis."
+
+policy:
+  allow_implicit_invocation: true

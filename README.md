@@ -51,6 +51,24 @@ latentstrat pretrain match-breakdown inspect `
 
 Flat command aliases remain available for one release and print V6.2 removal warnings.
 
+## Repository Layout
+
+```text
+.agents/        Local Codex skills and workflow guidance for this repo.
+baselines/      Checked-in baseline metadata used by tests and comparisons.
+configs/        YAML configuration for season training and experimental workflows.
+data/           Small checked-in catalogs plus ignored local caches, databases, and features.
+docs/           Active project documentation, with historical notes under docs/archive/.
+scripts/        Maintenance scripts for local storage organization.
+src/frc/        FRC data models, providers, scouting helpers, and importers.
+src/latentstrat/ Core package: CLI, features, training, pretraining, artifacts, and evaluation.
+tests/          Pytest coverage for data handling, features, training, models, and workflows.
+```
+
+Generated experiment outputs live outside the tracked source tree in ignored folders such as
+`artifacts/`, `runs/`, `data/features/`, `data/pretraining/`, `data/scouting/`, and
+`statbotics_offline_cache/`.
+
 ## Storage
 
 Generated local files are ignored by Git:

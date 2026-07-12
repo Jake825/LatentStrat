@@ -1,43 +1,24 @@
 ---
 name: tba-api
-description: Use when working with, understanding, or using data from The Blue Alliance (TBA) API for the FIRST Robotics Competition (FRC), especially with the tbapy Python library. Covers retrieving, validating, normalizing, and analyzing FRC teams, events, matches, rankings, awards, alliances, and year-specific score breakdowns.
+description: Work directly with The Blue Alliance API, tbapy, or LatentStrat's TbaProvider to retrieve and normalize teams, events, matches, rankings, awards, alliances, and score breakdowns. Use for endpoint behavior, authentication, keys, caching, payloads, and season-specific TBA fields. Do not use for already-local feature tables, Statbotics, model internals, or generic FRC interpretation.
 ---
 
-# The Blue Alliance API and FRC Data
+# The Blue Alliance API
 
-## Overview
+Use `tbapy==1.3.2` or `frc.providers.tba_provider.TbaProvider` according to the repository boundary being changed. Use `TBA_API_KEY` for live access.
 
-Use this skill to write reliable Python code against The Blue Alliance API through `tbapy`, especially in LatentStrat workflows that ingest or analyze FRC match data.
+## Key Contracts
 
-LatentStrat already depends on `tbapy==1.3.2` and uses `TBA_API_KEY` for live TBA ingestion. Preserve raw TBA payloads where practical because score breakdowns, rankings, playoff structures, awards, and advancement rules vary across seasons.
-
-## Key Formats
-
-TBA uses strict key formats. Normalize identifiers before joining scouting, model, or provider data.
-
-- Team keys: `frc####` with no leading zeros, such as `frc254`.
-- Event keys: `[year][event_code]`, such as `2026ilch` or `2024cmpop`.
-- Match keys: `[event_key]_[comp_level][match_number]` or `[event_key]_[comp_level][set_number]m[match_number]`, such as `2026ilch_qm12` or `2026ilch_sf1m2`.
-- Competition levels: `qm` for qualifications; `ef`, `qf`, `sf`, and `f` for playoff matches.
-- District keys: `[year][district_abbrev]`, such as `2026fim` or `2024ne`.
-
-## Core Practices
-
-- Prefer narrow TBA pulls. Fetch the specific event, team, match, ranking, award, or alliance endpoint needed for the task.
-- Preserve raw context. Keep raw JSON for complex objects such as match score breakdowns so downstream analytics can inspect unexpected fields.
-- Use `TBA_API_KEY`, not `TBA_AUTH_KEY`, in LatentStrat examples and environment setup.
-- Handle unplayed matches and incomplete data. Future or missing matches may have `None` for `actual_time` and `score_breakdown`, and `winning_alliance` may be an empty string.
-- Use defensive `.get()` access for nested payloads. TBA can add fields mid-season and score fields differ by game.
-
-## Versioning Guardrails
-
-Never assume two seasons share the same `score_breakdown` schema. FRC releases a new game every year, so scoring elements, ranking point fields, foul fields, and bonus fields can change completely.
-
-Before using newer seasons, uncommon fields, or recently added TBA API functionality, verify endpoint behavior against the current TBA API docs or official FIRST materials. For current-year tournament structure, prefer the official FIRST Game Manual and season materials.
+- Team keys use `frc####` without leading zeros.
+- Event keys combine year and event code.
+- Qualification match keys use `_qm#`; playoff keys include competition level, set, and match numbers.
+- Preserve raw payload context for season-specific score breakdowns and tournament structures.
+- Handle unplayed and incomplete matches defensively.
+- Never assume score-breakdown fields carry across seasons.
 
 ## References
 
-- Read [references/frc-concepts.md](references/frc-concepts.md) for FRC terminology, tournament structures, advancement systems, historical quirks, and score-breakdown context.
-- Read [references/tbapy-patterns.md](references/tbapy-patterns.md) for Python patterns using `tbapy`, Pandas normalization, missing-data handling, and historical defensive guards.
-- Use `$frc-competition-structure` when event type, district/regional semantics, multi-division events, Einstein/finals fields, offseason events, or analysis grain affect how TBA data should be interpreted.
-- Use `$latentstrat-feature-pipeline` when TBA data is being shaped into Pandas/PyArrow Parquet feature tables for LatentStrat training.
+- Read `references/tbapy-patterns.md` for retrieval, pagination, normalization, and missing-data patterns.
+- Read `references/frc-concepts.md` only when basic FRC terminology is needed to interpret a TBA payload.
+
+Verify current or uncommon endpoint behavior against official TBA API documentation before hard-coding it.

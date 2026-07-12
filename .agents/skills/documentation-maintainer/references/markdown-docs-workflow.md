@@ -10,7 +10,7 @@ Inspect the source of truth:
 - Project metadata and dependencies in `pyproject.toml`.
 - Existing docs under `docs/`.
 - Tests for expected behavior.
-- Domain skills when documenting TBA, Statbotics, scouting, timing, or FRC concepts.
+- Relevant source modules, tests, and authoritative external references for TBA, Statbotics, scouting, timing, or FRC concepts.
 
 ## Writing Style
 

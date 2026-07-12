@@ -30,4 +30,4 @@ The model receives:
 - Blue team index tensor shaped `[batch, 3]`.
 - Continuous and binary target tensors as `torch.float32`.
 
-Use `$pytorch-set-transformer` before changing shapes, team-slot semantics, or model-facing tensors.
+Treat changes to shapes, team-slot semantics, or model-facing tensors as a separate model-interface boundary and test both dataset and model consumers.

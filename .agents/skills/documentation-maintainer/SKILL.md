@@ -1,40 +1,28 @@
 ---
 name: documentation-maintainer
-description: Use when adding, reviewing, or maintaining Markdown documentation for LatentStrat, especially README.md and docs/*.md. Covers keeping docs aligned with CLI behavior, project configuration, domain skills, command examples, validation instructions, and concise repo documentation style without introducing generated docs tooling or Python docstring policy.
+description: Maintain LatentStrat repository documentation. Use when the requested deliverable adds, edits, reviews, links, or reorganizes README.md, AGENTS.md, active docs/*.md pages, or the docs/ Obsidian vault. Do not use for code-only work, generic Markdown outside this repository, or a passing documentation mention in another subsystem task.
 ---
 
 # Documentation Maintainer
 
-Use this skill when a task changes or reviews LatentStrat Markdown documentation.
+Keep LatentStrat documentation aligned with current repository behavior.
 
-## Core Directives
+## Workflow
 
-1. Keep docs factual and tied to repo behavior. Inspect code, CLI help, configs, or tests before documenting commands or APIs.
-2. Prefer concise Markdown with runnable examples.
-3. Update the narrowest relevant document instead of duplicating the same explanation across many files.
-4. Keep README high-level and route deeper details to `docs/*.md`.
-5. Do not introduce mkdocs, Sphinx, generated API docs, or Python docstring policy unless the user explicitly asks.
+1. Inspect source, tests, CLI help, configuration, or artifacts before stating behavior.
+2. Use `references/repo-docs-map.md` to select the narrowest active page.
+3. Use `references/command-docs-checklist.md` for commands, options, environment variables, and validation examples.
+4. Use `references/markdown-docs-workflow.md` for editing conventions.
+5. Use `references/docs-review-checklist.md` before finalizing changes.
 
-## Routing
+Keep `README.md` concise and route details to active pages linked from `docs/index.md`. Treat `docs/archive/` as immutable historical context unless the user explicitly requests archival maintenance.
 
-- Read `references/markdown-docs-workflow.md` before editing or reviewing Markdown docs.
-- Read `references/repo-docs-map.md` to choose the right LatentStrat document.
-- Read `references/command-docs-checklist.md` before documenting CLI commands, env vars, dependencies, or validation commands.
-- Read `references/docs-review-checklist.md` before finalizing doc changes.
+## Obsidian Mode
 
-## Templates
+Use Obsidian-specific behavior only when the request explicitly involves vault links, tags, properties, tasks, backlinks, note movement, or diagnostics. The vault root is `docs/`.
 
-- Use `assets/doc-update-plan-template.md` to plan larger documentation updates.
-- Use `assets/docs-change-checklist.md` to review documentation changes before final response.
+- Read `references/latentstrat-vault.md` and `references/obsidian-format-guide.md` before Obsidian-native edits.
+- Prefer the wrappers in `scripts/` for CLI operations and diagnostics.
+- Keep repo-facing pages GitHub-readable and avoid modifying `.obsidian/workspace.json` or other local workspace churn.
 
-## Coordinate With Other Skills
-
-- Use `$tba-api` when documenting The Blue Alliance ingestion, key formats, or TBA environment variables.
-- Use `$statbotics` when documenting EPA, Statbotics provider behavior, or predictive analytics data.
-- Use `$frc-time-aware-analysis` when documenting leakage, validation splits, or feature timing.
-- Use `$latentstrat-feature-pipeline`, `$pytorch-set-transformer`, and `$latentstrat-model-evaluation` when documenting ML feature construction, model architecture, metrics, artifacts, or embeddings.
-- Use `$latentstrat-scouting-db`, `$frc-scouting-data-types`, and related scouting skills when documenting scouting ingestion or schema behavior.
-- Use `$git-workflow` when documentation work is part of commit or release preparation.
-- Use `$obsidian-cli` when docs work involves Obsidian wikilinks, tags, properties, backlinks, MOCs, vault-native embeds, note movement, or vault diagnostics.
-- Keep public docs GitHub-readable unless the user asks for Obsidian-native behavior.
-- Use `docs/assets/` and standard Markdown image links for repo-facing diagrams and plots.
+Use templates in `assets/` only for substantial documentation changes that benefit from them.

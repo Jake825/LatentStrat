@@ -1,7 +1,7 @@
 interface:
   display_name: "FRC Competition Structure"
   short_description: "Interpret FRC event systems and analysis grain"
-  default_prompt: "Use $frc-competition-structure to classify this FRC event context and choose the right analysis grain."
+  default_prompt: "Use $frc-competition-structure to interpret this FRC event or advancement structure."
 
 policy:
-  allow_implicit_invocation: true
+  allow_implicit_invocation: false

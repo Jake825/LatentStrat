@@ -14,7 +14,9 @@ Start with [V6.1](V6.1.md), then use [Rebuild from scratch](rebuild-from-scratch
 
 - [Architecture](architecture.md)
 - [Evaluation and artifacts](evaluation-and-artifacts.md)
+- [Research workbench](streamlit-app.md)
 - [Current state](current-state.md)
+- [Roadmap](roadmap.md)
 - [Data sources](data-sources.md)
 - [Experiment ledger](experiment-ledger.md)
 - [Changelog](changelog.md)

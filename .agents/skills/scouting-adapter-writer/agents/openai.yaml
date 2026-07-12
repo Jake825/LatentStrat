@@ -1,7 +1,0 @@
-interface:
-  display_name: "Scouting Adapter Writer"
-  short_description: "Write LatentStrat scouting importers"
-  default_prompt: "Use $scouting-adapter-writer to create a LatentStrat scouting importer and tests for this source."
-
-policy:
-  allow_implicit_invocation: true

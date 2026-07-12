@@ -1,0 +1,60 @@
+[browser]
+gatherUsageStats = false
+
+[server]
+enableStaticServing = true
+
+[client]
+showErrorDetails = "type"
+toolbarMode = "viewer"
+
+[theme]
+base = "light"
+primaryColor = "#0066B3"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F3F4F6"
+textColor = "#231F20"
+linkColor = "#0066B3"
+redColor = "#ED1C24"
+blueColor = "#0066B3"
+grayColor = "#9A989A"
+font = "Roboto, Arial, sans-serif"
+headingFont = "Roboto Condensed, Arial, sans-serif"
+baseRadius = "2px"
+buttonRadius = "2px"
+showWidgetBorder = true
+showSidebarBorder = true
+chartCategoricalColors = ["#0066B3", "#ED1C24", "#009CD7", "#231F20", "#9A989A", "#FFD400"]
+
+[[theme.fontFaces]]
+family = "Roboto"
+url = "app/static/fonts/Roboto-Variable.ttf"
+style = "normal"
+weight = "100 900"
+
+[[theme.fontFaces]]
+family = "Roboto Condensed"
+url = "app/static/fonts/RobotoCondensed-Variable.ttf"
+style = "normal"
+weight = "100 900"
+
+[theme.sidebar]
+backgroundColor = "#101820"
+secondaryBackgroundColor = "#231F20"
+textColor = "#FFFFFF"
+primaryColor = "#FFD400"
+borderColor = "#0066B3"
+
+[theme.dark]
+primaryColor = "#009CD7"
+backgroundColor = "#11171D"
+secondaryBackgroundColor = "#1C252D"
+textColor = "#F7F7F7"
+linkColor = "#5CC5EA"
+borderColor = "#4D5963"
+
+[theme.dark.sidebar]
+backgroundColor = "#090E12"
+secondaryBackgroundColor = "#172028"
+textColor = "#FFFFFF"
+primaryColor = "#FFD400"

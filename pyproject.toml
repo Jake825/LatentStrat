@@ -32,6 +32,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+app = [
+  "plotly>=6,<7",
+  "streamlit>=1.58,<2",
+]
 dev = [
   "pytest>=8",
   "vcrpy>=6",
