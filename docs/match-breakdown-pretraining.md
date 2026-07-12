@@ -53,6 +53,10 @@ latentstrat pretrain match-breakdown train `
 V2 writes a separate artifact and remains `promotion_eligible=false`. Preserve V1 unchanged and
 compare the V2 inspection against V1 before promotion.
 
+## Runtime and Resume
+
+Both evaluation and all-data phases use the shared CPU optimizer runtime with AdamW, gradient clipping at `1.0`, optimizer-step cosine decay, stable phase/epoch seeds, and TensorBoard enabled by default. Epoch checkpoints are written to `resume/eval/latest.ckpt` and `resume/all_data/latest.ckpt` inside the artifact directory. Continue a phase with `--resume-checkpoint`; the source tensors and resolved configuration must match exactly.
+
 ## Inspection
 
 ```powershell

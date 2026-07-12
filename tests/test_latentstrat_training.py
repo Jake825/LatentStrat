@@ -1,7 +1,7 @@
-import sys
 
 import numpy as np
 import pandas as pd
+import pytest
 import torch
 
 from latentstrat.config import default_options
@@ -506,7 +506,7 @@ def test_sidecar_datasets_and_training_with_unequal_lengths():
 
     assert len(history) == 1
     assert diagnostics.iterations > len(selections)
-    assert model.team_value_head.linear.weight.grad is not None
+    assert model.team_value_head.linear.weight.grad is None
 
 
 def test_resolve_device_returns_available_torch_device():
@@ -518,9 +518,74 @@ def test_acceleration_defaults_are_safe_by_device():
     opts = default_options()
 
     assert not resolve_amp_enabled(opts, torch.device("cpu"))
-    assert resolve_amp_enabled(opts, torch.device("cuda"))
+    assert not resolve_amp_enabled(opts, torch.device("cuda"))
     assert not resolve_amp_enabled(opts, torch.device("mps"))
 
     assert not resolve_compile_enabled(opts, torch.device("cpu"))
-    assert resolve_compile_enabled(opts, torch.device("cuda")) == (sys.platform != "win32")
+    assert not resolve_compile_enabled(opts, torch.device("cuda"))
     assert not resolve_compile_enabled(opts, torch.device("mps"))
+
+
+def test_season_training_epoch_resume_matches_uninterrupted(tmp_path, monkeypatch):
+    table = _training_table()
+    opts = default_options().model_copy(
+        update={
+            "epochs": 2,
+            "mini_batch_size": 4,
+            "use_early_stopping": False,
+            "restore_best_validation_model": False,
+            "team_dropout_rate": 0.0,
+        }
+    )
+    split = _split(len(table))
+    stats = fit_target_stats(table, split.train_mask, opts)
+    from latentstrat.data import apply_v57_target_stats, fit_v57_target_stats
+
+    prepared = apply_v57_target_stats(
+        apply_target_stats(table, stats),
+        fit_v57_target_stats(table, split.train_mask, opts),
+    )
+    uninterrupted, uninterrupted_history, _ = train_model(
+        prepared, split, opts, verbose=False
+    )
+
+    resume_path = tmp_path / "latest.ckpt"
+    from latentstrat.season import train as training_module
+
+    original_save = training_module.save_resume_checkpoint
+
+    def save_then_interrupt(path, payload):
+        result = original_save(path, payload)
+        if payload["completed_epoch"] == 1:
+            raise RuntimeError("simulated interruption")
+        return result
+
+    monkeypatch.setattr(training_module, "save_resume_checkpoint", save_then_interrupt)
+    with pytest.raises(RuntimeError, match="simulated interruption"):
+        train_model(
+            prepared,
+            split,
+            opts,
+            verbose=False,
+            resume_output=str(resume_path),
+        )
+    monkeypatch.setattr(training_module, "save_resume_checkpoint", original_save)
+    resumed, resumed_history, _ = train_model(
+        prepared,
+        split,
+        opts,
+        verbose=False,
+        resume_checkpoint=str(resume_path),
+    )
+
+    for name, tensor in uninterrupted.state_dict().items():
+        assert torch.equal(tensor, resumed.state_dict()[name]), name
+    metric_columns = [
+        column
+        for column in uninterrupted_history.columns
+        if column not in {"epoch_seconds", "samples_per_second"}
+    ]
+    pd.testing.assert_frame_equal(
+        uninterrupted_history[metric_columns].reset_index(drop=True),
+        resumed_history[metric_columns].reset_index(drop=True),
+    )

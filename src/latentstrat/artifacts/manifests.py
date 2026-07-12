@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from latentstrat.artifacts.hashes import sha256_file
+from latentstrat.training_runtime import runtime_provenance
 
 MANIFEST_SCHEMA_VERSION = 1
 
@@ -74,6 +75,7 @@ def write_artifact_manifest(
             "note": promotion_note,
         },
         "migration_provenance": migration_provenance,
+        "runtime_provenance": runtime_provenance(),
     }
     manifest_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return manifest_path

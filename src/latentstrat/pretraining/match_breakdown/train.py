@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import subprocess
+import time
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -48,6 +49,18 @@ from latentstrat.pretraining.match_breakdown.vectorize import (
     union_schema_audit,
     vectorize_flat_row,
 )
+from latentstrat.training_runtime import (
+    OptimizationController,
+    TrainingRuntimeConfig,
+    build_lr_scheduler,
+    epoch_runtime_metrics,
+    load_resume_checkpoint,
+    load_training_state,
+    resume_payload,
+    save_resume_checkpoint,
+    seed_everything,
+    validate_resume_checkpoint,
+)
 
 PARQUET_ENGINE = "pyarrow"
 LATENT_DIM = 16
@@ -67,7 +80,16 @@ class MatchBreakdownTrainingOptions:
     seed: int = 2026
     validation_fraction: float = 0.10
     max_grad_norm: float = 1.0
-    device: str = "auto"
+    gradient_accumulation_steps: int = 1
+    scheduler: str = "cosine"
+    lr_eta_min: float = 1e-5
+    one_cycle_pct_start: float = 0.3
+    one_cycle_div_factor: float = 25.0
+    one_cycle_final_div_factor: float = 10_000.0
+    deterministic_algorithms: bool = False
+    checkpoint_every_epochs: int = 1
+    optimizer_log_interval: int = 10
+    device: str = "cpu"
     include_foc: bool = False
     include_remote: bool = False
     reconstruction_weight: float = 1.0
@@ -173,6 +195,16 @@ def load_match_breakdown_training_options(
                 "seed": "seed",
                 "validation_fraction": "validation_fraction",
                 "max_grad_norm": "max_grad_norm",
+                "gradient_accumulation_steps": "gradient_accumulation_steps",
+                "scheduler": "scheduler",
+                "lr_eta_min": "lr_eta_min",
+                "one_cycle_pct_start": "one_cycle_pct_start",
+                "one_cycle_div_factor": "one_cycle_div_factor",
+                "one_cycle_final_div_factor": "one_cycle_final_div_factor",
+                "deterministic_algorithms": "deterministic_algorithms",
+                "checkpoint_every_epochs": "checkpoint_every_epochs",
+                "optimizer_log_interval": "optimizer_log_interval",
+                "device": "device",
             },
             "loss": {
                 "reconstruction_weight": "reconstruction_weight",
@@ -473,11 +505,29 @@ def _train_model(
     seed_offset: int,
     phase: str,
     rules_by_season: dict[int, tuple[LinearRule, ...]] | None = None,
+    resume_checkpoint: str | Path | None = None,
+    resume_output: str | Path | None = None,
+    tensorboard_writer: Any | None = None,
 ) -> tuple[MatchBreakdownAutoencoder, list[dict[str, Any]]]:
     active_seasons = [season for season, rows in sorted(indices.items()) if len(rows)]
     if not active_seasons:
         raise ValueError(f"{phase} training split has no eligible rows.")
-    torch.manual_seed(options.seed + seed_offset)
+    runtime_config = TrainingRuntimeConfig(
+        gradient_accumulation_steps=options.gradient_accumulation_steps,
+        max_grad_norm=options.max_grad_norm,
+        scheduler=options.scheduler,
+        lr_eta_min=options.lr_eta_min,
+        one_cycle_pct_start=options.one_cycle_pct_start,
+        one_cycle_div_factor=options.one_cycle_div_factor,
+        one_cycle_final_div_factor=options.one_cycle_final_div_factor,
+        deterministic_algorithms=options.deterministic_algorithms,
+        checkpoint_every_epochs=options.checkpoint_every_epochs,
+        optimizer_log_interval=options.optimizer_log_interval,
+    )
+    seed_everything(
+        options.seed + seed_offset,
+        deterministic_algorithms=options.deterministic_algorithms,
+    )
     rng = np.random.default_rng(options.seed + seed_offset)
     device = _resolve_device(options.device)
     model = MatchBreakdownAutoencoder(
@@ -490,9 +540,52 @@ def _train_model(
     )
     total_rows = sum(len(rows) for rows in indices.values())
     steps_per_epoch = max(1, math.ceil(total_rows / options.derived_batch_size))
+    scheduler = build_lr_scheduler(
+        optimizer,
+        runtime_config,
+        epochs=options.epochs,
+        microbatches_per_epoch=steps_per_epoch,
+    )
+    controller = OptimizationController(
+        model,
+        optimizer,
+        runtime_config,
+        scheduler=scheduler,
+        tensorboard_writer=tensorboard_writer,
+        tensorboard_prefix=f"Optimization/MatchBreakdown/{phase}",
+    )
+    resolved_config = {"options": asdict(options), "seed_offset": seed_offset}
+    digest = hashlib.sha256()
+    for season, data in sorted(tensors.items()):
+        digest.update(str(season).encode("ascii"))
+        digest.update(data.values.contiguous().numpy().tobytes())
+        digest.update(data.masks.contiguous().numpy().tobytes())
+        digest.update(np.asarray(indices[season], dtype=np.int64).tobytes())
+    source_fingerprint = digest.hexdigest()
     history = []
+    start_epoch = 1
     rules_by_season = rules_by_season or {}
-    for epoch in range(1, options.epochs + 1):
+    if resume_checkpoint is not None:
+        payload = load_resume_checkpoint(resume_checkpoint)
+        validate_resume_checkpoint(
+            payload,
+            trainer="match-breakdown",
+            phase=phase,
+            config=resolved_config,
+            source_fingerprint=source_fingerprint,
+        )
+        load_training_state(
+            payload,
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+        )
+        history = list(payload.get("history", []))
+        controller.optimizer_step = int(payload.get("optimizer_step", 0))
+        start_epoch = int(payload["completed_epoch"]) + 1
+    for epoch in range(start_epoch, options.epochs + 1):
+        epoch_started = time.perf_counter()
+        epoch_step_start = len(controller.step_results)
         model.train()
         queues = {season: _RowQueue(indices[season], rng) for season in active_seasons}
         pair_queues = {
@@ -508,10 +601,9 @@ def _train_model(
             "total_loss": [],
         }
         epoch_grad_norms = []
-        for _ in range(steps_per_epoch):
+        for step_index in range(steps_per_epoch):
             count = min(options.seasons_per_step, len(active_seasons))
             sampled_seasons = rng.choice(active_seasons, size=count, replace=False)
-            optimizer.zero_grad(set_to_none=True)
             season_losses = []
             for season_value in sampled_seasons:
                 season = int(season_value)
@@ -576,15 +668,15 @@ def _train_model(
                 ):
                     epoch_losses[name].append(float(value.detach().cpu()))
             loss = torch.stack(season_losses).mean()
-            loss.backward()
-            grad_norm = torch.nn.utils.clip_grad_norm_(
-                model.parameters(), max_norm=options.max_grad_norm
+            step_result = controller.backward(
+                loss,
+                microbatch_index=step_index,
+                microbatch_count=steps_per_epoch,
             )
-            optimizer.step()
             epoch_losses["total_loss"].append(float(loss.detach().cpu()))
-            epoch_grad_norms.append(float(grad_norm.detach().cpu()))
-        history.append(
-            {
+            if step_result is not None:
+                epoch_grad_norms.append(step_result.preclip_grad_norm)
+        row = {
                 "phase": phase,
                 "epoch": epoch,
                 "steps": steps_per_epoch,
@@ -594,8 +686,41 @@ def _train_model(
                 },
                 "train_loss": float(np.mean(epoch_losses["total_loss"])),
                 "max_preclip_grad_norm": float(np.max(epoch_grad_norms)),
-            }
+        }
+        row.update(
+            epoch_runtime_metrics(
+                started_at=epoch_started,
+                sample_count=total_rows,
+                optimizer_summary=controller.epoch_summary(start_index=epoch_step_start),
+            )
         )
+        history.append(row)
+        if tensorboard_writer is not None:
+            for name, value in row.items():
+                if isinstance(value, (int, float)) and np.isfinite(float(value)):
+                    tensorboard_writer.add_scalar(
+                        f"MatchBreakdown/{phase}/{name}", float(value), epoch
+                    )
+        if (
+            resume_output is not None
+            and runtime_config.checkpoint_every_epochs > 0
+            and epoch % runtime_config.checkpoint_every_epochs == 0
+        ):
+            save_resume_checkpoint(
+                resume_output,
+                resume_payload(
+                    trainer="match-breakdown",
+                    phase=phase,
+                    completed_epoch=epoch,
+                    model=model,
+                    optimizer=optimizer,
+                    scheduler=scheduler,
+                    optimizer_step=controller.optimizer_step,
+                    history=history,
+                    config=resolved_config,
+                    source_fingerprint=source_fingerprint,
+                ),
+            )
     return model.cpu(), history
 
 
@@ -900,6 +1025,10 @@ def train_match_breakdown_encoder(
     output_dir: str | Path,
     alliance_features_path: str | Path,
     options: MatchBreakdownTrainingOptions | None = None,
+    *,
+    resume_checkpoint: str | Path | None = None,
+    tensorboard_logdir: str | Path | None = None,
+    tensorboard_run_name: str | None = None,
 ) -> TrainingResult:
     """Train holdout and production encoders, then write the offline artifact bundle."""
 
@@ -916,6 +1045,17 @@ def train_match_breakdown_encoder(
         raise ValueError("pairs_per_season must be positive.")
     if options.reconstruct_from_corrupt:
         raise ValueError("V2 does not reconstruct decoder targets from corrupted inputs.")
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    writer = None
+    if tensorboard_logdir is not None:
+        from torch.utils.tensorboard import SummaryWriter
+
+        run_name = tensorboard_run_name or f"match_breakdown_{int(time.time())}"
+        writer = SummaryWriter(str(Path(tensorboard_logdir) / run_name))
+    resume_phase = None
+    if resume_checkpoint is not None:
+        resume_phase = str(load_resume_checkpoint(resume_checkpoint).get("phase"))
     corpus = MatchBreakdownCorpus(corpus_path)
     matches = corpus.raw_matches(
         start_season=options.start_season,
@@ -937,6 +1077,18 @@ def train_match_breakdown_encoder(
         seed_offset=0,
         phase="eval",
         rules_by_season=eval_rules,
+        resume_checkpoint=(
+            resume_checkpoint
+            if resume_phase == "eval"
+            else (
+                out / "resume" / "eval" / "latest.ckpt"
+                if resume_phase == "all_data"
+                and (out / "resume" / "eval" / "latest.ckpt").exists()
+                else None
+            )
+        ),
+        resume_output=out / "resume" / "eval" / "latest.ckpt",
+        tensorboard_writer=writer,
     )
     validation_report = _evaluate(
         eval_model, tensors, validation_indices, options, rules_by_season=eval_rules
@@ -954,10 +1106,10 @@ def train_match_breakdown_encoder(
         seed_offset=1,
         phase="all_data",
         rules_by_season=production_rules,
+        resume_checkpoint=resume_checkpoint if resume_phase == "all_data" else None,
+        resume_output=out / "resume" / "all_data" / "latest.ckpt",
+        tensorboard_writer=writer,
     )
-
-    out = Path(output_dir)
-    out.mkdir(parents=True, exist_ok=True)
     features_path = Path(alliance_features_path)
     features_path.parent.mkdir(parents=True, exist_ok=True)
     _alliance_frame(rows).to_parquet(features_path, engine=PARQUET_ENGINE, index=False)
@@ -1062,6 +1214,9 @@ def train_match_breakdown_encoder(
         promotion_eligible=False,
         promotion_note=bundle["promotion_note"],
     )
+    if writer is not None:
+        writer.flush()
+        writer.close()
     return TrainingResult(
         output_dir=out,
         alliance_features_path=features_path,

@@ -651,13 +651,14 @@ def test_v2_cli_config_is_opt_in_and_explicit_flags_override_yaml(tmp_path, monk
     )
     captured = {}
 
-    def fake_train(corpus_path, output_dir, alliance_features_path, options):
+    def fake_train(corpus_path, output_dir, alliance_features_path, options, **kwargs):
         captured.update(
             {
                 "corpus_path": corpus_path,
                 "output_dir": output_dir,
                 "alliance_features_path": alliance_features_path,
                 "options": options,
+                "runtime_kwargs": kwargs,
             }
         )
         return type(

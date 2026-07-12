@@ -580,11 +580,19 @@ def run_walk_forward_validation(
                 else None
             )
             try:
+                fold_resume_output = (
+                    out / "resume" / f"fold_{fold_number:02d}" / "latest.ckpt"
+                )
+                fold_resume_checkpoint = (
+                    fold_resume_output if fold_resume_output.exists() else None
+                )
                 result = train_feature_table(
                     feature_table,
                     fold_opts,
                     verbose=verbose,
-                    prior_checkpoint=prior_checkpoint,
+                    prior_checkpoint=(
+                        None if fold_resume_checkpoint is not None else prior_checkpoint
+                    ),
                     sidecar_tables=train_sidecars,
                     split_override=split,
                     tensorboard_writer=fold_writer,
@@ -594,6 +602,8 @@ def run_walk_forward_validation(
                     if run_logdir is not None
                     else None,
                     world_model_bundle=fold_world_model,
+                    resume_checkpoint=fold_resume_checkpoint,
+                    resume_output=fold_resume_output,
                 )
             finally:
                 if fold_writer is not None:

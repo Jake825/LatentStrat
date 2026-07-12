@@ -1,6 +1,6 @@
 # Current State
 
-Last audited locally: June 2, 2026.
+Last audited locally: July 12, 2026.
 
 LatentStrat V6.1 is a stabilization milestone. The supervised season model remains schema-`6`
 compatible, while public package names, CLI commands, generated paths, and artifact manifests are
@@ -14,6 +14,7 @@ organized for continued pretraining work.
   `baselines/v5.8-baseline.json`.
 - V6.1 season model: supervised Set Transformer with `Z_base + Z_event`, existing readout heads,
   nested forward outputs, and strict schema-`6` checkpoint compatibility.
+- CPU-first PyTorch runtime: shared seeded optimizer steps, accumulation, clipping, cosine or one-cycle scheduling, TensorBoard telemetry, and epoch-exact resume checkpoints across training workflows.
 - Match-breakdown V1: offline all-years 16D alliance-result artifact.
 - Match-breakdown V2: explicit structured-objective ablation. It is implemented but not promoted.
 
@@ -33,9 +34,9 @@ organized for continued pretraining work.
 
 New artifact writers emit `manifest.json`. Generated outputs remain ignored locally.
 
-## Baseline Evidence
+## Historical Baseline Evidence
 
-The tagged V5.8 replay remains the comparison boundary:
+The tagged V5.8 replay remains the reproducible historical comparison boundary:
 
 ```text
 artifacts/baselines/v5.8/walk-forward/
@@ -52,9 +53,13 @@ Its average row reports:
 | Win log loss | `0.7227` |
 | Validation matches | `18164` |
 
+These values are development evidence rather than an unbiased promotion estimate. Each historical fold restored the epoch with the best loss on the same held-out week used for its reported predictions. The metric-only Statbotics comparison workflow can evaluate those saved predictions without retraining, but it marks the result as ineligible for promotion.
+
 ## Caveats
 
 - Calibration remains the main season-model weakness.
+- The runtime overhaul changes optimizer trajectories; it is implemented and regression-tested, but empirical promotion still requires the documented multi-seed calibration and non-inferiority comparison.
+- Honest nested temporal evaluation remains the next training-protocol milestone; see the [Roadmap](roadmap.md).
 - Match-breakdown artifacts are offline representation artifacts, not leakage-safe walk-forward
   promotion evidence.
 - Match-breakdown runtime score attachment remains disabled.

@@ -715,6 +715,49 @@ def test_distiller_training_reduces_reconstruction_loss():
     assert history["train_loss"].iloc[-1] < history["train_loss"].iloc[0]
 
 
+def test_prior_training_epoch_resume_matches_uninterrupted(tmp_path, monkeypatch):
+    table = _prior_table(4)
+    opts = _prior_opts(max_team_number=4, epochs=2, batch_size=2, learning_rate=1e-2)
+    uninterrupted, uninterrupted_history, _ = train_prior_model(table, opts, verbose=False)
+    resume_path = tmp_path / "latest.ckpt"
+    from latentstrat.pretraining.prior import train as training_module
+
+    original_save = training_module.save_resume_checkpoint
+
+    def save_then_interrupt(path, payload):
+        result = original_save(path, payload)
+        if payload["completed_epoch"] == 1:
+            raise RuntimeError("simulated interruption")
+        return result
+
+    monkeypatch.setattr(training_module, "save_resume_checkpoint", save_then_interrupt)
+    with pytest.raises(RuntimeError, match="simulated interruption"):
+        train_prior_model(
+            table,
+            opts,
+            verbose=False,
+            resume_output=resume_path,
+        )
+    monkeypatch.setattr(training_module, "save_resume_checkpoint", original_save)
+    resumed, resumed_history, _ = train_prior_model(
+        table,
+        opts,
+        verbose=False,
+        resume_checkpoint=resume_path,
+    )
+    for name, tensor in uninterrupted.state_dict().items():
+        assert torch.equal(tensor, resumed.state_dict()[name]), name
+    metric_columns = [
+        column
+        for column in uninterrupted_history.columns
+        if column not in {"epoch_seconds", "samples_per_second"}
+    ]
+    pd.testing.assert_frame_equal(
+        uninterrupted_history[metric_columns].reset_index(drop=True),
+        resumed_history[metric_columns].reset_index(drop=True),
+    )
+
+
 def test_prior_distiller_checkpoint_contract(tmp_path):
     features = tmp_path / "prior_features.parquet"
     output = tmp_path / "pretrained_prior_2026.pt"

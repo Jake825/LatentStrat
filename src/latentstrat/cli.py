@@ -32,6 +32,8 @@ from latentstrat.season.data import (
     make_team_index_map,
 )
 from latentstrat.season.evaluate import evaluate_model
+from latentstrat.season.metrics import write_prediction_evaluation
+from latentstrat.season.statbotics_baseline import build_statbotics_prediction_artifact
 from latentstrat.dev.diagnostics import build_evidence_packet, inspect_embeddings
 from latentstrat.experimental.venue import consolidate_event_checkpoint
 from latentstrat.season.features import (
@@ -366,6 +368,20 @@ def train_features(
         float | None,
         typer.Option("--lr-eta-min", help="Minimum learning rate for cosine annealing."),
     ] = None,
+    gradient_accumulation_steps: Annotated[
+        int, typer.Option("--gradient-accumulation-steps", min=1)
+    ] = 1,
+    max_grad_norm: Annotated[float, typer.Option("--max-grad-norm", min=0.0)] = 1.0,
+    scheduler: Annotated[
+        str, typer.Option("--scheduler", help="none, cosine, or one-cycle.")
+    ] = "cosine",
+    checkpoint_every_epochs: Annotated[
+        int, typer.Option("--checkpoint-every-epochs", min=0)
+    ] = 1,
+    deterministic_algorithms: Annotated[
+        bool,
+        typer.Option("--deterministic-algorithms/--no-deterministic-algorithms"),
+    ] = False,
     loss_log_var_min: Annotated[
         float | None,
         typer.Option("--loss-log-var-min", help="Minimum homoscedastic log variance."),
@@ -394,6 +410,10 @@ def train_features(
     checkpoint: Annotated[
         Path | None,
         typer.Option("--checkpoint", help="Optional V5 checkpoint to resume/fine-tune."),
+    ] = None,
+    resume_checkpoint: Annotated[
+        Path | None,
+        typer.Option("--resume-checkpoint", help="Exact epoch-boundary training checkpoint."),
     ] = None,
     prior_checkpoint: Annotated[
         Path | None,
@@ -449,6 +469,15 @@ def train_features(
     updates["restore_best_validation_model"] = restore_best
     if lr_eta_min is not None:
         updates["lr_eta_min"] = lr_eta_min
+    updates.update(
+        {
+            "gradient_accumulation_steps": gradient_accumulation_steps,
+            "max_grad_norm": max_grad_norm,
+            "scheduler": scheduler,
+            "checkpoint_every_epochs": checkpoint_every_epochs,
+            "deterministic_algorithms": deterministic_algorithms,
+        }
+    )
     if loss_log_var_min is not None:
         updates["loss_log_var_min"] = loss_log_var_min
     if loss_log_var_max is not None:
@@ -459,6 +488,12 @@ def train_features(
     if freeze_team_embeddings and checkpoint is None and prior_checkpoint is None:
         typer.echo(
             "Error: --freeze-team-embeddings requires --prior-checkpoint or --checkpoint.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    if resume_checkpoint is not None and (checkpoint is not None or prior_checkpoint is not None):
+        typer.echo(
+            "Error: --resume-checkpoint cannot be combined with warm-start checkpoints.",
             err=True,
         )
         raise typer.Exit(code=2)
@@ -517,6 +552,7 @@ def train_features(
             tensorboard_writer=writer,
             tensorboard_logdir=run_logdir,
             world_model_bundle=world_model_bundle,
+            resume_checkpoint=resume_checkpoint,
         )
     finally:
         if writer is not None:
@@ -544,6 +580,19 @@ def validate_walk_forward(
         int | None,
         typer.Option("--latent-dim", help="Override model latent dimension."),
     ] = None,
+    gradient_accumulation_steps: Annotated[
+        int, typer.Option("--gradient-accumulation-steps", min=1)
+    ] = 1,
+    max_grad_norm: Annotated[float, typer.Option("--max-grad-norm", min=0.0)] = 1.0,
+    scheduler: Annotated[str, typer.Option("--scheduler")] = "cosine",
+    lr_eta_min: Annotated[float, typer.Option("--lr-eta-min")] = 1e-5,
+    checkpoint_every_epochs: Annotated[
+        int, typer.Option("--checkpoint-every-epochs", min=0)
+    ] = 1,
+    deterministic_algorithms: Annotated[
+        bool,
+        typer.Option("--deterministic-algorithms/--no-deterministic-algorithms"),
+    ] = False,
     rankings_sidecar: Annotated[
         Path | None,
         typer.Option("--rankings-sidecar", help="Optional V5.7 rankings sidecar Parquet."),
@@ -609,7 +658,16 @@ def validate_walk_forward(
     ] = OPENAI_EMBEDDING_CACHE_PATH,
 ) -> None:
     """Run temporal walk-forward validation."""
-    updates = {"epochs": epochs, "use_early_stopping": False}
+    updates = {
+        "epochs": epochs,
+        "use_early_stopping": False,
+        "gradient_accumulation_steps": gradient_accumulation_steps,
+        "max_grad_norm": max_grad_norm,
+        "scheduler": scheduler,
+        "lr_eta_min": lr_eta_min,
+        "checkpoint_every_epochs": checkpoint_every_epochs,
+        "deterministic_algorithms": deterministic_algorithms,
+    }
     if mini_batch_size is not None:
         updates["mini_batch_size"] = mini_batch_size
     if latent_dim is not None:
@@ -652,6 +710,28 @@ def validate_walk_forward(
     typer.echo(f"Walk-forward validation complete: {result.output_dir} folds={fold_count}")
 
 
+def build_statbotics_baseline_command(
+    season: Annotated[int, typer.Option("--season", help="FRC season to retrieve.")] = 2026,
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", help="Pre-match Statbotics prediction Parquet."),
+    ] = None,
+    page_size: Annotated[
+        int,
+        typer.Option("--page-size", help="Statbotics rows per paginated request."),
+    ] = 10_000,
+) -> None:
+    """Build a leakage-safe Statbotics pre-match prediction artifact."""
+
+    destination = output or Path(
+        f"data/baselines/statbotics/statbotics_predictions_{season}.parquet"
+    )
+    artifact, manifest = build_statbotics_prediction_artifact(
+        _statbotics_provider(), season, destination, page_size=page_size
+    )
+    typer.echo(f"Statbotics baseline written: {artifact} manifest={manifest}")
+
+
 @app.command("build-world-model")
 def build_world_model(
     config: Annotated[Path, typer.Option("--config", help="Experimental frozen-target YAML.")],
@@ -680,12 +760,45 @@ def build_world_model(
     fit_max_week: Annotated[
         int | None, typer.Option("--fit-max-week", help="Optional fold-local week boundary.")
     ] = None,
+    gradient_accumulation_steps: Annotated[
+        int, typer.Option("--gradient-accumulation-steps", min=1)
+    ] = 1,
+    max_grad_norm: Annotated[float, typer.Option("--max-grad-norm", min=0.0)] = 1.0,
+    scheduler: Annotated[str, typer.Option("--scheduler")] = "cosine",
+    lr_eta_min: Annotated[float, typer.Option("--lr-eta-min")] = 1e-5,
+    checkpoint_every_epochs: Annotated[
+        int, typer.Option("--checkpoint-every-epochs", min=0)
+    ] = 1,
+    deterministic_algorithms: Annotated[
+        bool,
+        typer.Option("--deterministic-algorithms/--no-deterministic-algorithms"),
+    ] = False,
+    resume_checkpoint: Annotated[
+        Path | None, typer.Option("--resume-checkpoint")
+    ] = None,
+    tensorboard: Annotated[
+        bool, typer.Option("--tensorboard/--no-tensorboard")
+    ] = True,
+    tensorboard_logdir: Annotated[Path, typer.Option("--tensorboard-logdir")] = Path("runs"),
+    tensorboard_run_name: Annotated[
+        str | None, typer.Option("--tensorboard-run-name")
+    ] = None,
 ) -> None:
     """Build experimental frozen target spaces offline."""
+    options = load_world_model_options(config).model_copy(
+        update={
+            "gradient_accumulation_steps": gradient_accumulation_steps,
+            "max_grad_norm": max_grad_norm,
+            "scheduler": scheduler,
+            "lr_eta_min": lr_eta_min,
+            "checkpoint_every_epochs": checkpoint_every_epochs,
+            "deterministic_algorithms": deterministic_algorithms,
+        }
+    )
     bundle = build_world_model_bundle(
         features,
         output,
-        load_world_model_options(config),
+        options,
         events_path=events,
         rankings_path=rankings,
         selections_path=selections,
@@ -693,7 +806,12 @@ def build_world_model(
         award_catalog_path=award_catalog,
         openai_cache_path=openai_cache,
         fit_max_week=fit_max_week,
+        resume_checkpoint=resume_checkpoint,
+        tensorboard_logdir=tensorboard_logdir if tensorboard else None,
+        tensorboard_run_name=tensorboard_run_name,
     )
+    if tensorboard:
+        typer.echo(f"TensorBoard active: tensorboard --logdir={tensorboard_logdir}")
     typer.echo(
         f"World-model bundle written: {bundle.root} spaces={','.join(sorted(bundle.spaces))}"
     )
@@ -809,6 +927,29 @@ def train_match_breakdown_encoder_command(
     device: Annotated[
         str | None, typer.Option("--device", help='Torch device, or "auto".')
     ] = None,
+    gradient_accumulation_steps: Annotated[
+        int, typer.Option("--gradient-accumulation-steps", min=1)
+    ] = 1,
+    max_grad_norm: Annotated[float, typer.Option("--max-grad-norm", min=0.0)] = 1.0,
+    scheduler: Annotated[str, typer.Option("--scheduler")] = "cosine",
+    lr_eta_min: Annotated[float, typer.Option("--lr-eta-min")] = 1e-5,
+    checkpoint_every_epochs: Annotated[
+        int, typer.Option("--checkpoint-every-epochs", min=0)
+    ] = 1,
+    deterministic_algorithms: Annotated[
+        bool,
+        typer.Option("--deterministic-algorithms/--no-deterministic-algorithms"),
+    ] = False,
+    resume_checkpoint: Annotated[
+        Path | None, typer.Option("--resume-checkpoint")
+    ] = None,
+    tensorboard: Annotated[
+        bool, typer.Option("--tensorboard/--no-tensorboard")
+    ] = True,
+    tensorboard_logdir: Annotated[Path, typer.Option("--tensorboard-logdir")] = Path("runs"),
+    tensorboard_run_name: Annotated[
+        str | None, typer.Option("--tensorboard-run-name")
+    ] = None,
 ) -> None:
     """Train the offline historical match-breakdown encoder."""
 
@@ -825,6 +966,12 @@ def train_match_breakdown_encoder_command(
             "device": device,
             "include_foc": include_foc,
             "include_remote": include_remote,
+            "gradient_accumulation_steps": gradient_accumulation_steps,
+            "max_grad_norm": max_grad_norm,
+            "scheduler": scheduler,
+            "lr_eta_min": lr_eta_min,
+            "checkpoint_every_epochs": checkpoint_every_epochs,
+            "deterministic_algorithms": deterministic_algorithms,
         },
     )
     result = train_match_breakdown_encoder(
@@ -836,7 +983,12 @@ def train_match_breakdown_encoder_command(
         alliance_features
         or match_breakdown_features_path(options.start_season, options.end_season),
         options,
+        resume_checkpoint=resume_checkpoint,
+        tensorboard_logdir=tensorboard_logdir if tensorboard else None,
+        tensorboard_run_name=tensorboard_run_name,
     )
+    if tensorboard:
+        typer.echo(f"TensorBoard active: tensorboard --logdir={tensorboard_logdir}")
     typer.echo(
         f"Match-breakdown encoder written: {result.output_dir} "
         f"rows={result.bundle['audit']['alliance_rows']} "
@@ -918,6 +1070,35 @@ def compare_world_model(
     typer.echo(report.to_string(index=False))
 
 
+def evaluate_predictions_command(
+    candidate: Annotated[
+        Path, typer.Option("--candidate", help="Saved LatentStrat prediction Parquet.")
+    ],
+    statbotics: Annotated[
+        Path, typer.Option("--statbotics", help="Statbotics pre-match prediction Parquet.")
+    ],
+    output: Annotated[
+        Path, typer.Option("--output", help="Directory for comparison artifacts.")
+    ],
+    resamples: Annotated[
+        int, typer.Option("--resamples", help="Event-cluster bootstrap sample count.")
+    ] = 2_000,
+    seed: Annotated[int, typer.Option("--seed", help="Deterministic bootstrap seed.")] = 2026,
+) -> None:
+    """Evaluate saved predictions without loading or training a model."""
+
+    result = write_prediction_evaluation(
+        candidate,
+        statbotics,
+        output,
+        resamples=resamples,
+        seed=seed,
+    )
+    typer.echo(
+        f"Prediction evaluation written: {output} matched={result.coverage['matched_rows']}"
+    )
+
+
 @app.command("build-prior-features")
 def build_prior_features(
     target_season: Annotated[
@@ -990,6 +1171,22 @@ def train_prior(
         int | None,
         typer.Option("--max-team-number", help="Largest team number in the distiller table."),
     ] = None,
+    gradient_accumulation_steps: Annotated[
+        int, typer.Option("--gradient-accumulation-steps", min=1)
+    ] = 1,
+    max_grad_norm: Annotated[float, typer.Option("--max-grad-norm", min=0.0)] = 1.0,
+    scheduler: Annotated[str, typer.Option("--scheduler")] = "cosine",
+    lr_eta_min: Annotated[float, typer.Option("--lr-eta-min")] = 1e-5,
+    checkpoint_every_epochs: Annotated[
+        int, typer.Option("--checkpoint-every-epochs", min=0)
+    ] = 1,
+    deterministic_algorithms: Annotated[
+        bool,
+        typer.Option("--deterministic-algorithms/--no-deterministic-algorithms"),
+    ] = False,
+    resume_checkpoint: Annotated[
+        Path | None, typer.Option("--resume-checkpoint")
+    ] = None,
     tensorboard: Annotated[
         bool,
         typer.Option(
@@ -1016,6 +1213,16 @@ def train_prior(
         updates["latent_dim"] = latent_dim
     if max_team_number is not None:
         updates["max_team_number"] = max_team_number
+    updates.update(
+        {
+            "gradient_accumulation_steps": gradient_accumulation_steps,
+            "max_grad_norm": max_grad_norm,
+            "scheduler": scheduler,
+            "lr_eta_min": lr_eta_min,
+            "checkpoint_every_epochs": checkpoint_every_epochs,
+            "deterministic_algorithms": deterministic_algorithms,
+        }
+    )
     opts = PriorOpts(**updates)
     output_path = output or PRIOR_ARTIFACT_ROOT / f"pretrained_prior_{pd.Timestamp.utcnow().year}"
     result = train_prior_file(
@@ -1024,6 +1231,7 @@ def train_prior(
         opts,
         tensorboard_logdir=tensorboard_logdir if tensorboard else None,
         tensorboard_run_name=tensorboard_run_name,
+        resume_checkpoint=resume_checkpoint,
     )
     if result.tensorboard_logdir is not None:
         typer.echo(f"TensorBoard active: tensorboard --logdir={tensorboard_logdir}")
@@ -1080,7 +1288,30 @@ def run_prior_grid_command(
         float, typer.Option("--validation-fraction", help="Validation holdout fraction.")
     ] = 0.2,
     seed: Annotated[int, typer.Option("--seed", help="Random seed.")] = 2026,
-    device: Annotated[str, typer.Option("--device", help='Torch device, or "auto".')] = "auto",
+    device: Annotated[str, typer.Option("--device", help='Torch device, or "auto".')] = "cpu",
+    gradient_accumulation_steps: Annotated[
+        int, typer.Option("--gradient-accumulation-steps", min=1)
+    ] = 1,
+    max_grad_norm: Annotated[float, typer.Option("--max-grad-norm", min=0.0)] = 1.0,
+    scheduler: Annotated[str, typer.Option("--scheduler")] = "cosine",
+    lr_eta_min: Annotated[float, typer.Option("--lr-eta-min")] = 1e-5,
+    checkpoint_every_epochs: Annotated[
+        int, typer.Option("--checkpoint-every-epochs", min=0)
+    ] = 1,
+    deterministic_algorithms: Annotated[
+        bool,
+        typer.Option("--deterministic-algorithms/--no-deterministic-algorithms"),
+    ] = False,
+    resume_checkpoint: Annotated[
+        Path | None, typer.Option("--resume-checkpoint")
+    ] = None,
+    tensorboard: Annotated[
+        bool, typer.Option("--tensorboard/--no-tensorboard")
+    ] = True,
+    tensorboard_logdir: Annotated[Path, typer.Option("--tensorboard-logdir")] = Path("runs"),
+    tensorboard_run_name: Annotated[
+        str | None, typer.Option("--tensorboard-run-name")
+    ] = None,
 ) -> None:
     """Run the V5.6 prior bottleneck grid experiment."""
     result = run_prior_grid(
@@ -1093,7 +1324,18 @@ def run_prior_grid_command(
         validation_fraction=validation_fraction,
         seed=seed,
         device=device,
+        gradient_accumulation_steps=gradient_accumulation_steps,
+        max_grad_norm=max_grad_norm,
+        scheduler=scheduler,
+        lr_eta_min=lr_eta_min,
+        deterministic_algorithms=deterministic_algorithms,
+        checkpoint_every_epochs=checkpoint_every_epochs,
+        resume_checkpoint=resume_checkpoint,
+        tensorboard_logdir=tensorboard_logdir if tensorboard else None,
+        tensorboard_run_name=tensorboard_run_name,
     )
+    if tensorboard:
+        typer.echo(f"TensorBoard active: tensorboard --logdir={tensorboard_logdir}")
     ok = int((result.results["status"] == "ok").sum()) if not result.results.empty else 0
     typer.echo(
         f"Prior grid complete: {result.output_dir} runs={len(result.results)} "
@@ -1289,8 +1531,10 @@ match_breakdown_app.command("inspect")(inspect_match_breakdown_encoder_command)
 season_app.command("build-features")(build_features)
 season_app.command("train")(train_features)
 season_app.command("validate")(validate_walk_forward)
+season_app.command("build-statbotics-baseline")(build_statbotics_baseline_command)
 artifact_app.command("baseline-manifest")(write_baseline_manifest_command)
 artifact_app.command("compare-predictions")(compare_world_model)
+artifact_app.command("evaluate-predictions")(evaluate_predictions_command)
 scouting_app.command("init")(init_scouting_db)
 dev_app.command("api-smoke")(api_smoke)
 dev_app.command("smoke-test")(smoke_test)

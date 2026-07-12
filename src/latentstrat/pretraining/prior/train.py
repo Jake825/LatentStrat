@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
 import time
 from dataclasses import dataclass
@@ -23,6 +24,19 @@ from latentstrat.pretraining.prior.features import (
     read_prior_feature_table,
 )
 from latentstrat.pretraining.prior.model import TeamPriorDistiller, prior_distillation_losses
+from latentstrat.training_runtime import (
+    OptimizationController,
+    TrainingRuntimeConfig,
+    build_lr_scheduler,
+    epoch_runtime_metrics,
+    load_resume_checkpoint,
+    load_training_state,
+    resume_payload,
+    save_resume_checkpoint,
+    seed_dataloader_worker,
+    seed_everything,
+    validate_resume_checkpoint,
+)
 
 
 @dataclass
@@ -111,12 +125,16 @@ class PriorTensorDataset(Dataset):
         culture = table[list(CULTURE_TARGET_COLUMNS)].apply(pd.to_numeric, errors="coerce")
         if not np.isfinite(culture.to_numpy(dtype=np.float32)).all():
             raise ValueError("V5.6.4 cultural target values must be finite.")
-        self.target_norm_epa = torch.as_tensor(norm_epa.to_numpy(dtype=np.float32))
+        self.target_norm_epa = torch.as_tensor(
+            norm_epa.to_numpy(dtype=np.float32, copy=True)
+        )
         self.norm_epa_observed = torch.as_tensor(
-            norm_epa_observed.to_numpy(dtype=bool),
+            norm_epa_observed.to_numpy(dtype=bool, copy=True),
             dtype=torch.bool,
         )
-        self.target_culture = torch.as_tensor(culture.to_numpy(dtype=np.float32))
+        self.target_culture = torch.as_tensor(
+            culture.to_numpy(dtype=np.float32, copy=True)
+        )
 
     def __len__(self) -> int:
         return int(self.vectors.shape[0])
@@ -225,9 +243,25 @@ def train_prior_model(
     *,
     verbose: bool = True,
     tensorboard_writer: Any | None = None,
+    resume_checkpoint: str | Path | None = None,
+    resume_output: str | Path | None = None,
 ) -> tuple[TeamPriorDistiller, pd.DataFrame, PriorTensorDataset]:
     opts = opts or PriorOpts()
-    torch.manual_seed(opts.random_seed)
+    runtime_config = TrainingRuntimeConfig(
+        gradient_accumulation_steps=opts.gradient_accumulation_steps,
+        max_grad_norm=opts.max_grad_norm,
+        scheduler=opts.scheduler,
+        lr_eta_min=opts.lr_eta_min,
+        one_cycle_pct_start=opts.one_cycle_pct_start,
+        one_cycle_div_factor=opts.one_cycle_div_factor,
+        one_cycle_final_div_factor=opts.one_cycle_final_div_factor,
+        deterministic_algorithms=opts.deterministic_algorithms,
+        checkpoint_every_epochs=opts.checkpoint_every_epochs,
+        optimizer_log_interval=opts.optimizer_log_interval,
+    )
+    seed_everything(
+        opts.random_seed, deterministic_algorithms=opts.deterministic_algorithms
+    )
     dataset = PriorTensorDataset(table, opts)
     device = _resolve_device(opts.device)
     model = TeamPriorDistiller(opts).to(device)
@@ -239,9 +273,60 @@ def train_prior_model(
         batch_size=opts.batch_size,
         shuffle=True,
         generator=generator,
+        num_workers=0,
+        pin_memory=False,
+        worker_init_fn=seed_dataloader_worker,
     )
+    scheduler = build_lr_scheduler(
+        optimizer,
+        runtime_config,
+        epochs=opts.epochs,
+        microbatches_per_epoch=len(loader),
+    )
+    controller = OptimizationController(
+        model,
+        optimizer,
+        runtime_config,
+        scheduler=scheduler,
+        tensorboard_writer=tensorboard_writer,
+        tensorboard_prefix="Optimization/Prior",
+    )
+    resolved_config = opts.model_dump(mode="json")
+    digest = hashlib.sha256()
+    for tensor in (
+        dataset.team_numbers,
+        dataset.vectors,
+        dataset.target_norm_epa,
+        dataset.norm_epa_observed,
+        dataset.target_culture,
+    ):
+        digest.update(tensor.detach().cpu().contiguous().numpy().tobytes())
+    digest.update("\0".join(dataset.team_keys).encode("utf-8"))
+    source_fingerprint = digest.hexdigest()
     rows = []
-    for epoch in range(1, opts.epochs + 1):
+    start_epoch = 1
+    if resume_checkpoint is not None:
+        payload = load_resume_checkpoint(resume_checkpoint)
+        validate_resume_checkpoint(
+            payload,
+            trainer="prior",
+            phase="fit",
+            config=resolved_config,
+            source_fingerprint=source_fingerprint,
+        )
+        load_training_state(
+            payload,
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            loader_generator=generator,
+        )
+        rows = list(payload.get("history", []))
+        controller.optimizer_step = int(payload.get("optimizer_step", 0))
+        start_epoch = int(payload["completed_epoch"]) + 1
+    for epoch in range(start_epoch, opts.epochs + 1):
+        epoch_started = time.perf_counter()
+        epoch_step_start = len(controller.step_results)
         model.train()
         total_loss = 0.0
         total_openai_mse = 0.0
@@ -251,13 +336,18 @@ def train_prior_model(
         total_norm_epa_axis_rows = np.zeros(len(NORM_EPA_TARGET_COLUMNS), dtype=np.float64)
         total_culture_axis_mse = np.zeros(len(CULTURE_TARGET_COLUMNS), dtype=np.float64)
         total_rows = 0
-        for team_numbers, vectors, target_norm_epa, norm_epa_observed, target_culture in loader:
+        for batch_index, (
+            team_numbers,
+            vectors,
+            target_norm_epa,
+            norm_epa_observed,
+            target_culture,
+        ) in enumerate(loader):
             team_numbers = team_numbers.to(device)
             vectors = vectors.to(device)
             target_norm_epa = target_norm_epa.to(device)
             norm_epa_observed = norm_epa_observed.to(device)
             target_culture = target_culture.to(device)
-            optimizer.zero_grad(set_to_none=True)
             losses = prior_distillation_losses(
                 model,
                 team_numbers,
@@ -266,8 +356,11 @@ def train_prior_model(
                 norm_epa_observed,
                 target_culture,
             )
-            losses.total.backward()
-            optimizer.step()
+            controller.backward(
+                losses.total,
+                microbatch_index=batch_index,
+                microbatch_count=len(loader),
+            )
             batch_rows = int(vectors.shape[0])
             total_loss += float(losses.total.detach().cpu()) * batch_rows
             total_openai_mse += float(losses.openai_mse.detach().cpu()) * batch_rows
@@ -292,6 +385,13 @@ def train_prior_model(
             "log_var_openai": float(model.log_var_openai.detach().cpu()),
             "log_var_epa": float(model.log_var_epa.detach().cpu()),
         }
+        row.update(
+            epoch_runtime_metrics(
+                started_at=epoch_started,
+                sample_count=total_rows,
+                optimizer_summary=controller.epoch_summary(start_index=epoch_step_start),
+            )
+        )
         for axis, column in enumerate(NORM_EPA_TARGET_COLUMNS):
             row[f"{column}_mse"] = (
                 total_norm_epa_axis_mse[axis] / total_norm_epa_axis_rows[axis]
@@ -306,6 +406,27 @@ def train_prior_model(
             _write_tensorboard_epoch(tensorboard_writer, row)
         if verbose and (epoch == 1 or epoch == opts.epochs or epoch % 100 == 0):
             print(f"Prior epoch {epoch}/{opts.epochs}: train loss {mean_loss:.6f}")
+        if (
+            resume_output is not None
+            and runtime_config.checkpoint_every_epochs > 0
+            and epoch % runtime_config.checkpoint_every_epochs == 0
+        ):
+            save_resume_checkpoint(
+                resume_output,
+                resume_payload(
+                    trainer="prior",
+                    phase="fit",
+                    completed_epoch=epoch,
+                    model=model,
+                    optimizer=optimizer,
+                    scheduler=scheduler,
+                    optimizer_step=controller.optimizer_step,
+                    history=rows,
+                    config=resolved_config,
+                    source_fingerprint=source_fingerprint,
+                    loader_generator=generator,
+                ),
+            )
     return model, pd.DataFrame(rows), dataset
 
 
@@ -371,6 +492,7 @@ def train_prior_file(
     verbose: bool = True,
     tensorboard_logdir: str | Path | None = None,
     tensorboard_run_name: str | None = None,
+    resume_checkpoint: str | Path | None = None,
 ) -> PriorTrainingResult:
     opts = opts or PriorOpts()
     table = read_prior_feature_table(features_path)
@@ -397,6 +519,8 @@ def train_prior_file(
             opts,
             verbose=verbose,
             tensorboard_writer=writer,
+            resume_checkpoint=resume_checkpoint,
+            resume_output=output.parent / "resume" / "fit" / "latest.ckpt",
         )
         checkpoint = build_prior_checkpoint(
             model,

@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import subprocess
+import time
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -21,6 +22,21 @@ from torch import Tensor, nn
 
 from latentstrat.config import PriorOpts
 from latentstrat.pretraining.prior.features import EmbeddingStats, embed_narratives
+from latentstrat.season.metrics import (
+    paired_bootstrap_noninferiority as _supported_paired_bootstrap_noninferiority,
+)
+from latentstrat.training_runtime import (
+    OptimizationController,
+    TrainingRuntimeConfig,
+    build_lr_scheduler,
+    epoch_runtime_metrics,
+    load_resume_checkpoint,
+    load_training_state,
+    resume_payload,
+    save_resume_checkpoint,
+    seed_everything,
+    validate_resume_checkpoint,
+)
 
 PARQUET_ENGINE = "pyarrow"
 OFFICIAL_EVENT_TYPES = frozenset(range(8))
@@ -57,6 +73,16 @@ class WorldModelOptions(BaseModel):
     target_epochs: int = Field(default=50, gt=0)
     target_learning_rate: float = Field(default=1e-3, gt=0)
     random_seed: int = 2026
+    gradient_accumulation_steps: int = 1
+    max_grad_norm: float = 1.0
+    scheduler: str = "cosine"
+    lr_eta_min: float = 1e-5
+    one_cycle_pct_start: float = 0.3
+    one_cycle_div_factor: float = 25.0
+    one_cycle_final_div_factor: float = 10_000.0
+    deterministic_algorithms: bool = False
+    checkpoint_every_epochs: int = 1
+    optimizer_log_interval: int = 10
 
     def active_spaces(self) -> tuple[str, ...]:
         if not self.enabled:
@@ -321,6 +347,68 @@ def _linear_probe_report(
     return result
 
 
+def _runtime_config(options: WorldModelOptions) -> TrainingRuntimeConfig:
+    return TrainingRuntimeConfig(
+        gradient_accumulation_steps=options.gradient_accumulation_steps,
+        max_grad_norm=options.max_grad_norm,
+        scheduler=options.scheduler,
+        lr_eta_min=options.lr_eta_min,
+        one_cycle_pct_start=options.one_cycle_pct_start,
+        one_cycle_div_factor=options.one_cycle_div_factor,
+        one_cycle_final_div_factor=options.one_cycle_final_div_factor,
+        deterministic_algorithms=options.deterministic_algorithms,
+        checkpoint_every_epochs=options.checkpoint_every_epochs,
+        optimizer_log_interval=options.optimizer_log_interval,
+    )
+
+
+def _write_runtime_epoch(
+    writer: Any | None, phase: str, row: dict[str, Any], epoch: int
+) -> None:
+    if writer is None:
+        return
+    for name, value in row.items():
+        if isinstance(value, (int, float)) and np.isfinite(float(value)):
+            writer.add_scalar(f"FrozenTargets/{phase}/{name}", float(value), epoch)
+
+
+def _save_frozen_resume(
+    path: str | Path | None,
+    runtime_config: TrainingRuntimeConfig,
+    *,
+    epoch: int,
+    phase: str,
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.LRScheduler | None,
+    controller: OptimizationController,
+    history: list[dict[str, Any]],
+    config: dict[str, Any],
+    source_fingerprint: str,
+) -> None:
+    if (
+        path is None
+        or runtime_config.checkpoint_every_epochs <= 0
+        or epoch % runtime_config.checkpoint_every_epochs
+    ):
+        return
+    save_resume_checkpoint(
+        path,
+        resume_payload(
+            trainer="frozen-targets",
+            phase=phase,
+            completed_epoch=epoch,
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            optimizer_step=controller.optimizer_step,
+            history=history,
+            config=config,
+            source_fingerprint=source_fingerprint,
+        ),
+    )
+
+
 def _train_numeric_space(
     table: pd.DataFrame,
     *,
@@ -328,6 +416,10 @@ def _train_numeric_space(
     groups: dict[str, list[int]],
     width: int,
     options: WorldModelOptions,
+    phase: str,
+    resume_checkpoint: str | Path | None = None,
+    resume_output: str | Path | None = None,
+    tensorboard_writer: Any | None = None,
 ) -> tuple[NumericTargetAutoencoder, np.ndarray, dict[str, Any], dict[str, Any]]:
     values, observed = _finite_matrix(table, columns)
     if not np.any(observed):
@@ -337,19 +429,80 @@ def _train_numeric_space(
     sigma[~np.isfinite(sigma) | (sigma < 1e-8)] = 1.0
     normalized = (values - mu) / sigma
     normalized[~observed] = 0.0
-    torch.manual_seed(options.random_seed)
+    runtime_config = _runtime_config(options)
+    seed_everything(
+        options.random_seed, deterministic_algorithms=options.deterministic_algorithms
+    )
     model = NumericTargetAutoencoder(len(columns), width)
     optimizer = torch.optim.AdamW(model.parameters(), lr=options.target_learning_rate)
+    scheduler = build_lr_scheduler(
+        optimizer,
+        runtime_config,
+        epochs=options.target_epochs,
+        microbatches_per_epoch=1,
+    )
+    controller = OptimizationController(
+        model,
+        optimizer,
+        runtime_config,
+        scheduler=scheduler,
+        tensorboard_writer=tensorboard_writer,
+        tensorboard_prefix=f"Optimization/FrozenTargets/{phase}",
+    )
     x = torch.as_tensor(normalized, dtype=torch.float32)
     mask = torch.as_tensor(observed, dtype=torch.bool)
     history = []
-    for epoch in range(1, options.target_epochs + 1):
-        optimizer.zero_grad(set_to_none=True)
+    resolved_config = options.model_dump(mode="json")
+    digest = hashlib.sha256()
+    digest.update(x.numpy().tobytes())
+    digest.update(mask.numpy().tobytes())
+    digest.update(json.dumps(groups, sort_keys=True).encode("utf-8"))
+    source_fingerprint = digest.hexdigest()
+    start_epoch = 1
+    if resume_checkpoint is not None:
+        payload = load_resume_checkpoint(resume_checkpoint)
+        validate_resume_checkpoint(
+            payload,
+            trainer="frozen-targets",
+            phase=phase,
+            config=resolved_config,
+            source_fingerprint=source_fingerprint,
+        )
+        load_training_state(
+            payload, model=model, optimizer=optimizer, scheduler=scheduler
+        )
+        history = list(payload.get("history", []))
+        controller.optimizer_step = int(payload.get("optimizer_step", 0))
+        start_epoch = int(payload["completed_epoch"]) + 1
+    for epoch in range(start_epoch, options.target_epochs + 1):
+        epoch_started = time.perf_counter()
+        epoch_step_start = len(controller.step_results)
         reconstruction, _ = model(x)
         loss = _grouped_masked_mse(reconstruction, x, mask, groups)
-        loss.backward()
-        optimizer.step()
-        history.append({"epoch": epoch, "grouped_reconstruction_loss": float(loss.detach())})
+        controller.backward(loss, microbatch_index=0, microbatch_count=1)
+        row = {"epoch": epoch, "grouped_reconstruction_loss": float(loss.detach())}
+        row.update(
+            epoch_runtime_metrics(
+                started_at=epoch_started,
+                sample_count=len(x),
+                optimizer_summary=controller.epoch_summary(start_index=epoch_step_start),
+            )
+        )
+        history.append(row)
+        _write_runtime_epoch(tensorboard_writer, phase, row, epoch)
+        _save_frozen_resume(
+            resume_output,
+            runtime_config,
+            epoch=epoch,
+            phase=phase,
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            controller=controller,
+            history=history,
+            config=resolved_config,
+            source_fingerprint=source_fingerprint,
+        )
     model.eval()
     with torch.inference_mode():
         reconstruction, latent = model(x)
@@ -517,6 +670,9 @@ def build_rank_target_space(
     event_metadata: pd.DataFrame | None = None,
     source_path: str | Path | None = None,
     fit_max_week: int | None = None,
+    resume_checkpoint: str | Path | None = None,
+    resume_output: str | Path | None = None,
+    tensorboard_writer: Any | None = None,
 ) -> FrozenTargetSpace:
     rows, audit = _official_rows(rankings, event_metadata, fit_max_week=fit_max_week)
     if "event_completed" in rows.columns:
@@ -545,7 +701,15 @@ def build_rank_target_space(
     groups = {column: [idx] for idx, column in enumerate(columns)}
     width = options.rank_embedding.width
     model, latent, normalizers, report = _train_numeric_space(
-        rows, columns=columns, groups=groups, width=width, options=options
+        rows,
+        columns=columns,
+        groups=groups,
+        width=width,
+        options=options,
+        phase="rank",
+        resume_checkpoint=resume_checkpoint,
+        resume_output=resume_output,
+        tensorboard_writer=tensorboard_writer,
     )
     embeddings = rows[["event_key", "team_key", "event_week"]].copy()
     embeddings[_embedding_columns(width)] = latent
@@ -651,6 +815,9 @@ def build_pick_target_space(
     event_metadata: pd.DataFrame | None = None,
     source_path: str | Path | None = None,
     fit_max_week: int | None = None,
+    resume_checkpoint: str | Path | None = None,
+    resume_output: str | Path | None = None,
+    tensorboard_writer: Any | None = None,
 ) -> FrozenTargetSpace:
     rows, audit = _official_rows(selections, event_metadata, fit_max_week=fit_max_week)
     rank_rows, _ = _official_rows(rankings, event_metadata, fit_max_week=fit_max_week)
@@ -666,7 +833,7 @@ def build_pick_target_space(
     captain = torch.as_tensor([team_index[key] for key in opportunities["captain_team_key"]])
     candidate = torch.as_tensor([team_index[key] for key in opportunities["candidate_team_key"]])
     event = torch.as_tensor([event_index[key] for key in opportunities["event_key"]])
-    picked = torch.as_tensor(opportunities["picked"].to_numpy(bool))
+    picked = torch.as_tensor(opportunities["picked"].to_numpy(bool, copy=True))
     pool_membership = torch.zeros((len(opportunities), len(team_keys)), dtype=torch.float32)
     for _, indices in opportunities.groupby(["event_key", "snapshot_number"]).groups.items():
         index_list = list(indices)
@@ -676,12 +843,51 @@ def build_pick_target_space(
         for row_index in index_list:
             pool_membership[row_index, pool_indices] = 1.0
     width = options.pick_embedding.width
-    torch.manual_seed(options.random_seed)
+    runtime_config = _runtime_config(options)
+    seed_everything(
+        options.random_seed, deterministic_algorithms=options.deterministic_algorithms
+    )
     model = PickTargetEncoder(len(team_keys), len(event_keys), width)
     optimizer = torch.optim.AdamW(model.parameters(), lr=options.target_learning_rate)
+    scheduler = build_lr_scheduler(
+        optimizer,
+        runtime_config,
+        epochs=options.target_epochs,
+        microbatches_per_epoch=1,
+    )
+    controller = OptimizationController(
+        model,
+        optimizer,
+        runtime_config,
+        scheduler=scheduler,
+        tensorboard_writer=tensorboard_writer,
+        tensorboard_prefix="Optimization/FrozenTargets/pick",
+    )
     history = []
-    for epoch in range(1, options.target_epochs + 1):
-        optimizer.zero_grad(set_to_none=True)
+    resolved_config = options.model_dump(mode="json")
+    digest = hashlib.sha256()
+    for tensor in (captain, candidate, event, picked, pool_membership):
+        digest.update(tensor.contiguous().numpy().tobytes())
+    source_fingerprint = digest.hexdigest()
+    start_epoch = 1
+    if resume_checkpoint is not None:
+        payload = load_resume_checkpoint(resume_checkpoint)
+        validate_resume_checkpoint(
+            payload,
+            trainer="frozen-targets",
+            phase="pick",
+            config=resolved_config,
+            source_fingerprint=source_fingerprint,
+        )
+        load_training_state(
+            payload, model=model, optimizer=optimizer, scheduler=scheduler
+        )
+        history = list(payload.get("history", []))
+        controller.optimizer_step = int(payload.get("optimizer_step", 0))
+        start_epoch = int(payload["completed_epoch"]) + 1
+    for epoch in range(start_epoch, options.target_epochs + 1):
+        epoch_started = time.perf_counter()
+        epoch_step_start = len(controller.step_results)
         _, scores = model(captain, candidate, event, pool_membership)
         losses = []
         for _, indices in opportunities.groupby(["event_key", "snapshot_number"]).groups.items():
@@ -695,9 +901,30 @@ def build_pick_target_space(
                 "Pick target snapshots require at least one ranked-unselected negative."
             )
         loss = torch.stack(losses).mean()
-        loss.backward()
-        optimizer.step()
-        history.append({"epoch": epoch, "contrastive_margin_loss": float(loss.detach())})
+        controller.backward(loss, microbatch_index=0, microbatch_count=1)
+        row = {"epoch": epoch, "contrastive_margin_loss": float(loss.detach())}
+        row.update(
+            epoch_runtime_metrics(
+                started_at=epoch_started,
+                sample_count=len(opportunities),
+                optimizer_summary=controller.epoch_summary(start_index=epoch_step_start),
+            )
+        )
+        history.append(row)
+        _write_runtime_epoch(tensorboard_writer, "pick", row, epoch)
+        _save_frozen_resume(
+            resume_output,
+            runtime_config,
+            epoch=epoch,
+            phase="pick",
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            controller=controller,
+            history=history,
+            config=resolved_config,
+            source_fingerprint=source_fingerprint,
+        )
     model.eval()
     with torch.inference_mode():
         latent, scores = model(captain, candidate, event, pool_membership)
@@ -773,9 +1000,21 @@ def build_world_model_bundle(
     openai_cache_path: str | Path | None = None,
     fit_max_week: int | None = None,
     client: Any | None = None,
+    resume_checkpoint: str | Path | None = None,
+    tensorboard_logdir: str | Path | None = None,
+    tensorboard_run_name: str | None = None,
 ) -> LoadedWorldModelBundle:
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
+    writer = None
+    if tensorboard_logdir is not None:
+        from torch.utils.tensorboard import SummaryWriter
+
+        run_name = tensorboard_run_name or f"frozen_targets_{int(time.time())}"
+        writer = SummaryWriter(str(Path(tensorboard_logdir) / run_name))
+    resume_phase = None
+    if resume_checkpoint is not None:
+        resume_phase = str(load_resume_checkpoint(resume_checkpoint).get("phase"))
     events = pd.read_parquet(events_path, engine=PARQUET_ENGINE)
     rankings = pd.read_parquet(rankings_path, engine=PARQUET_ENGINE) if rankings_path else None
     selections = (
@@ -800,6 +1039,9 @@ def build_world_model_bundle(
             event_metadata=events,
             source_path=rankings_path,
             fit_max_week=fit_max_week,
+            resume_checkpoint=resume_checkpoint if resume_phase == "rank" else None,
+            resume_output=out / "resume" / "rank" / "latest.ckpt",
+            tensorboard_writer=writer,
         )
     if "pick" in options.active_spaces():
         if selections is None or rankings is None:
@@ -812,6 +1054,9 @@ def build_world_model_bundle(
             event_metadata=events,
             source_path=selections_path,
             fit_max_week=fit_max_week,
+            resume_checkpoint=resume_checkpoint if resume_phase == "pick" else None,
+            resume_output=out / "resume" / "pick" / "latest.ckpt",
+            tensorboard_writer=writer,
         )
     payload = {
         "schema_version": 1,
@@ -831,6 +1076,9 @@ def build_world_model_bundle(
         "fit_max_week": fit_max_week,
     }
     _json_write(out / "bundle.json", payload)
+    if writer is not None:
+        writer.flush()
+        writer.close()
     return LoadedWorldModelBundle(root=out, options=options, spaces=spaces)
 
 
@@ -886,61 +1134,6 @@ def paired_bootstrap_noninferiority(
     resamples: int = 2_000,
     seed: int = 2026,
 ) -> pd.DataFrame:
-    keys = ["fold_number", "match_key"]
-    joined = baseline.merge(
-        candidate, on=keys, suffixes=("_baseline", "_candidate"), validate="one_to_one"
+    return _supported_paired_bootstrap_noninferiority(
+        baseline, candidate, resamples=resamples, seed=seed
     )
-    metrics = {
-        "brier": ("win_brier", "absolute", 0.002),
-        "log_loss": ("win_log_loss", "absolute", 0.01),
-        "total_score_mse": ("total_score_squared_error", "relative", 0.01),
-    }
-    if "total_score_squared_error" not in joined.columns:
-        for suffix in ("baseline", "candidate"):
-            joined[f"total_score_squared_error_{suffix}"] = 0.5 * (
-                (
-                    joined[f"pred_red_total_score_{suffix}"]
-                    - joined[f"actual_red_total_score_{suffix}"]
-                )
-                ** 2
-                + (
-                    joined[f"pred_blue_total_score_{suffix}"]
-                    - joined[f"actual_blue_total_score_{suffix}"]
-                )
-                ** 2
-            )
-    rng = np.random.default_rng(seed)
-    draws: dict[str, list[float]] = {name: [] for name in metrics}
-    grouped = [group for _, group in joined.groupby("fold_number", sort=True)]
-    for _ in range(resamples):
-        sampled = pd.concat(
-            [group.iloc[rng.integers(0, len(group), size=len(group))] for group in grouped],
-            ignore_index=True,
-        )
-        for name, (column, mode, _) in metrics.items():
-            base = pd.to_numeric(sampled[f"{column}_baseline"], errors="coerce")
-            cand = pd.to_numeric(sampled[f"{column}_candidate"], errors="coerce")
-            delta = float(cand.mean() - base.mean())
-            if mode == "relative":
-                denominator = float(base.mean())
-                if abs(denominator) <= np.finfo(float).eps:
-                    delta = 0.0 if abs(delta) <= np.finfo(float).eps else math.copysign(
-                        math.inf, delta
-                    )
-                else:
-                    delta = delta / denominator
-            draws[name].append(delta)
-    rows = []
-    for name, (_, _, epsilon) in metrics.items():
-        values = np.asarray(draws[name])
-        rows.append(
-            {
-                "metric": name,
-                "delta_mean": float(values.mean()),
-                "ci_low": float(np.quantile(values, 0.025)),
-                "ci_high": float(np.quantile(values, 0.975)),
-                "epsilon": epsilon,
-                "passes_noninferiority": bool(np.quantile(values, 0.975) <= epsilon),
-            }
-        )
-    return pd.DataFrame(rows)

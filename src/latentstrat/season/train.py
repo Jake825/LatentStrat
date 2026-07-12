@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
 import sys
+import time
 import warnings
 from copy import deepcopy
 from dataclasses import dataclass
@@ -27,6 +29,19 @@ from latentstrat.season.data import (
     v57_continuous_target_names,
 )
 from latentstrat.season.model import SetTransformerModel, init_model, optimizer_parameter_groups
+from latentstrat.training_runtime import (
+    OptimizationController,
+    TrainingRuntimeConfig,
+    build_lr_scheduler,
+    epoch_runtime_metrics,
+    load_resume_checkpoint,
+    load_training_state,
+    resume_payload,
+    save_resume_checkpoint,
+    seed_dataloader_worker,
+    seed_everything,
+    validate_resume_checkpoint,
+)
 
 
 @dataclass
@@ -849,13 +864,29 @@ def create_optimizer(model: SetTransformerModel, opts: LatentStratOptions) -> to
 
 def create_lr_scheduler(
     optimizer: torch.optim.Optimizer, opts: LatentStratOptions
-) -> torch.optim.lr_scheduler.CosineAnnealingLR | None:
-    if not opts.use_lr_scheduler:
-        return None
-    return torch.optim.lr_scheduler.CosineAnnealingLR(
+) -> torch.optim.lr_scheduler.LRScheduler | None:
+    """Compatibility helper for callers that do not have a loader length."""
+
+    return build_lr_scheduler(
         optimizer,
-        T_max=max(int(opts.epochs), 1),
-        eta_min=float(opts.lr_eta_min),
+        _runtime_config(opts),
+        epochs=opts.epochs,
+        microbatches_per_epoch=1,
+    )
+
+
+def _runtime_config(opts: LatentStratOptions) -> TrainingRuntimeConfig:
+    return TrainingRuntimeConfig(
+        gradient_accumulation_steps=opts.gradient_accumulation_steps,
+        max_grad_norm=opts.max_grad_norm,
+        scheduler=opts.scheduler if opts.use_lr_scheduler else "none",
+        lr_eta_min=opts.lr_eta_min,
+        one_cycle_pct_start=opts.one_cycle_pct_start,
+        one_cycle_div_factor=opts.one_cycle_div_factor,
+        one_cycle_final_div_factor=opts.one_cycle_final_div_factor,
+        deterministic_algorithms=opts.deterministic_algorithms,
+        checkpoint_every_epochs=opts.checkpoint_every_epochs,
+        optimizer_log_interval=opts.optimizer_log_interval,
     )
 
 
@@ -902,6 +933,8 @@ def _make_loader(
         generator=generator,
         num_workers=opts.dataloader_num_workers,
         pin_memory=pin_memory,
+        worker_init_fn=seed_dataloader_worker if opts.dataloader_num_workers else None,
+        persistent_workers=opts.dataloader_num_workers > 0,
     )
 
 
@@ -1086,6 +1119,8 @@ def _sidecar_loader(
         generator=generator,
         num_workers=opts.dataloader_num_workers,
         pin_memory=device.type == "cuda",
+        worker_init_fn=seed_dataloader_worker if opts.dataloader_num_workers else None,
+        persistent_workers=opts.dataloader_num_workers > 0,
     )
 
 
@@ -1154,6 +1189,18 @@ def evaluate_loss(
     return total_loss / max(total_rows, 1)
 
 
+def _training_source_fingerprint(table: pd.DataFrame, split: Split) -> str:
+    digest = hashlib.sha256()
+    stable_table = table.copy()
+    for column in stable_table.select_dtypes(include=["object", "str"]):
+        stable_table[column] = stable_table[column].map(repr)
+    digest.update(pd.util.hash_pandas_object(stable_table, index=True).values.tobytes())
+    digest.update(np.asarray(split.train_mask, dtype=np.bool_).tobytes())
+    digest.update(np.asarray(split.validation_mask, dtype=np.bool_).tobytes())
+    digest.update(str(split.policy).encode("utf-8"))
+    return digest.hexdigest()
+
+
 def train_model(
     table: pd.DataFrame,
     split: Split,
@@ -1166,10 +1213,18 @@ def train_model(
     sidecar_tables: dict[str, pd.DataFrame] | None = None,
     tensorboard_writer: Any | None = None,
     world_model_opts: WorldModelOptions | None = None,
+    resume_checkpoint: str | None = None,
+    resume_output: str | None = None,
 ) -> tuple[SetTransformerModel, pd.DataFrame, TrainingDiagnostics]:
     opts = opts or default_options()
     world_model_opts = world_model_opts or (
         initial_model.world_model_opts if initial_model is not None else WorldModelOptions()
+    )
+    if resume_checkpoint is not None and initial_model is not None:
+        raise ValueError("resume_checkpoint cannot be combined with initial_model warm-starting.")
+    runtime_config = _runtime_config(opts)
+    seed_everything(
+        opts.random_seed, deterministic_algorithms=runtime_config.deterministic_algorithms
     )
     device = resolve_device(opts.device)
     dataset = MatchTensorDataset.from_table(table, opts, world_model_opts)
@@ -1199,11 +1254,11 @@ def train_model(
         freeze_for_venue_mode(model)
     elif freeze_team_embeddings:
         freeze_team_embedding_tables(model)
+    clamp_loss_log_vars(model, opts)
     model.to(device)
     amp_enabled = resolve_amp_enabled(opts, device)
     forward_model, compiled = compile_forward_model(model, opts, device)
     optimizer = create_optimizer(model, opts)
-    scheduler = create_lr_scheduler(optimizer, opts)
     scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
 
     generator = torch.Generator()
@@ -1218,9 +1273,33 @@ def train_model(
         device=device,
         world_model_opts=world_model_opts,
     )
-    sidecar_iters = {name: cycle(loader) for name, loader in sidecar_loaders.items()}
     train_eval_loader = _make_loader(dataset, train_rows, opts, shuffle=False, device=device)
     validation_loader = _make_loader(dataset, validation_rows, opts, shuffle=False, device=device)
+
+    scheduler = build_lr_scheduler(
+        optimizer,
+        runtime_config,
+        epochs=opts.epochs,
+        microbatches_per_epoch=len(train_loader),
+    )
+    controller = OptimizationController(
+        model,
+        optimizer,
+        runtime_config,
+        scheduler=scheduler,
+        scaler=scaler,
+        tensorboard_writer=tensorboard_writer,
+        tensorboard_prefix="Optimization/Season",
+        after_step=lambda: clamp_loss_log_vars(model, opts),
+    )
+    resolved_config = {
+        "options": opts.model_dump(mode="json"),
+        "world_model": world_model_opts.model_dump(mode="json"),
+        "venue_mode": venue_mode,
+        "freeze_team_embeddings": freeze_team_embeddings,
+        "sidecar_tables": sorted(sidecar_loaders),
+    }
+    source_fingerprint = _training_source_fingerprint(table, split)
 
     initial_loss = evaluate_loss(
         model,
@@ -1238,15 +1317,46 @@ def train_model(
     stopped = False
     iteration = 0
     rows = []
+    start_epoch = 1
+    if resume_checkpoint is not None:
+        payload = load_resume_checkpoint(resume_checkpoint)
+        validate_resume_checkpoint(
+            payload,
+            trainer="season",
+            phase="venue" if venue_mode else "fit",
+            config=resolved_config,
+            source_fingerprint=source_fingerprint,
+        )
+        load_training_state(
+            payload,
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            scaler=scaler,
+            loader_generator=generator,
+        )
+        extra_state = payload.get("extra_state", {})
+        best_model = extra_state.get("best_model_state_dict")
+        best_epoch = extra_state.get("best_epoch")
+        best_validation = float(extra_state.get("best_validation", float("inf")))
+        patience_counter = int(extra_state.get("patience_counter", 0))
+        rows = list(payload.get("history", []))
+        iteration = int(payload.get("optimizer_step", 0))
+        controller.optimizer_step = iteration
+        start_epoch = int(payload["completed_epoch"]) + 1
+        initial_loss = float(extra_state.get("initial_loss", initial_loss))
 
-    for epoch in range(1, opts.epochs + 1):
+    for epoch in range(start_epoch, opts.epochs + 1):
+        epoch_started = time.perf_counter()
+        epoch_step_start = len(controller.step_results)
         model.train()
         forward_model.train()
         epoch_learning_rate = float(optimizer.param_groups[0]["lr"])
         task_sums, task_weights = _empty_epoch_accumulators()
-        for batch in train_loader:
+        sidecar_iters = {name: cycle(loader) for name, loader in sidecar_loaders.items()}
+        epoch_sample_count = 0
+        for batch_index, batch in enumerate(train_loader):
             batch = batch_to_device(batch, device)
-            optimizer.zero_grad(set_to_none=True)
             with torch.amp.autocast(device_type="cuda", enabled=amp_enabled):
                 loss, metrics, _ = _loss_from_batch(
                     model, batch, opts, positive_weights, forward_model
@@ -1278,11 +1388,13 @@ def train_model(
                         int(sidecar_batch[0].shape[0]),
                     )
                     loss = loss + model.balance_loss(name, raw_loss, True)
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-            clamp_loss_log_vars(model, opts)
-            iteration += 1
+            controller.backward(
+                loss,
+                microbatch_index=batch_index,
+                microbatch_count=len(train_loader),
+            )
+            epoch_sample_count += batch_rows
+            iteration = controller.optimizer_step
 
         train_loss = evaluate_loss(
             model,
@@ -1311,6 +1423,13 @@ def train_model(
             "validation_loss": validation_loss,
             "learning_rate": epoch_learning_rate,
         }
+        row.update(
+            epoch_runtime_metrics(
+                started_at=epoch_started,
+                sample_count=epoch_sample_count,
+                optimizer_summary=controller.epoch_summary(start_index=epoch_step_start),
+            )
+        )
         for task_name, value in task_means.items():
             row[f"{task_name}_loss"] = value
         for task_name, parameter in model.loss_balancer.log_vars.items():
@@ -1342,10 +1461,37 @@ def train_model(
                     opts.use_early_stopping
                     and patience_counter >= opts.early_stopping_patience
                 )
-                if stopped:
-                    break
-        if scheduler is not None:
-            scheduler.step()
+        if (
+            resume_output is not None
+            and runtime_config.checkpoint_every_epochs > 0
+            and epoch % runtime_config.checkpoint_every_epochs == 0
+        ):
+            save_resume_checkpoint(
+                resume_output,
+                resume_payload(
+                    trainer="season",
+                    phase="venue" if venue_mode else "fit",
+                    completed_epoch=epoch,
+                    model=model,
+                    optimizer=optimizer,
+                    scheduler=scheduler,
+                    optimizer_step=controller.optimizer_step,
+                    history=rows,
+                    config=resolved_config,
+                    source_fingerprint=source_fingerprint,
+                    scaler=scaler,
+                    loader_generator=generator,
+                    extra_state={
+                        "best_model_state_dict": best_model,
+                        "best_epoch": best_epoch,
+                        "best_validation": best_validation,
+                        "patience_counter": patience_counter,
+                        "initial_loss": initial_loss,
+                    },
+                ),
+            )
+        if stopped:
+            break
 
     restored = False
     if opts.restore_best_validation_model and best_model is not None:

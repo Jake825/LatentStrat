@@ -35,7 +35,16 @@ class LatentStratOptions(BaseModel):
     l2_heads: float = 1e-4
     l2_set: float = 1e-4
     use_lr_scheduler: bool = True
+    scheduler: str = "cosine"
     lr_eta_min: float = 1e-5
+    gradient_accumulation_steps: int = 1
+    max_grad_norm: float = 1.0
+    one_cycle_pct_start: float = 0.3
+    one_cycle_div_factor: float = 25.0
+    one_cycle_final_div_factor: float = 10_000.0
+    deterministic_algorithms: bool = False
+    checkpoint_every_epochs: int = 1
+    optimizer_log_interval: int = 10
     loss_log_var_min: float = -5.0
     loss_log_var_max: float = 5.0
     team_dropout_rate: float = 0.03
@@ -44,9 +53,9 @@ class LatentStratOptions(BaseModel):
     smoke_mini_batch_size: int = 64
     eval_batch_size: int = 1024
     dataloader_num_workers: int = 0
-    device: str = "auto"
-    use_amp: bool | str = "auto"
-    compile_model: bool | str = "auto"
+    device: str = "cpu"
+    use_amp: bool | str = False
+    compile_model: bool | str = False
     use_early_stopping: bool = True
     early_stopping_patience: int = 15
     early_stopping_min_delta: float = 1e-4
@@ -136,8 +145,18 @@ class PriorOpts(BaseModel):
     future_growth_per_year: int = 800
     epa_source_year: int | None = None
     cache_path: str = str(OPENAI_EMBEDDING_CACHE_PATH)
-    device: str = "auto"
+    device: str = "cpu"
     random_seed: int = 2026
+    gradient_accumulation_steps: int = 1
+    max_grad_norm: float = 1.0
+    scheduler: str = "cosine"
+    lr_eta_min: float = 1e-5
+    one_cycle_pct_start: float = 0.3
+    one_cycle_div_factor: float = 25.0
+    one_cycle_final_div_factor: float = 10_000.0
+    deterministic_algorithms: bool = False
+    checkpoint_every_epochs: int = 1
+    optimizer_log_interval: int = 10
 
 
 def default_options(season: int = 2026) -> LatentStratOptions:

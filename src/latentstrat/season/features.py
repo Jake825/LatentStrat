@@ -667,6 +667,8 @@ def train_feature_table(
     tensorboard_writer: object | None = None,
     tensorboard_logdir: str | Path | None = None,
     world_model_bundle: str | Path | LoadedWorldModelBundle | None = None,
+    resume_checkpoint: str | Path | None = None,
+    resume_output: str | Path | None = None,
 ) -> FeatureTrainingResult:
     opts = opts or default_options()
     loaded_world_model = (
@@ -685,6 +687,12 @@ def train_feature_table(
         and initial_model.world_model_opts.active_spaces()
     ):
         raise ValueError("Active frozen-target checkpoint training requires frozen_target_bundle.")
+    if resume_checkpoint is not None and (
+        initial_model is not None or prior_checkpoint is not None
+    ):
+        raise ValueError(
+            "resume_checkpoint cannot be combined with checkpoint or prior warm-starting."
+        )
     if initial_model is not None:
         initial_widths = tuple(
             initial_model.world_model_opts.space(name).width
@@ -749,6 +757,16 @@ def train_feature_table(
         sidecar_tables=indexed_sidecars,
         tensorboard_writer=tensorboard_writer,
         world_model_opts=world_model_opts,
+        resume_checkpoint=str(resume_checkpoint) if resume_checkpoint is not None else None,
+        resume_output=(
+            str(resume_output)
+            if resume_output is not None
+            else (
+                str(Path(output_dir) / "resume" / "season" / "latest.ckpt")
+                if output_dir is not None
+                else None
+            )
+        ),
     )
     report = evaluate_model(
         model, prepared, split, target_stats, opts, baselines, v57_target_stats
@@ -797,6 +815,8 @@ def train_feature_file(
     tensorboard_writer: object | None = None,
     tensorboard_logdir: str | Path | None = None,
     world_model_bundle: str | Path | LoadedWorldModelBundle | None = None,
+    resume_checkpoint: str | Path | None = None,
+    resume_output: str | Path | None = None,
 ) -> FeatureTrainingResult:
     return train_feature_table(
         read_feature_table(input_path),
@@ -813,6 +833,8 @@ def train_feature_file(
         tensorboard_writer=tensorboard_writer,
         tensorboard_logdir=tensorboard_logdir,
         world_model_bundle=world_model_bundle,
+        resume_checkpoint=resume_checkpoint,
+        resume_output=resume_output,
     )
 
 

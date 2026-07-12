@@ -32,6 +32,8 @@ latentstrat pretrain prior inspect `
 OpenAI requests require `OPENAI_API_KEY` only for cache misses. The cache lives at
 `data/cache/openai_embeddings.sqlite`.
 
+Prior training and every latent-dimension grid trial use the shared CPU runtime: AdamW, gradient clipping at `1.0`, optimizer-step cosine decay, deterministic seed streams, and TensorBoard observability. Training writes `resume/fit/latest.ckpt`; grid trials write `resume/<latent-dim>/latest.ckpt`. Pass `--resume-checkpoint` to continue the matching phase with identical data and configuration.
+
 ## Contract
 
 The checkpoint exports a team embedding table used to initialize season-model `Z_base`. Prior

@@ -29,6 +29,20 @@ latentstrat season train data/features/season/features_2026.parquet `
 The run writes `checkpoint.pt`, CSV diagnostics, PNG plots, and `manifest.json`. TensorBoard writes
 to `runs/` by default; use `--no-tensorboard` for quiet automation.
 
+## CPU Training Runtime
+
+Season training defaults to CPU, AdamW, gradient clipping at `1.0`, and an optimizer-step cosine schedule ending at `1e-5`. The same runtime drives walk-forward folds. Use `--gradient-accumulation-steps` to increase the effective batch size, or select `--scheduler none|cosine|one-cycle` explicitly.
+
+Every CLI run writes an epoch-boundary resume checkpoint at `resume/season/latest.ckpt`. Continue an interrupted run with the same data and mathematical configuration:
+
+```powershell
+latentstrat season train data/features/season/features_2026.parquet `
+  --resume-checkpoint artifacts/season/features_run/resume/season/latest.ckpt `
+  --output artifacts/season/features_run
+```
+
+`--resume-checkpoint` restores model, optimizer, scheduler, RNG, loader, history, and early-stopping state. It cannot be combined with `--checkpoint` or `--prior-checkpoint`, which remain weights-only warm starts. Walk-forward folds resume automatically from their fold-local checkpoints under the selected output directory.
+
 ## Validate
 
 ```powershell

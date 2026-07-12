@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,6 +23,19 @@ from latentstrat.pretraining.prior.features import (
     read_prior_feature_table,
 )
 from latentstrat.pretraining.prior.model import TeamPriorDistiller, prior_distillation_losses
+from latentstrat.training_runtime import (
+    OptimizationController,
+    TrainingRuntimeConfig,
+    build_lr_scheduler,
+    epoch_runtime_metrics,
+    load_resume_checkpoint,
+    load_training_state,
+    resume_payload,
+    save_resume_checkpoint,
+    seed_dataloader_worker,
+    seed_everything,
+    validate_resume_checkpoint,
+)
 
 
 @dataclass(frozen=True)
@@ -96,12 +110,16 @@ class PriorGridDataset(Dataset):
         culture = table[list(CULTURE_TARGET_COLUMNS)].apply(pd.to_numeric, errors="coerce")
         if not np.isfinite(culture.to_numpy(dtype=np.float32)).all():
             raise ValueError("Prior grid cultural target values must be finite.")
-        self.target_norm_epa = torch.as_tensor(norm_epa.to_numpy(dtype=np.float32))
+        self.target_norm_epa = torch.as_tensor(
+            norm_epa.to_numpy(dtype=np.float32, copy=True)
+        )
         self.norm_epa_observed = torch.as_tensor(
-            norm_epa_observed.to_numpy(dtype=bool),
+            norm_epa_observed.to_numpy(dtype=bool, copy=True),
             dtype=torch.bool,
         )
-        self.target_culture = torch.as_tensor(culture.to_numpy(dtype=np.float32))
+        self.target_culture = torch.as_tensor(
+            culture.to_numpy(dtype=np.float32, copy=True)
+        )
         self.max_team_number = int(max(team_numbers))
         self.llm_dim = int(llm_dim)
 
@@ -207,6 +225,9 @@ def _loader(
         batch_size=batch_size,
         shuffle=shuffle,
         generator=generator if shuffle else None,
+        num_workers=0,
+        pin_memory=False,
+        worker_init_fn=seed_dataloader_worker,
     )
 
 
@@ -270,8 +291,13 @@ def train_prior_grid_run(
     learning_rate: float,
     seed: int,
     device: torch.device,
+    runtime_config: TrainingRuntimeConfig | None = None,
+    resume_checkpoint: str | Path | None = None,
+    resume_output: str | Path | None = None,
+    tensorboard_writer: Any | None = None,
 ) -> tuple[dict[str, Any], pd.DataFrame]:
-    torch.manual_seed(seed)
+    runtime_config = runtime_config or TrainingRuntimeConfig()
+    seed_everything(seed, deterministic_algorithms=runtime_config.deterministic_algorithms)
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
     opts = PriorOpts(
@@ -300,28 +326,79 @@ def train_prior_grid_run(
         shuffle=False,
         seed=seed,
     )
+    scheduler = build_lr_scheduler(
+        optimizer,
+        runtime_config,
+        epochs=epochs,
+        microbatches_per_epoch=len(train_loader),
+    )
+    controller = OptimizationController(
+        model,
+        optimizer,
+        runtime_config,
+        scheduler=scheduler,
+        tensorboard_writer=tensorboard_writer,
+        tensorboard_prefix=f"Optimization/PriorGrid/{latent_dim}",
+    )
+    resolved_config = {
+        **opts.model_dump(mode="json"),
+        "runtime": runtime_config.__dict__,
+    }
+    digest = hashlib.sha256()
+    for tensor in (
+        dataset.team_numbers,
+        dataset.vectors,
+        dataset.target_norm_epa,
+        dataset.norm_epa_observed,
+        dataset.target_culture,
+    ):
+        digest.update(tensor.detach().cpu().contiguous().numpy().tobytes())
+    digest.update(np.asarray(split.train_mask, dtype=np.bool_).tobytes())
+    digest.update(np.asarray(split.validation_mask, dtype=np.bool_).tobytes())
+    source_fingerprint = digest.hexdigest()
     start = time.perf_counter()
     history_rows = []
-    for epoch in range(1, epochs + 1):
+    start_epoch = 1
+    if resume_checkpoint is not None:
+        payload = load_resume_checkpoint(resume_checkpoint)
+        validate_resume_checkpoint(
+            payload,
+            trainer="prior-grid",
+            phase=str(latent_dim),
+            config=resolved_config,
+            source_fingerprint=source_fingerprint,
+        )
+        load_training_state(
+            payload,
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            loader_generator=train_loader.generator,
+        )
+        history_rows = list(payload.get("history", []))
+        controller.optimizer_step = int(payload.get("optimizer_step", 0))
+        start_epoch = int(payload["completed_epoch"]) + 1
+    for epoch in range(start_epoch, epochs + 1):
+        epoch_started = time.perf_counter()
+        epoch_step_start = len(controller.step_results)
         model.train()
         total_loss = 0.0
         total_openai_mse = 0.0
         total_norm_epa_mse = 0.0
         total_culture_mse = 0.0
         total_rows = 0
-        for (
+        for batch_index, (
             team_numbers,
             vectors,
             target_norm_epa,
             norm_epa_observed,
             target_culture,
-        ) in train_loader:
+        ) in enumerate(train_loader):
             team_numbers = team_numbers.to(device)
             vectors = vectors.to(device)
             target_norm_epa = target_norm_epa.to(device)
             norm_epa_observed = norm_epa_observed.to(device)
             target_culture = target_culture.to(device)
-            optimizer.zero_grad(set_to_none=True)
             losses = prior_distillation_losses(
                 model,
                 team_numbers,
@@ -330,8 +407,11 @@ def train_prior_grid_run(
                 norm_epa_observed,
                 target_culture,
             )
-            losses.total.backward()
-            optimizer.step()
+            controller.backward(
+                losses.total,
+                microbatch_index=batch_index,
+                microbatch_count=len(train_loader),
+            )
             batch_rows = int(vectors.shape[0])
             total_loss += float(losses.total.detach().cpu()) * batch_rows
             total_openai_mse += float(losses.openai_mse.detach().cpu()) * batch_rows
@@ -340,8 +420,7 @@ def train_prior_grid_run(
             total_rows += batch_rows
         train_loss = total_loss / max(total_rows, 1)
         validation = _batch_metrics(model, validation_loader, device)
-        history_rows.append(
-            {
+        row = {
                 "latent_dim": latent_dim,
                 "epoch": epoch,
                 "train_loss": train_loss,
@@ -355,8 +434,42 @@ def train_prior_grid_run(
                 "log_var_openai": float(model.log_var_openai.detach().cpu()),
                 "log_var_epa": float(model.log_var_epa.detach().cpu()),
                 "log_var_culture_mean": float(model.log_var_culture.detach().cpu().mean()),
-            }
+        }
+        row.update(
+            epoch_runtime_metrics(
+                started_at=epoch_started,
+                sample_count=total_rows,
+                optimizer_summary=controller.epoch_summary(start_index=epoch_step_start),
+            )
         )
+        history_rows.append(row)
+        if tensorboard_writer is not None:
+            for name, value in row.items():
+                if isinstance(value, (int, float)) and np.isfinite(float(value)):
+                    tensorboard_writer.add_scalar(
+                        f"PriorGrid/{latent_dim}/{name}", float(value), epoch
+                    )
+        if (
+            resume_output is not None
+            and runtime_config.checkpoint_every_epochs > 0
+            and epoch % runtime_config.checkpoint_every_epochs == 0
+        ):
+            save_resume_checkpoint(
+                resume_output,
+                resume_payload(
+                    trainer="prior-grid",
+                    phase=str(latent_dim),
+                    completed_epoch=epoch,
+                    model=model,
+                    optimizer=optimizer,
+                    scheduler=scheduler,
+                    optimizer_step=controller.optimizer_step,
+                    history=history_rows,
+                    config=resolved_config,
+                    source_fingerprint=source_fingerprint,
+                    loader_generator=train_loader.generator,
+                ),
+            )
     history = pd.DataFrame(history_rows)
     elapsed = time.perf_counter() - start
     parameter_count = trainable_parameter_count(model)
@@ -452,7 +565,16 @@ def run_prior_grid(
     learning_rate: float = 1e-3,
     validation_fraction: float = 0.2,
     seed: int = 2026,
-    device: str = "auto",
+    device: str = "cpu",
+    gradient_accumulation_steps: int = 1,
+    max_grad_norm: float = 1.0,
+    scheduler: str = "cosine",
+    lr_eta_min: float = 1e-5,
+    deterministic_algorithms: bool = False,
+    checkpoint_every_epochs: int = 1,
+    resume_checkpoint: str | Path | None = None,
+    tensorboard_logdir: str | Path | None = None,
+    tensorboard_run_name: str | None = None,
 ) -> PriorGridExperimentResult:
     table = read_prior_feature_table(features_path)
     dataset = PriorGridDataset(table)
@@ -460,9 +582,26 @@ def run_prior_grid(
     torch_device = resolve_grid_device(device)
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
+    writer = None
+    if tensorboard_logdir is not None:
+        from torch.utils.tensorboard import SummaryWriter
+
+        run_name = tensorboard_run_name or f"prior_grid_{int(time.time())}"
+        writer = SummaryWriter(str(Path(tensorboard_logdir) / run_name))
     result_rows: list[dict[str, Any]] = []
     history_frames: list[pd.DataFrame] = []
     failure_rows: list[dict[str, Any]] = []
+    runtime_config = TrainingRuntimeConfig(
+        gradient_accumulation_steps=gradient_accumulation_steps,
+        max_grad_norm=max_grad_norm,
+        scheduler=scheduler,
+        lr_eta_min=lr_eta_min,
+        deterministic_algorithms=deterministic_algorithms,
+        checkpoint_every_epochs=checkpoint_every_epochs,
+    )
+    resume_phase = None
+    if resume_checkpoint is not None:
+        resume_phase = str(load_resume_checkpoint(resume_checkpoint).get("phase"))
     for latent_dim in latent_dims:
         try:
             result, history = train_prior_grid_run(
@@ -474,6 +613,12 @@ def run_prior_grid(
                 learning_rate=float(learning_rate),
                 seed=int(seed),
                 device=torch_device,
+                runtime_config=runtime_config,
+                resume_checkpoint=(
+                    resume_checkpoint if resume_phase == str(latent_dim) else None
+                ),
+                resume_output=output / "resume" / str(latent_dim) / "latest.ckpt",
+                tensorboard_writer=writer,
             )
             result_rows.append(result)
             history_frames.append(history)
@@ -539,6 +684,9 @@ def run_prior_grid(
         source_files={"features": features_path},
         promotion_note="Prior bottleneck selection experiment.",
     )
+    if writer is not None:
+        writer.flush()
+        writer.close()
     return PriorGridExperimentResult(
         results=results,
         history=history,
