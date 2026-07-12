@@ -192,9 +192,7 @@ class MatchBreakdownCorpus:
         raw_json = _json_text(match)
         alliances = match.get("alliances")
         red_score = alliances.get("red", {}).get("score") if isinstance(alliances, dict) else None
-        blue_score = (
-            alliances.get("blue", {}).get("score") if isinstance(alliances, dict) else None
-        )
+        blue_score = alliances.get("blue", {}).get("score") if isinstance(alliances, dict) else None
         played = red_score not in (None, -1) and blue_score not in (None, -1)
         breakdown = match.get("score_breakdown")
         has_breakdown = isinstance(breakdown, dict) and all(

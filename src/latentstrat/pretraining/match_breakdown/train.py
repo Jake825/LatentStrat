@@ -320,9 +320,7 @@ def winner_margin_ranking_loss(
         device=device,
     )
     valid = (
-        red_scores != blue_scores
-        if skip_ties
-        else torch.ones_like(red_scores, dtype=torch.bool)
+        red_scores != blue_scores if skip_ties else torch.ones_like(red_scores, dtype=torch.bool)
     )
     if not torch.any(valid):
         return red_quality.sum() * 0
@@ -399,8 +397,7 @@ def _season_tensors(rows: list[AllianceBreakdownRow]) -> dict[int, SeasonTensors
     for season, season_rows in sorted(by_season.items()):
         schema = discover_season_schema(season_rows, season)
         vectors = [
-            vectorize_flat_row(row.flat_breakdown, schema.encoded_fields)
-            for row in season_rows
+            vectorize_flat_row(row.flat_breakdown, schema.encoded_fields) for row in season_rows
         ]
         values = torch.as_tensor(np.stack([vector[0] for vector in vectors]), dtype=torch.float32)
         masks = torch.as_tensor(np.stack([vector[1] for vector in vectors]), dtype=torch.float32)
@@ -456,9 +453,7 @@ def _checkpoint_payload(
         "season_widths": {season: data.schema.width for season, data in tensors.items()},
         "schemas": {season: data.schema.to_dict() for season, data in tensors.items()},
         "options": asdict(options),
-        "quality_head_contract": (
-            "diagnostic-only" if model.quality_head_enabled else None
-        ),
+        "quality_head_contract": ("diagnostic-only" if model.quality_head_enabled else None),
         "state_dict": model.state_dict(),
     }
 
@@ -677,15 +672,15 @@ def _train_model(
             if step_result is not None:
                 epoch_grad_norms.append(step_result.preclip_grad_norm)
         row = {
-                "phase": phase,
-                "epoch": epoch,
-                "steps": steps_per_epoch,
-                **{
-                    name: float(np.mean(values)) if values else 0.0
-                    for name, values in epoch_losses.items()
-                },
-                "train_loss": float(np.mean(epoch_losses["total_loss"])),
-                "max_preclip_grad_norm": float(np.max(epoch_grad_norms)),
+            "phase": phase,
+            "epoch": epoch,
+            "steps": steps_per_epoch,
+            **{
+                name: float(np.mean(values)) if values else 0.0
+                for name, values in epoch_losses.items()
+            },
+            "train_loss": float(np.mean(epoch_losses["total_loss"])),
+            "max_preclip_grad_norm": float(np.max(epoch_grad_norms)),
         }
         row.update(
             epoch_runtime_metrics(
@@ -1082,8 +1077,7 @@ def train_match_breakdown_encoder(
             if resume_phase == "eval"
             else (
                 out / "resume" / "eval" / "latest.ckpt"
-                if resume_phase == "all_data"
-                and (out / "resume" / "eval" / "latest.ckpt").exists()
+                if resume_phase == "all_data" and (out / "resume" / "eval" / "latest.ckpt").exists()
                 else None
             )
         ),
@@ -1123,9 +1117,10 @@ def train_match_breakdown_encoder(
         },
     }
     _json_write(out / "schema.json", schema_payload)
-    _json_write(out / "union_schema_audit.json", union_schema_audit(
-        {season: data.schema for season, data in tensors.items()}
-    ))
+    _json_write(
+        out / "union_schema_audit.json",
+        union_schema_audit({season: data.schema for season, data in tensors.items()}),
+    )
     optional_files = []
     if options.structured_objective_enabled:
         _json_write(

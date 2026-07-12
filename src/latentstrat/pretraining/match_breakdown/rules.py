@@ -77,9 +77,7 @@ def load_rule_file(
                 lhs={str(key): float(value) for key, value in raw["lhs"].items()},
                 rhs={str(key): float(value) for key, value in raw["rhs"].items()},
                 weight=float(raw.get("weight", defaults.get("weight", 1.0))),
-                tolerance=float(
-                    raw.get("tolerance", defaults.get("tolerance", default_tolerance))
-                ),
+                tolerance=float(raw.get("tolerance", defaults.get("tolerance", default_tolerance))),
                 min_pass_rate=float(
                     raw.get(
                         "min_pass_rate",
@@ -229,9 +227,7 @@ def score_consistency_loss(
         residual = _linear_expr(pred, rule.lhs, field_to_index) - _linear_expr(
             pred, rule.rhs, field_to_index
         )
-        losses.append(
-            rule.weight * F.smooth_l1_loss(residual, torch.zeros_like(residual))
-        )
+        losses.append(rule.weight * F.smooth_l1_loss(residual, torch.zeros_like(residual)))
     if not losses:
         return pred.sum() * 0
     return torch.stack(losses).mean()

@@ -362,9 +362,7 @@ def _runtime_config(options: WorldModelOptions) -> TrainingRuntimeConfig:
     )
 
 
-def _write_runtime_epoch(
-    writer: Any | None, phase: str, row: dict[str, Any], epoch: int
-) -> None:
+def _write_runtime_epoch(writer: Any | None, phase: str, row: dict[str, Any], epoch: int) -> None:
     if writer is None:
         return
     for name, value in row.items():
@@ -430,9 +428,7 @@ def _train_numeric_space(
     normalized = (values - mu) / sigma
     normalized[~observed] = 0.0
     runtime_config = _runtime_config(options)
-    seed_everything(
-        options.random_seed, deterministic_algorithms=options.deterministic_algorithms
-    )
+    seed_everything(options.random_seed, deterministic_algorithms=options.deterministic_algorithms)
     model = NumericTargetAutoencoder(len(columns), width)
     optimizer = torch.optim.AdamW(model.parameters(), lr=options.target_learning_rate)
     scheduler = build_lr_scheduler(
@@ -468,9 +464,7 @@ def _train_numeric_space(
             config=resolved_config,
             source_fingerprint=source_fingerprint,
         )
-        load_training_state(
-            payload, model=model, optimizer=optimizer, scheduler=scheduler
-        )
+        load_training_state(payload, model=model, optimizer=optimizer, scheduler=scheduler)
         history = list(payload.get("history", []))
         controller.optimizer_step = int(payload.get("optimizer_step", 0))
         start_epoch = int(payload["completed_epoch"]) + 1
@@ -512,10 +506,7 @@ def _train_numeric_space(
         valid = observed[:, indices]
         group_mse[name] = (
             float(
-                np.mean(
-                    (reconstruction_np[:, indices][valid] - normalized[:, indices][valid])
-                    ** 2
-                )
+                np.mean((reconstruction_np[:, indices][valid] - normalized[:, indices][valid]) ** 2)
             )
             if np.any(valid)
             else math.nan
@@ -528,9 +519,7 @@ def _train_numeric_space(
         "grouped_reconstruction_mse": group_mse,
         "effective_rank": _effective_rank(latent.numpy()),
         "nearest_neighbors": _nearest_neighbor_report(table, latent.numpy()),
-        "linear_probes_r2": _linear_probe_report(
-            latent.numpy(), normalized, observed, columns
-        ),
+        "linear_probes_r2": _linear_probe_report(latent.numpy(), normalized, observed, columns),
         "history": history,
     }
     return model, latent.numpy(), normalizers, report
@@ -694,9 +683,7 @@ def build_rank_target_space(
         or column.startswith(("record_", "ranking_stat_"))
     ]
     columns = [
-        column
-        for column in columns
-        if pd.to_numeric(rows[column], errors="coerce").notna().any()
+        column for column in columns if pd.to_numeric(rows[column], errors="coerce").notna().any()
     ]
     groups = {column: [idx] for idx, column in enumerate(columns)}
     width = options.rank_embedding.width
@@ -844,9 +831,7 @@ def build_pick_target_space(
             pool_membership[row_index, pool_indices] = 1.0
     width = options.pick_embedding.width
     runtime_config = _runtime_config(options)
-    seed_everything(
-        options.random_seed, deterministic_algorithms=options.deterministic_algorithms
-    )
+    seed_everything(options.random_seed, deterministic_algorithms=options.deterministic_algorithms)
     model = PickTargetEncoder(len(team_keys), len(event_keys), width)
     optimizer = torch.optim.AdamW(model.parameters(), lr=options.target_learning_rate)
     scheduler = build_lr_scheduler(
@@ -879,9 +864,7 @@ def build_pick_target_space(
             config=resolved_config,
             source_fingerprint=source_fingerprint,
         )
-        load_training_state(
-            payload, model=model, optimizer=optimizer, scheduler=scheduler
-        )
+        load_training_state(payload, model=model, optimizer=optimizer, scheduler=scheduler)
         history = list(payload.get("history", []))
         controller.optimizer_step = int(payload.get("optimizer_step", 0))
         start_epoch = int(payload["completed_epoch"]) + 1
@@ -1093,9 +1076,7 @@ def attach_world_model_targets(
         prototype = bundle.spaces["award"].embeddings
         columns = _embedding_columns(bundle.options.award_embedding.width)
         prototype_map = {
-            str(row.award_id): np.asarray(
-                [getattr(row, column) for column in columns], dtype=float
-            )
+            str(row.award_id): np.asarray([getattr(row, column) for column in columns], dtype=float)
             for row in prototype.itertuples()
         }
         for color in ("red", "blue"):

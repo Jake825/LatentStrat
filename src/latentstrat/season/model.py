@@ -305,6 +305,26 @@ class HomoscedasticTaskBalancer(nn.Module):
                 parameter.clamp_(min=min_value, max=max_value)
 
 
+class FixedTaskBalancer(nn.Module):
+    """Parameter-free task weights for controlled diagnostic studies."""
+
+    def __init__(self, weights: dict[str, float]) -> None:
+        super().__init__()
+        self.weights = dict(weights)
+        self.log_vars = nn.ParameterDict()
+
+    def forward(self, task_name: str, loss: Tensor, active: bool) -> Tensor:
+        if not active:
+            return torch.zeros((), dtype=loss.dtype, device=loss.device)
+        return float(self.weights.get(task_name, 0.0)) * loss
+
+    def precision(self, task_name: str) -> Tensor:
+        return torch.as_tensor(float(self.weights.get(task_name, 0.0)))
+
+    def clamp_(self, min_value: float, max_value: float) -> None:
+        del min_value, max_value
+
+
 class DeltaIntegrationGate(nn.Module):
     """Offline gate for folding event deltas into durable base embeddings."""
 
@@ -382,31 +402,57 @@ class SetTransformerModel(nn.Module):
             self.cross = CROSS(latent_dim, opts.set_ffn_dim, **block_args)
 
         self.cont_head = nn.Linear(latent_dim, max(num_cont_targets // 2, 1))
-        self.atomic_head = nn.Linear(latent_dim, max(len(opts.atomic_count_targets), 1))
-        self.foul_head = nn.Linear(latent_dim, max(len(opts.foul_targets), 1))
-        self.bonus_head = nn.Linear(latent_dim, max(len(opts.bonus_binary_targets), 1))
-        self.special_head = nn.Linear(latent_dim, max(len(opts.special_binary_targets), 1))
+        self.atomic_head = (
+            None
+            if opts.core_objective
+            else nn.Linear(latent_dim, max(len(opts.atomic_count_targets), 1))
+        )
+        self.foul_head = (
+            None if opts.core_objective else nn.Linear(latent_dim, max(len(opts.foul_targets), 1))
+        )
+        self.bonus_head = (
+            None
+            if opts.core_objective
+            else nn.Linear(latent_dim, max(len(opts.bonus_binary_targets), 1))
+        )
+        self.special_head = (
+            None
+            if opts.core_objective
+            else nn.Linear(latent_dim, max(len(opts.special_binary_targets), 1))
+        )
         self.bin_head = (
             AdditiveWinHead(latent_dim)
             if opts.match_architecture == "additive"
             else SiameseWinHead(latent_dim)
         )
-        self.endgame_head = OrdinalEndgameHead(latent_dim, self.num_endgame_classes)
-        if opts.state_model == "static-z-base":
+        self.endgame_head = (
+            None
+            if opts.core_objective
+            else OrdinalEndgameHead(latent_dim, self.num_endgame_classes)
+        )
+        if opts.state_model == "static-z-base" and not opts.core_objective:
             self.auto_head = OrdinalEndgameHead(latent_dim, len(opts.auto_class_order))
-        self.award_head = JudgesRoomHead(latent_dim, self.num_awards)
-        self.team_value_head = TeamValueHead(latent_dim)
-        self.alliance_value_head = AllianceValueHead(latent_dim)
+        self.award_head = (
+            None if opts.core_objective else JudgesRoomHead(latent_dim, self.num_awards)
+        )
+        self.team_value_head = None if opts.core_objective else TeamValueHead(latent_dim)
+        self.alliance_value_head = None if opts.core_objective else AllianceValueHead(latent_dim)
         if opts.state_model == "base-plus-event":
             self.delta_integration_gate = DeltaIntegrationGate(latent_dim)
-        self.award_prototype_predictor = nn.Linear(
-            latent_dim, self.world_model_opts.award_embedding.width
+        self.award_prototype_predictor = (
+            None
+            if opts.core_objective
+            else nn.Linear(latent_dim, self.world_model_opts.award_embedding.width)
         )
-        self.rank_outcome_predictor = nn.Linear(
-            latent_dim, self.world_model_opts.rank_embedding.width
+        self.rank_outcome_predictor = (
+            None
+            if opts.core_objective
+            else nn.Linear(latent_dim, self.world_model_opts.rank_embedding.width)
         )
-        self.selection_embedding_predictor = nn.Linear(
-            2 * latent_dim, self.world_model_opts.pick_embedding.width
+        self.selection_embedding_predictor = (
+            None
+            if opts.core_objective
+            else nn.Linear(2 * latent_dim, self.world_model_opts.pick_embedding.width)
         )
         task_names = [
             "continuous",
@@ -426,7 +472,11 @@ class SetTransformerModel(nn.Module):
         ]
         if opts.state_model == "static-z-base":
             task_names.insert(3, "auto")
-        self.loss_balancer = HomoscedasticTaskBalancer(tuple(task_names))
+        self.loss_balancer = (
+            FixedTaskBalancer({"continuous": opts.score_loss_weight, "win": opts.win_loss_weight})
+            if opts.core_objective
+            else HomoscedasticTaskBalancer(tuple(task_names))
+        )
 
     def balance_loss(self, task_name: str, loss: Tensor, active: bool) -> Tensor:
         return self.loss_balancer(task_name, loss, active)
@@ -571,10 +621,27 @@ class SetTransformerModel(nn.Module):
         cont = torch.cat([self.cont_head(z_red), self.cont_head(z_blue)], dim=1)
         if cont.shape[1] > self.num_cont_targets:
             cont = cont[:, : self.num_cont_targets]
-        atomic = torch.cat([self.atomic_head(z_red), self.atomic_head(z_blue)], dim=1)
-        foul = torch.cat([self.foul_head(z_red), self.foul_head(z_blue)], dim=1)
-        bonus = torch.cat([self.bonus_head(z_red), self.bonus_head(z_blue)], dim=1)
-        special = torch.cat([self.special_head(z_red), self.special_head(z_blue)], dim=1)
+        empty_match = cont.new_empty((cont.shape[0], 0))
+        atomic = (
+            torch.cat([self.atomic_head(z_red), self.atomic_head(z_blue)], dim=1)
+            if self.atomic_head is not None
+            else empty_match
+        )
+        foul = (
+            torch.cat([self.foul_head(z_red), self.foul_head(z_blue)], dim=1)
+            if self.foul_head is not None
+            else empty_match
+        )
+        bonus = (
+            torch.cat([self.bonus_head(z_red), self.bonus_head(z_blue)], dim=1)
+            if self.bonus_head is not None
+            else empty_match
+        )
+        special = (
+            torch.cat([self.special_head(z_red), self.special_head(z_blue)], dim=1)
+            if self.special_head is not None
+            else empty_match
+        )
 
         slot_context = torch.cat([red_interacted, blue_interacted], dim=1)
         return ForwardOutput(
@@ -593,15 +660,25 @@ class SetTransformerModel(nn.Module):
                     "foul": foul[:, : self.num_foul_targets],
                     "bonus": bonus[:, : self.num_bonus_targets],
                     "special": special[:, : self.num_special_targets],
-                    "endgame": self.endgame_head(slot_context),
+                    "endgame": (
+                        self.endgame_head(slot_context)
+                        if self.endgame_head is not None
+                        else slot_context.new_empty((slot_context.shape[0], 6, 0))
+                    ),
                     "auto": (
                         self.auto_head(slot_context)
                         if hasattr(self, "auto_head")
                         else slot_context.new_empty((slot_context.shape[0], 6, 0))
                     ),
-                    "award": self.award_head(slot_context),
-                    "wm_award": self.award_prototype_predictor(
-                        torch.cat([red_set, blue_set], dim=1)
+                    "award": (
+                        self.award_head(slot_context)
+                        if self.award_head is not None
+                        else slot_context.new_empty((slot_context.shape[0], 6, 0))
+                    ),
+                    "wm_award": (
+                        self.award_prototype_predictor(torch.cat([red_set, blue_set], dim=1))
+                        if self.award_prototype_predictor is not None
+                        else slot_context.new_empty((slot_context.shape[0], 6, 0))
                     ),
                 }
             ),

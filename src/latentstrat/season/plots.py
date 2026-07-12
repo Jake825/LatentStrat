@@ -81,15 +81,14 @@ def _write_calibration_plot(calibration: pd.DataFrame, output_path: Path) -> Non
         for target, rows in calibration.groupby("target", sort=True):
             ordered = rows.sort_values("bin_low")
             centers = 0.5 * (
-                ordered["bin_low"].to_numpy(dtype=float)
-                + ordered["bin_high"].to_numpy(dtype=float)
+                ordered["bin_low"].to_numpy(dtype=float) + ordered["bin_high"].to_numpy(dtype=float)
             )
-            mean_probability = pd.to_numeric(
-                ordered["mean_probability"], errors="coerce"
-            ).to_numpy(dtype=float)
-            observed_rate = pd.to_numeric(
-                ordered["observed_rate"], errors="coerce"
-            ).to_numpy(dtype=float)
+            mean_probability = pd.to_numeric(ordered["mean_probability"], errors="coerce").to_numpy(
+                dtype=float
+            )
+            observed_rate = pd.to_numeric(ordered["observed_rate"], errors="coerce").to_numpy(
+                dtype=float
+            )
             count = pd.to_numeric(ordered["count"], errors="coerce").fillna(0)
             x = np.where(np.isfinite(mean_probability), mean_probability, centers)
             ax.scatter(x, observed_rate, s=25 + 3 * count.to_numpy(dtype=float), label=target)

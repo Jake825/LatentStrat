@@ -97,9 +97,10 @@ def select_gradient_threshold(
         if post_warmup.empty:
             post_warmup = rows
         clipping = post_warmup.groupby("architecture")["clipping_fraction"].mean()
-        if clipping.reindex(ARCHITECTURES).notna().all() and (
-            clipping.reindex(ARCHITECTURES) <= max_mean_clipping_fraction
-        ).all():
+        if (
+            clipping.reindex(ARCHITECTURES).notna().all()
+            and (clipping.reindex(ARCHITECTURES) <= max_mean_clipping_fraction).all()
+        ):
             return float(threshold)
     raise RuntimeError(
         "No max_grad_norm candidate was finite and below the 10% post-warmup clipping gate."
@@ -170,8 +171,8 @@ def confirmation_passes(
             "validation_winner_log_loss",
         ]
     ].min()
-    final = confirmation.sort_values("epoch").groupby("architecture").tail(1).set_index(
-        "architecture"
+    final = (
+        confirmation.sort_values("epoch").groupby("architecture").tail(1).set_index("architecture")
     )
     for architecture in ARCHITECTURES:
         row = final.loc[architecture]
@@ -191,13 +192,15 @@ def confirmation_passes(
             best.loc[architecture, "validation_score_differential_rmse"]
         ):
             return False
-        if float(row["validation_winner_brier"]) > float(
-            best.loc[architecture, "validation_winner_brier"]
-        ) + 0.005:
+        if (
+            float(row["validation_winner_brier"])
+            > float(best.loc[architecture, "validation_winner_brier"]) + 0.005
+        ):
             return False
-        if float(row["validation_winner_log_loss"]) > float(
-            best.loc[architecture, "validation_winner_log_loss"]
-        ) + 0.01:
+        if (
+            float(row["validation_winner_log_loss"])
+            > float(best.loc[architecture, "validation_winner_log_loss"]) + 0.01
+        ):
             return False
         post_warmup = confirmation[
             confirmation["architecture"].astype(str).eq(architecture)
@@ -264,9 +267,9 @@ def fit_sequential_calibrator(
     red = pd.to_numeric(prior_predictions["actual_red_total_score"], errors="coerce").to_numpy(
         float
     )
-    blue = pd.to_numeric(
-        prior_predictions["actual_blue_total_score"], errors="coerce"
-    ).to_numpy(float)
+    blue = pd.to_numeric(prior_predictions["actual_blue_total_score"], errors="coerce").to_numpy(
+        float
+    )
     valid = np.isfinite(probability) & np.isfinite(red) & np.isfinite(blue) & (red != blue)
     outcome = (red > blue).astype(int)
     if valid.sum() < minimum_rows or np.unique(outcome[valid]).size != 2:
@@ -296,13 +299,7 @@ def apply_sequential_calibrator(
     raw = np.clip(result["pred_red_win_probability"].to_numpy(float), 1e-7, 1 - 1e-7)
     logits = np.log(raw / (1 - raw))
     calibrated = 1.0 / (
-        1.0
-        + np.exp(
-            -(
-                float(calibrator["coefficient"]) * logits
-                + float(calibrator["intercept"])
-            )
-        )
+        1.0 + np.exp(-(float(calibrator["coefficient"]) * logits + float(calibrator["intercept"])))
     )
     result["raw_pred_red_win_probability"] = raw
     result["calibrated_pred_red_win_probability"] = calibrated
@@ -452,8 +449,7 @@ def reliability_calibration(predictions: pd.DataFrame, bins: int = 10) -> pd.Dat
                     }
                 )
             ece = float(
-                sum(row["count"] * abs(row["gap"]) for row in bin_rows if row["count"])
-                / total
+                sum(row["count"] * abs(row["gap"]) for row in bin_rows if row["count"]) / total
             )
             for row in bin_rows:
                 row["expected_calibration_error"] = ece
@@ -496,8 +492,7 @@ def hierarchical_seed_event_bootstrap(
     """Resample seeds, then event clusters within each primary test week."""
 
     source = predictions[
-        predictions["prediction_level"].eq("seed")
-        & predictions["test_week"].isin(PRIMARY_WEEKS)
+        predictions["prediction_level"].eq("seed") & predictions["test_week"].isin(PRIMARY_WEEKS)
     ]
     available_weeks = sorted(source["test_week"].dropna().astype(int).unique().tolist())
     rng = np.random.default_rng(seed)
@@ -581,9 +576,7 @@ def hierarchical_seed_event_bootstrap(
     return pd.DataFrame(rows)
 
 
-def classify_interactions(
-    hierarchical: pd.DataFrame, paired: pd.DataFrame
-) -> pd.DataFrame:
+def classify_interactions(hierarchical: pd.DataFrame, paired: pd.DataFrame) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     for candidate, baseline, component in (
         ("teammate-set", "additive", "teammate-interaction"),
@@ -637,10 +630,7 @@ def classify_interactions(
                 practical = float(item["delta_mean"]) <= -tolerance
                 harmful_both_weeks = all(
                     int(
-                        (
-                            seed_week[seed_week["test_week"].eq(week)]["delta_mean"]
-                            > tolerance
-                        ).sum()
+                        (seed_week[seed_week["test_week"].eq(week)]["delta_mean"] > tolerance).sum()
                     )
                     >= 2
                     for week in PRIMARY_WEEKS
@@ -719,8 +709,7 @@ def external_statbotics_comparison(
         & predictions["test_week"].isin(PRIMARY_WEEKS)
     ]
     baseline_frame = predictions[
-        predictions["model"].eq("statbotics")
-        & predictions["test_week"].isin(PRIMARY_WEEKS)
+        predictions["model"].eq("statbotics") & predictions["test_week"].isin(PRIMARY_WEEKS)
     ]
     left = _loss_frame(candidate_frame).rename(
         columns={metric: f"candidate_{metric}" for metric in PRACTICAL_TOLERANCES}
@@ -741,9 +730,7 @@ def external_statbotics_comparison(
             sampled_deltas: list[np.ndarray] = []
             for week in PRIMARY_WEEKS:
                 week_keys = set(
-                    candidate_frame[candidate_frame["test_week"].eq(week)]["match_key"].astype(
-                        str
-                    )
+                    candidate_frame[candidate_frame["test_week"].eq(week)]["match_key"].astype(str)
                 )
                 week_frame = paired[paired["match_key"].astype(str).isin(week_keys)]
                 events = week_frame["event_key"].drop_duplicates().to_numpy()
@@ -802,9 +789,9 @@ def external_statbotics_comparison(
 
 def _seed_event_bootstrap(predictions: pd.DataFrame, *, resamples: int) -> pd.DataFrame:
     rows = []
-    for seed_value, frame in predictions[
-        predictions["prediction_level"].eq("seed")
-    ].groupby("seed"):
+    for seed_value, frame in predictions[predictions["prediction_level"].eq("seed")].groupby(
+        "seed"
+    ):
         raw = frame.copy()
         raw["pred_red_win_probability"] = raw["raw_pred_red_win_probability"]
         result = paired_event_bootstrap(raw, resamples=resamples, seed=2026)
@@ -856,9 +843,7 @@ def _parameter_rows(
             "module": "<all>",
             "nominal_parameters": int(final["nominal_parameter_count"]),
             "trainable_parameters": int(final["trainable_parameter_count"]),
-            "gradient_receiving_parameters": int(
-                final["gradient_receiving_parameter_count"]
-            ),
+            "gradient_receiving_parameters": int(final["gradient_receiving_parameter_count"]),
         }
     ]
     suffix = "_nominal_parameter_count"
@@ -976,8 +961,7 @@ def _add_statbotics_rows(
         pd.read_parquet(statbotics_path, engine="pyarrow"), 2026
     )
     truth = without_stat[
-        without_stat["prediction_level"].eq("ensemble")
-        & without_stat["model"].eq("full-match")
+        without_stat["prediction_level"].eq("ensemble") & without_stat["model"].eq("full-match")
     ].drop_duplicates("match_key")
     candidate_keys = set(truth["match_key"].astype(str))
     baseline_keys = set(statbotics["match_key"].astype(str))
@@ -990,12 +974,8 @@ def _add_statbotics_rows(
     joined["prediction_level"] = "control"
     joined["pred_red_total_score"] = joined["statbotics_pred_red_score"]
     joined["pred_blue_total_score"] = joined["statbotics_pred_blue_score"]
-    joined["raw_pred_red_win_probability"] = joined[
-        "statbotics_pred_red_win_probability"
-    ]
-    joined["calibrated_pred_red_win_probability"] = joined[
-        "statbotics_pred_red_win_probability"
-    ]
+    joined["raw_pred_red_win_probability"] = joined["statbotics_pred_red_win_probability"]
+    joined["calibrated_pred_red_win_probability"] = joined["statbotics_pred_red_win_probability"]
     joined["pred_red_win_probability"] = joined["statbotics_pred_red_win_probability"]
     joined["calibration_method"] = "statbotics-pre-match-pred"
     joined["calibration_source_weeks"] = "[]"
@@ -1145,11 +1125,7 @@ def run_reliability_study(
             development_split,
             prior_checkpoint=prior_path,
             sidecars=_filter_sidecars(sidecars, max_week=3),
-            logdir=(
-                tensorboard_dir / "development" / "timing-pilot"
-                if tensorboard_dir
-                else None
-            ),
+            logdir=(tensorboard_dir / "development" / "timing-pilot" if tensorboard_dir else None),
             contract={
                 "study_id": output.name,
                 "artifact_schema": RELIABILITY_SCHEMA,
@@ -1355,9 +1331,7 @@ def run_reliability_study(
     for _architecture, result in confirmation_results.items():
         seconds_per_epoch = float(result.history["epoch_seconds"].mean())
         for week in tests:
-            train_rows = int(
-                pd.to_numeric(table["event_week"], errors="coerce").le(week - 1).sum()
-            )
+            train_rows = int(pd.to_numeric(table["event_week"], errors="coerce").le(week - 1).sum())
             final_seconds += (
                 seconds_per_epoch
                 * selected_epochs
@@ -1435,10 +1409,7 @@ def run_reliability_study(
                     prior_checkpoint=prior_path,
                     sidecars=_filter_sidecars(sidecars, max_week=test_week - 1),
                     logdir=(
-                        tensorboard_dir
-                        / f"seed_{seed_value}"
-                        / architecture
-                        / f"fold_{test_week}"
+                        tensorboard_dir / f"seed_{seed_value}" / architecture / f"fold_{test_week}"
                         if tensorboard_dir
                         else None
                     ),
@@ -1464,8 +1435,10 @@ def run_reliability_study(
                 calibrated = apply_sequential_calibrator(raw, calibrator)
                 predictions.append(calibrated)
                 bank.append(calibrated.copy())
-                if seed_value == seed_values[0] and architecture == "full-match" and (
-                    test_week not in baseline_weeks
+                if (
+                    seed_value == seed_values[0]
+                    and architecture == "full-match"
+                    and (test_week not in baseline_weeks)
                 ):
                     for control in _baseline_frames(
                         result,

@@ -60,6 +60,7 @@ class TbaTeam(PayloadModel):
     state_prov: str | None = None
     country: str | None = None
 
+
 class TbaEvent(PayloadModel):
     key: str = ""
     name: str = ""
@@ -69,9 +70,11 @@ class TbaEvent(PayloadModel):
     start_date: str | None = None
     end_date: str | None = None
 
+
 class TbaAwardRecipient(PayloadModel):
     team_key: str | None = None
     awardee: str | None = None
+
 
 class TbaAward(PayloadModel):
     name: str = ""

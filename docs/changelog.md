@@ -14,6 +14,15 @@ related:
 
 # Changelog
 
+## Unreleased
+
+- Added the fixed-100 2026 static Championship diagnostic with exact match-key splits, DQ and tie
+  masking, fixed score/win/embedding losses, six controlled model configurations, transferred
+  calibration, frozen controls, event bootstrap, leave-one-division-out sensitivity, and an
+  authoritative generated report.
+- Added a simple epoch-domain TensorBoard profile and Research Workbench support for the new
+  non-promotable diagnostic artifact contract.
+
 This changelog connects LatentStrat's research version names, Git commits, and local artifact eras. It is meant to help an FRC student understand the project timeline and help an agent find the closest code snapshot for an older design.
 
 ## How To Use This Changelog

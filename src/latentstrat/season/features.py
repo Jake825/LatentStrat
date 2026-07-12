@@ -105,7 +105,14 @@ class FeatureTrainingResult:
 def _validate_feature_table(table: pd.DataFrame) -> pd.DataFrame:
     if table.empty:
         raise ValueError("Feature table is empty.")
-    return table.reset_index(drop=True)
+    out = table.reset_index(drop=True).copy()
+    required = {"red_total_score", "blue_total_score", "red_win"}
+    if required.issubset(out.columns):
+        red = pd.to_numeric(out["red_total_score"], errors="coerce")
+        blue = pd.to_numeric(out["blue_total_score"], errors="coerce")
+        out["red_win"] = pd.to_numeric(out["red_win"], errors="coerce").astype(float)
+        out.loc[red.eq(blue) & red.notna(), "red_win"] = np.nan
+    return out
 
 
 def _scouting_table(session: Session, model: type[SQLModel]) -> pd.DataFrame:

@@ -38,6 +38,7 @@ class TrainingRuntimeConfig:
     deterministic_algorithms: bool = False
     checkpoint_every_epochs: int = 1
     optimizer_log_interval: int = 10
+    log_optimizer_steps: bool = True
 
     def validate(self) -> TrainingRuntimeConfig:
         if self.gradient_accumulation_steps <= 0:
@@ -108,9 +109,7 @@ def build_lr_scheduler(
     config.validate()
     if config.scheduler == "none":
         return None
-    steps_per_epoch = max(
-        1, math.ceil(microbatches_per_epoch / config.gradient_accumulation_steps)
-    )
+    steps_per_epoch = max(1, math.ceil(microbatches_per_epoch / config.gradient_accumulation_steps))
     total_steps = max(1, int(epochs) * steps_per_epoch)
     if config.scheduler == "cosine":
         return torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -182,9 +181,8 @@ class OptimizationController:
         else:
             self.scaler.scale(scaled_loss).backward()
         at_boundary = (
-            (microbatch_index + 1) % accumulation == 0
-            or microbatch_index + 1 == microbatch_count
-        )
+            microbatch_index + 1
+        ) % accumulation == 0 or microbatch_index + 1 == microbatch_count
         return self.step() if at_boundary else None
 
     def step(self) -> OptimizerStepResult:
@@ -193,11 +191,7 @@ class OptimizationController:
             self.scaler.unscale_(self.optimizer)
         grad_norm = torch.nn.utils.clip_grad_norm_(
             self._parameters,
-            max_norm=(
-                self.config.max_grad_norm
-                if self.config.max_grad_norm > 0
-                else float("inf")
-            ),
+            max_norm=(self.config.max_grad_norm if self.config.max_grad_norm > 0 else float("inf")),
             error_if_nonfinite=True,
         )
         grad_norm_value = float(grad_norm.detach().cpu())
@@ -215,10 +209,7 @@ class OptimizationController:
         result = OptimizerStepResult(
             optimizer_step=self.optimizer_step,
             preclip_grad_norm=grad_norm_value,
-            clipped=(
-                self.config.max_grad_norm > 0
-                and grad_norm_value > self.config.max_grad_norm
-            ),
+            clipped=(self.config.max_grad_norm > 0 and grad_norm_value > self.config.max_grad_norm),
             learning_rates=learning_rates,
             elapsed_seconds=time.perf_counter() - started,
         )
@@ -229,7 +220,11 @@ class OptimizationController:
 
     def _log_step(self, result: OptimizerStepResult) -> None:
         writer = self.tensorboard_writer
-        if writer is None or result.optimizer_step % self.config.optimizer_log_interval:
+        if (
+            writer is None
+            or not self.config.log_optimizer_steps
+            or result.optimizer_step % self.config.optimizer_log_interval
+        ):
             return
         writer.add_scalar(
             f"{self.tensorboard_prefix}/PreclipGradientNorm",

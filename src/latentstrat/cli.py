@@ -34,6 +34,7 @@ from latentstrat.season.data import (
 from latentstrat.season.evaluate import evaluate_model
 from latentstrat.season.metrics import write_prediction_evaluation
 from latentstrat.season.statbotics_baseline import build_statbotics_prediction_artifact
+from latentstrat.season.championship_study import run_championship_study
 from latentstrat.season.reference_study import run_reference_study
 from latentstrat.season.reliability_study import (
     finalize_reliability_statbotics,
@@ -300,9 +301,7 @@ def build_features(
             end_date = pd.to_datetime(row.get("end_date"), errors="coerce")
             row["event_completed"] = bool(pd.notna(end_date) and end_date.date() < date.today())
             event_rows.append(row)
-        pd.DataFrame(event_rows).to_parquet(
-            event_metadata_output, engine="pyarrow", index=False
-        )
+        pd.DataFrame(event_rows).to_parquet(event_metadata_output, engine="pyarrow", index=False)
         typer.echo(f"Event metadata written: {event_metadata_output} rows={len(events)}")
     if sidecar_output_dir is not None:
         sidecars = build_feature_sidecars(
@@ -380,9 +379,7 @@ def train_features(
     scheduler: Annotated[
         str, typer.Option("--scheduler", help="none, cosine, or one-cycle.")
     ] = "cosine",
-    checkpoint_every_epochs: Annotated[
-        int, typer.Option("--checkpoint-every-epochs", min=0)
-    ] = 1,
+    checkpoint_every_epochs: Annotated[int, typer.Option("--checkpoint-every-epochs", min=0)] = 1,
     deterministic_algorithms: Annotated[
         bool,
         typer.Option("--deterministic-algorithms/--no-deterministic-algorithms"),
@@ -591,9 +588,7 @@ def validate_walk_forward(
     max_grad_norm: Annotated[float, typer.Option("--max-grad-norm", min=0.0)] = 1.0,
     scheduler: Annotated[str, typer.Option("--scheduler")] = "cosine",
     lr_eta_min: Annotated[float, typer.Option("--lr-eta-min")] = 1e-5,
-    checkpoint_every_epochs: Annotated[
-        int, typer.Option("--checkpoint-every-epochs", min=0)
-    ] = 1,
+    checkpoint_every_epochs: Annotated[int, typer.Option("--checkpoint-every-epochs", min=0)] = 1,
     deterministic_algorithms: Annotated[
         bool,
         typer.Option("--deterministic-algorithms/--no-deterministic-algorithms"),
@@ -701,9 +696,7 @@ def validate_walk_forward(
         tensorboard_run_name=tensorboard_run_name,
         source_paths=source_paths,
         world_model_options=(
-            load_world_model_options(world_model_config)
-            if world_model_config is not None
-            else None
+            load_world_model_options(world_model_config) if world_model_config is not None else None
         ),
         world_model_events_path=event_metadata,
         award_catalog_path=award_catalog,
@@ -739,9 +732,7 @@ def build_statbotics_baseline_command(
 
 def validate_reference_2026_command(
     features: Annotated[Path, typer.Option("--features", help="2026 feature Parquet.")],
-    events: Annotated[
-        Path, typer.Option("--events", help="2026 event metadata with event_type.")
-    ],
+    events: Annotated[Path, typer.Option("--events", help="2026 event metadata with event_type.")],
     prior_checkpoint: Annotated[
         Path, typer.Option("--prior-checkpoint", help="Leakage-safe pre-2026 prior checkpoint.")
     ],
@@ -751,26 +742,16 @@ def validate_reference_2026_command(
     statbotics: Annotated[
         Path | None, typer.Option("--statbotics", help="Optional 2026 pre-match baseline.")
     ] = None,
-    rankings_sidecar: Annotated[
-        Path | None, typer.Option("--rankings-sidecar")
-    ] = None,
-    selections_sidecar: Annotated[
-        Path | None, typer.Option("--selections-sidecar")
-    ] = None,
-    playoffs_sidecar: Annotated[
-        Path | None, typer.Option("--playoffs-sidecar")
-    ] = None,
+    rankings_sidecar: Annotated[Path | None, typer.Option("--rankings-sidecar")] = None,
+    selections_sidecar: Annotated[Path | None, typer.Option("--selections-sidecar")] = None,
+    playoffs_sidecar: Annotated[Path | None, typer.Option("--playoffs-sidecar")] = None,
     epochs: Annotated[int, typer.Option("--epochs", min=1)] = 20,
     budget_minutes: Annotated[float, typer.Option("--budget-minutes", min=1)] = 100,
-    bootstrap_resamples: Annotated[
-        int, typer.Option("--bootstrap-resamples", min=1)
-    ] = 2_000,
-    tensorboard: Annotated[
-        bool, typer.Option("--tensorboard/--no-tensorboard")
-    ] = True,
-    tensorboard_logdir: Annotated[
-        Path, typer.Option("--tensorboard-logdir")
-    ] = Path("runs/reference-2026-static"),
+    bootstrap_resamples: Annotated[int, typer.Option("--bootstrap-resamples", min=1)] = 2_000,
+    tensorboard: Annotated[bool, typer.Option("--tensorboard/--no-tensorboard")] = True,
+    tensorboard_logdir: Annotated[Path, typer.Option("--tensorboard-logdir")] = Path(
+        "runs/reference-2026-static"
+    ),
     smoke: Annotated[
         bool,
         typer.Option(
@@ -813,9 +794,7 @@ def validate_reference_2026_command(
 
 def run_static_reliability_study_command(
     features: Annotated[Path, typer.Option("--features", help="2026 feature Parquet.")],
-    events: Annotated[
-        Path, typer.Option("--events", help="2026 event metadata with event_type.")
-    ],
+    events: Annotated[Path, typer.Option("--events", help="2026 event metadata with event_type.")],
     prior_checkpoint: Annotated[
         Path, typer.Option("--prior-checkpoint", help="Leakage-safe pre-2026 prior checkpoint.")
     ],
@@ -830,13 +809,11 @@ def run_static_reliability_study_command(
     playoffs_sidecar: Annotated[Path | None, typer.Option("--playoffs-sidecar")] = None,
     max_epochs: Annotated[int, typer.Option("--max-epochs", min=1)] = 40,
     budget_minutes: Annotated[float, typer.Option("--budget-minutes", min=1)] = 240,
-    bootstrap_resamples: Annotated[
-        int, typer.Option("--bootstrap-resamples", min=1)
-    ] = 5_000,
+    bootstrap_resamples: Annotated[int, typer.Option("--bootstrap-resamples", min=1)] = 5_000,
     tensorboard: Annotated[bool, typer.Option("--tensorboard/--no-tensorboard")] = True,
-    tensorboard_logdir: Annotated[
-        Path, typer.Option("--tensorboard-logdir")
-    ] = Path("runs/reference-2026-static-reliability"),
+    tensorboard_logdir: Annotated[Path, typer.Option("--tensorboard-logdir")] = Path(
+        "runs/reference-2026-static-reliability"
+    ),
     smoke: Annotated[
         bool,
         typer.Option(
@@ -878,16 +855,61 @@ def run_static_reliability_study_command(
         typer.echo(f"TensorBoard: tensorboard --logdir={result.tensorboard_logdir}")
 
 
-def finalize_static_reliability_command(
-    study: Annotated[
-        Path, typer.Option("--study", help="Completed reliability-study directory.")
+def run_static_championship_diagnostic_command(
+    features: Annotated[Path, typer.Option("--features", help="2026 feature Parquet.")],
+    events: Annotated[Path, typer.Option("--events", help="2026 event metadata Parquet.")],
+    prior_checkpoint: Annotated[
+        Path, typer.Option("--prior-checkpoint", help="Leakage-safe pre-2026 prior checkpoint.")
     ],
+    historical_reference: Annotated[
+        Path,
+        typer.Option(
+            "--historical-reference", help="Historical static-reference prediction Parquet."
+        ),
+    ],
+    output: Annotated[
+        Path, typer.Option("--output", help="Self-contained diagnostic output directory.")
+    ] = Path("artifacts/reference/2026-static-championship-core"),
+    epochs: Annotated[int, typer.Option("--epochs", min=1)] = 100,
+    budget_minutes: Annotated[float, typer.Option("--budget-minutes", min=1)] = 360,
+    bootstrap_resamples: Annotated[int, typer.Option("--bootstrap-resamples", min=1)] = 5_000,
+    tensorboard: Annotated[bool, typer.Option("--tensorboard/--no-tensorboard")] = True,
+    tensorboard_logdir: Annotated[Path, typer.Option("--tensorboard-logdir")] = Path(
+        "runs/2026-static-championship-core"
+    ),
+    smoke: Annotated[
+        bool,
+        typer.Option(
+            "--smoke/--full-study",
+            help="Run all six configurations for at most two epochs before the formal study.",
+        ),
+    ] = True,
+) -> None:
+    """Run the fixed-100-epoch static Championship diagnostic."""
+
+    result = run_championship_study(
+        features,
+        events,
+        prior_checkpoint,
+        historical_reference,
+        output,
+        epochs=epochs,
+        budget_minutes=budget_minutes,
+        tensorboard_root=tensorboard_logdir if tensorboard else None,
+        bootstrap_resamples=bootstrap_resamples,
+        smoke=smoke,
+    )
+    typer.echo(f"Static Championship diagnostic complete: {result}")
+    if tensorboard:
+        typer.echo(f"TensorBoard: tensorboard --logdir={tensorboard_logdir / output.name}")
+
+
+def finalize_static_reliability_command(
+    study: Annotated[Path, typer.Option("--study", help="Completed reliability-study directory.")],
     statbotics: Annotated[
         Path, typer.Option("--statbotics", help="Verified pre-match Statbotics Parquet.")
     ],
-    bootstrap_resamples: Annotated[
-        int, typer.Option("--bootstrap-resamples", min=1)
-    ] = 5_000,
+    bootstrap_resamples: Annotated[int, typer.Option("--bootstrap-resamples", min=1)] = 5_000,
 ) -> None:
     """Finalize Statbotics evidence from saved reliability predictions without training."""
 
@@ -931,23 +953,15 @@ def build_world_model(
     max_grad_norm: Annotated[float, typer.Option("--max-grad-norm", min=0.0)] = 1.0,
     scheduler: Annotated[str, typer.Option("--scheduler")] = "cosine",
     lr_eta_min: Annotated[float, typer.Option("--lr-eta-min")] = 1e-5,
-    checkpoint_every_epochs: Annotated[
-        int, typer.Option("--checkpoint-every-epochs", min=0)
-    ] = 1,
+    checkpoint_every_epochs: Annotated[int, typer.Option("--checkpoint-every-epochs", min=0)] = 1,
     deterministic_algorithms: Annotated[
         bool,
         typer.Option("--deterministic-algorithms/--no-deterministic-algorithms"),
     ] = False,
-    resume_checkpoint: Annotated[
-        Path | None, typer.Option("--resume-checkpoint")
-    ] = None,
-    tensorboard: Annotated[
-        bool, typer.Option("--tensorboard/--no-tensorboard")
-    ] = True,
+    resume_checkpoint: Annotated[Path | None, typer.Option("--resume-checkpoint")] = None,
+    tensorboard: Annotated[bool, typer.Option("--tensorboard/--no-tensorboard")] = True,
     tensorboard_logdir: Annotated[Path, typer.Option("--tensorboard-logdir")] = Path("runs"),
-    tensorboard_run_name: Annotated[
-        str | None, typer.Option("--tensorboard-run-name")
-    ] = None,
+    tensorboard_run_name: Annotated[str | None, typer.Option("--tensorboard-run-name")] = None,
 ) -> None:
     """Build experimental frozen target spaces offline."""
     options = load_world_model_options(config).model_copy(
@@ -1062,9 +1076,7 @@ def train_match_breakdown_encoder_command(
     learning_rate: Annotated[
         float | None, typer.Option("--learning-rate", help="AdamW learning rate.")
     ] = None,
-    seed: Annotated[
-        int | None, typer.Option("--seed", help="Deterministic random seed.")
-    ] = None,
+    seed: Annotated[int | None, typer.Option("--seed", help="Deterministic random seed.")] = None,
     include_foc: Annotated[
         bool | None,
         typer.Option(
@@ -1089,32 +1101,22 @@ def train_match_breakdown_encoder_command(
         Path | None,
         typer.Option("--alliance-features", help="Flattened raw alliance Parquet output."),
     ] = None,
-    device: Annotated[
-        str | None, typer.Option("--device", help='Torch device, or "auto".')
-    ] = None,
+    device: Annotated[str | None, typer.Option("--device", help='Torch device, or "auto".')] = None,
     gradient_accumulation_steps: Annotated[
         int, typer.Option("--gradient-accumulation-steps", min=1)
     ] = 1,
     max_grad_norm: Annotated[float, typer.Option("--max-grad-norm", min=0.0)] = 1.0,
     scheduler: Annotated[str, typer.Option("--scheduler")] = "cosine",
     lr_eta_min: Annotated[float, typer.Option("--lr-eta-min")] = 1e-5,
-    checkpoint_every_epochs: Annotated[
-        int, typer.Option("--checkpoint-every-epochs", min=0)
-    ] = 1,
+    checkpoint_every_epochs: Annotated[int, typer.Option("--checkpoint-every-epochs", min=0)] = 1,
     deterministic_algorithms: Annotated[
         bool,
         typer.Option("--deterministic-algorithms/--no-deterministic-algorithms"),
     ] = False,
-    resume_checkpoint: Annotated[
-        Path | None, typer.Option("--resume-checkpoint")
-    ] = None,
-    tensorboard: Annotated[
-        bool, typer.Option("--tensorboard/--no-tensorboard")
-    ] = True,
+    resume_checkpoint: Annotated[Path | None, typer.Option("--resume-checkpoint")] = None,
+    tensorboard: Annotated[bool, typer.Option("--tensorboard/--no-tensorboard")] = True,
     tensorboard_logdir: Annotated[Path, typer.Option("--tensorboard-logdir")] = Path("runs"),
-    tensorboard_run_name: Annotated[
-        str | None, typer.Option("--tensorboard-run-name")
-    ] = None,
+    tensorboard_run_name: Annotated[str | None, typer.Option("--tensorboard-run-name")] = None,
 ) -> None:
     """Train the offline historical match-breakdown encoder."""
 
@@ -1242,9 +1244,7 @@ def evaluate_predictions_command(
     statbotics: Annotated[
         Path, typer.Option("--statbotics", help="Statbotics pre-match prediction Parquet.")
     ],
-    output: Annotated[
-        Path, typer.Option("--output", help="Directory for comparison artifacts.")
-    ],
+    output: Annotated[Path, typer.Option("--output", help="Directory for comparison artifacts.")],
     resamples: Annotated[
         int, typer.Option("--resamples", help="Event-cluster bootstrap sample count.")
     ] = 2_000,
@@ -1259,9 +1259,7 @@ def evaluate_predictions_command(
         resamples=resamples,
         seed=seed,
     )
-    typer.echo(
-        f"Prediction evaluation written: {output} matched={result.coverage['matched_rows']}"
-    )
+    typer.echo(f"Prediction evaluation written: {output} matched={result.coverage['matched_rows']}")
 
 
 @app.command("build-prior-features")
@@ -1342,16 +1340,12 @@ def train_prior(
     max_grad_norm: Annotated[float, typer.Option("--max-grad-norm", min=0.0)] = 1.0,
     scheduler: Annotated[str, typer.Option("--scheduler")] = "cosine",
     lr_eta_min: Annotated[float, typer.Option("--lr-eta-min")] = 1e-5,
-    checkpoint_every_epochs: Annotated[
-        int, typer.Option("--checkpoint-every-epochs", min=0)
-    ] = 1,
+    checkpoint_every_epochs: Annotated[int, typer.Option("--checkpoint-every-epochs", min=0)] = 1,
     deterministic_algorithms: Annotated[
         bool,
         typer.Option("--deterministic-algorithms/--no-deterministic-algorithms"),
     ] = False,
-    resume_checkpoint: Annotated[
-        Path | None, typer.Option("--resume-checkpoint")
-    ] = None,
+    resume_checkpoint: Annotated[Path | None, typer.Option("--resume-checkpoint")] = None,
     tensorboard: Annotated[
         bool,
         typer.Option(
@@ -1419,9 +1413,7 @@ def inspect_prior(
         Path,
         typer.Option("--output", help="Directory for prior latent-space diagnostics."),
     ] = PRIOR_ARTIFACT_ROOT / "prior_2026",
-    top_k: Annotated[
-        int, typer.Option("--top-k", help="Nearest neighbors per team.")
-    ] = 10,
+    top_k: Annotated[int, typer.Option("--top-k", help="Nearest neighbors per team.")] = 10,
 ) -> None:
     """Write V5.6 prior latent-space tables and static PNG visuals."""
     inspection = inspect_prior_checkpoint(checkpoint, features, top_k=top_k)
@@ -1460,23 +1452,15 @@ def run_prior_grid_command(
     max_grad_norm: Annotated[float, typer.Option("--max-grad-norm", min=0.0)] = 1.0,
     scheduler: Annotated[str, typer.Option("--scheduler")] = "cosine",
     lr_eta_min: Annotated[float, typer.Option("--lr-eta-min")] = 1e-5,
-    checkpoint_every_epochs: Annotated[
-        int, typer.Option("--checkpoint-every-epochs", min=0)
-    ] = 1,
+    checkpoint_every_epochs: Annotated[int, typer.Option("--checkpoint-every-epochs", min=0)] = 1,
     deterministic_algorithms: Annotated[
         bool,
         typer.Option("--deterministic-algorithms/--no-deterministic-algorithms"),
     ] = False,
-    resume_checkpoint: Annotated[
-        Path | None, typer.Option("--resume-checkpoint")
-    ] = None,
-    tensorboard: Annotated[
-        bool, typer.Option("--tensorboard/--no-tensorboard")
-    ] = True,
+    resume_checkpoint: Annotated[Path | None, typer.Option("--resume-checkpoint")] = None,
+    tensorboard: Annotated[bool, typer.Option("--tensorboard/--no-tensorboard")] = True,
     tensorboard_logdir: Annotated[Path, typer.Option("--tensorboard-logdir")] = Path("runs"),
-    tensorboard_run_name: Annotated[
-        str | None, typer.Option("--tensorboard-run-name")
-    ] = None,
+    tensorboard_run_name: Annotated[str | None, typer.Option("--tensorboard-run-name")] = None,
 ) -> None:
     """Run the V5.6 prior bottleneck grid experiment."""
     result = run_prior_grid(
@@ -1698,6 +1682,7 @@ season_app.command("train")(train_features)
 season_app.command("validate")(validate_walk_forward)
 season_app.command("validate-reference-2026")(validate_reference_2026_command)
 season_app.command("run-static-reliability-study")(run_static_reliability_study_command)
+season_app.command("run-static-championship-diagnostic")(run_static_championship_diagnostic_command)
 season_app.command("build-statbotics-baseline")(build_statbotics_baseline_command)
 artifact_app.command("baseline-manifest")(write_baseline_manifest_command)
 artifact_app.command("compare-predictions")(compare_world_model)

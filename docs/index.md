@@ -16,6 +16,8 @@ The follow-up [static architecture reliability study](reference-2026-static-reli
 tests whether its interaction results survive frozen optimization and three random seeds.
 The [2026 static training postmortem](2026-static-training-postmortem.md) records the completed
 reference, smoke runs, rejected reliability grid, score-bias analysis, and clean-reset boundary.
+The [fixed-100 Championship diagnostic](2026-static-championship-core-study.md) defines the next
+controlled score-supervision and interaction experiment.
 
 ## Active References
 
@@ -27,6 +29,7 @@ reference, smoke runs, rejected reliability grid, score-bias analysis, and clean
 - [Data sources](data-sources.md)
 - [Experiment ledger](experiment-ledger.md)
 - [2026 static training postmortem](2026-static-training-postmortem.md)
+- [2026 fixed-100 Championship diagnostic](2026-static-championship-core-study.md)
 - [Changelog](changelog.md)
 - [Student primer](student-primer.md)
 - [Scouting data layer](scouting-data-layer.md)

@@ -110,16 +110,12 @@ class PriorGridDataset(Dataset):
         culture = table[list(CULTURE_TARGET_COLUMNS)].apply(pd.to_numeric, errors="coerce")
         if not np.isfinite(culture.to_numpy(dtype=np.float32)).all():
             raise ValueError("Prior grid cultural target values must be finite.")
-        self.target_norm_epa = torch.as_tensor(
-            norm_epa.to_numpy(dtype=np.float32, copy=True)
-        )
+        self.target_norm_epa = torch.as_tensor(norm_epa.to_numpy(dtype=np.float32, copy=True))
         self.norm_epa_observed = torch.as_tensor(
             norm_epa_observed.to_numpy(dtype=bool, copy=True),
             dtype=torch.bool,
         )
-        self.target_culture = torch.as_tensor(
-            culture.to_numpy(dtype=np.float32, copy=True)
-        )
+        self.target_culture = torch.as_tensor(culture.to_numpy(dtype=np.float32, copy=True))
         self.max_team_number = int(max(team_numbers))
         self.llm_dim = int(llm_dim)
 
@@ -421,19 +417,19 @@ def train_prior_grid_run(
         train_loss = total_loss / max(total_rows, 1)
         validation = _batch_metrics(model, validation_loader, device)
         row = {
-                "latent_dim": latent_dim,
-                "epoch": epoch,
-                "train_loss": train_loss,
-                "train_openai_mse": total_openai_mse / max(total_rows, 1),
-                "train_norm_epa_mse": total_norm_epa_mse / max(total_rows, 1),
-                "train_culture_mse": total_culture_mse / max(total_rows, 1),
-                "validation_loss": validation["loss"],
-                "validation_openai_mse": validation["openai_mse"],
-                "validation_norm_epa_mse": validation["norm_epa_mse"],
-                "validation_culture_mse": validation["culture_mse"],
-                "log_var_openai": float(model.log_var_openai.detach().cpu()),
-                "log_var_epa": float(model.log_var_epa.detach().cpu()),
-                "log_var_culture_mean": float(model.log_var_culture.detach().cpu().mean()),
+            "latent_dim": latent_dim,
+            "epoch": epoch,
+            "train_loss": train_loss,
+            "train_openai_mse": total_openai_mse / max(total_rows, 1),
+            "train_norm_epa_mse": total_norm_epa_mse / max(total_rows, 1),
+            "train_culture_mse": total_culture_mse / max(total_rows, 1),
+            "validation_loss": validation["loss"],
+            "validation_openai_mse": validation["openai_mse"],
+            "validation_norm_epa_mse": validation["norm_epa_mse"],
+            "validation_culture_mse": validation["culture_mse"],
+            "log_var_openai": float(model.log_var_openai.detach().cpu()),
+            "log_var_epa": float(model.log_var_epa.detach().cpu()),
+            "log_var_culture_mean": float(model.log_var_culture.detach().cpu().mean()),
         }
         row.update(
             epoch_runtime_metrics(
@@ -474,9 +470,7 @@ def train_prior_grid_run(
     elapsed = time.perf_counter() - start
     parameter_count = trainable_parameter_count(model)
     peak_vram = (
-        torch.cuda.max_memory_allocated(device) / (1024 * 1024)
-        if device.type == "cuda"
-        else np.nan
+        torch.cuda.max_memory_allocated(device) / (1024 * 1024) if device.type == "cuda" else np.nan
     )
     memory = _estimated_memory(parameter_count)
     result = {
@@ -614,9 +608,7 @@ def run_prior_grid(
                 seed=int(seed),
                 device=torch_device,
                 runtime_config=runtime_config,
-                resume_checkpoint=(
-                    resume_checkpoint if resume_phase == str(latent_dim) else None
-                ),
+                resume_checkpoint=(resume_checkpoint if resume_phase == str(latent_dim) else None),
                 resume_output=output / "resume" / str(latent_dim) / "latest.ckpt",
                 tensorboard_writer=writer,
             )

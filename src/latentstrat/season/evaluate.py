@@ -149,9 +149,7 @@ def _total_score_predictions(
     if "red_total_score" not in table.columns or "blue_total_score" not in table.columns:
         empty = np.full((len(table), 2), np.nan, dtype=float)
         return empty, empty.copy()
-    foul_names = [
-        f"{color}_{target}" for color in ("red", "blue") for target in opts.foul_targets
-    ]
+    foul_names = [f"{color}_{target}" for color in ("red", "blue") for target in opts.foul_targets]
     if pred_foul_z.shape[1] < len(foul_names):
         empty = np.full((len(table), 2), np.nan, dtype=float)
         return empty, empty.copy()
@@ -634,8 +632,15 @@ def zero_out_diagnostics(
     red, blue, red_event, blue_event, red_missing, blue_missing = match_v5_matrices(table)
     actual = target_matrix(table, [mapping.target_name for mapping in opts.target_map])
     baseline = _predict_cont(
-        model, red, blue, target_stats, opts, red_event=red_event, blue_event=blue_event,
-        red_missing=red_missing, blue_missing=blue_missing
+        model,
+        red,
+        blue,
+        target_stats,
+        opts,
+        red_event=red_event,
+        blue_event=blue_event,
+        red_missing=red_missing,
+        blue_missing=blue_missing,
     )
     baseline_rmse = np.sqrt(
         np.nanmean((baseline[split.validation_mask] - actual[split.validation_mask]) ** 2, axis=0)
@@ -794,14 +799,11 @@ def team_zero_out_sensitivity(
     if not rows:
         return pd.DataFrame(columns=columns)
     frame = pd.DataFrame(rows)
-    grouped = (
-        frame.groupby(["team_key", "team_base_idx", "target"], as_index=False)
-        .agg(
-            appearance_count=("baseline_squared_error", "size"),
-            event_count=("event_key", "nunique"),
-            baseline_mse=("baseline_squared_error", "mean"),
-            zeroed_mse=("zeroed_squared_error", "mean"),
-        )
+    grouped = frame.groupby(["team_key", "team_base_idx", "target"], as_index=False).agg(
+        appearance_count=("baseline_squared_error", "size"),
+        event_count=("event_key", "nunique"),
+        baseline_mse=("baseline_squared_error", "mean"),
+        zeroed_mse=("zeroed_squared_error", "mean"),
     )
     grouped["baseline_rmse"] = np.sqrt(grouped.pop("baseline_mse"))
     grouped["zeroed_rmse"] = np.sqrt(grouped.pop("zeroed_mse"))

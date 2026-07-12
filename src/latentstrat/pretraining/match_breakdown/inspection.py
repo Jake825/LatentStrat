@@ -257,9 +257,7 @@ def select_component_sources(raw_table: pd.DataFrame) -> dict[str, dict[str, str
     return selected
 
 
-def component_metric_source_payload(
-    selected: dict[str, dict[str, str | None]]
-) -> dict[str, Any]:
+def component_metric_source_payload(selected: dict[str, dict[str, str | None]]) -> dict[str, Any]:
     return {
         "strategy": "first finite season-specific aggregate alias; never sum overlapping fields",
         "aliases": {name: list(values) for name, values in COMPONENT_ALIASES.items()},
@@ -303,9 +301,7 @@ def add_component_percentiles(
                 if selected_sources[str(int(season))][component] is not None
                 else np.nan
             )
-            for season, flat in zip(
-                merged["season"], merged["flat_breakdown"], strict=True
-            )
+            for season, flat in zip(merged["season"], merged["flat_breakdown"], strict=True)
         ]
         merged[f"{component}_percentile"] = merged.groupby("season")[raw_column].rank(
             method="average", pct=True
@@ -637,9 +633,7 @@ def cross_season_neighbor_network(
         np.linalg.norm(matrix, axis=1, keepdims=True), np.finfo(float).eps
     )
     row_lookup = production.reset_index(drop=True)
-    row_index_lookup = {
-        str(row_id): int(index) for index, row_id in row_lookup["row_id"].items()
-    }
+    row_index_lookup = {str(row_id): int(index) for index, row_id in row_lookup["row_id"].items()}
     edges = []
     for season, season_seeds in seeds.groupby("season", sort=True):
         candidate_indices = row_lookup.index[row_lookup["season"] != season].to_numpy(dtype=int)

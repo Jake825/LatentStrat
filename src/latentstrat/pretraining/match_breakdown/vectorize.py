@@ -42,9 +42,7 @@ class SeasonSchema:
             "width": self.width,
             "encoded_fields": [asdict(field) for field in self.encoded_fields],
             "source_kinds": dict(sorted(self.source_kinds.items())),
-            "categories": {
-                path: list(values) for path, values in sorted(self.categories.items())
-            },
+            "categories": {path: list(values) for path, values in sorted(self.categories.items())},
             "unsupported_paths": list(self.unsupported_paths),
         }
 
@@ -126,9 +124,7 @@ def discover_season_schema(rows: Iterable[AllianceBreakdownRow], season: int) ->
                     )
                 )
         else:
-            fields.append(
-                EncodedField(name=path, group=group, kind=kind, source_path=path)
-            )
+            fields.append(EncodedField(name=path, group=group, kind=kind, source_path=path))
     if not fields:
         raise ValueError(f"Season {season} has no supported match-breakdown fields.")
     return SeasonSchema(
@@ -183,17 +179,13 @@ def union_schema_audit(schemas: dict[int, SeasonSchema]) -> dict[str, Any]:
         "season_widths": {str(season): schema.width for season, schema in sorted(schemas.items())},
         "source_path_presence": {
             path: [
-                season
-                for season, schema in sorted(schemas.items())
-                if path in schema.source_kinds
+                season for season, schema in sorted(schemas.items()) if path in schema.source_kinds
             ]
             for path in all_paths
         },
         "misc_fields": {
             str(season): [
-                path
-                for path in sorted(schema.source_kinds)
-                if classify_group(path) == "misc"
+                path for path in sorted(schema.source_kinds) if classify_group(path) == "misc"
             ]
             for season, schema in sorted(schemas.items())
         },

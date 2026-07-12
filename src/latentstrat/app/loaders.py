@@ -215,9 +215,7 @@ def scouting_feature_trace(columns: Sequence[str]) -> pd.DataFrame:
                 break
         if matched:
             continue
-        match = re.match(
-            r"^(red|blue)_team_[123]_(pit|event_scout|match_scout)_", column
-        )
+        match = re.match(r"^(red|blue)_team_[123]_(pit|event_scout|match_scout)_", column)
         if match:
             category = match.group(2)
             source, grain, timing = {

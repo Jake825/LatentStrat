@@ -115,9 +115,7 @@ def _validation_prediction_table(
     train_max_week: int,
     val_week: int,
 ) -> pd.DataFrame:
-    red, blue, red_event, blue_event, red_missing, blue_missing = match_v5_matrices(
-        result.prepared
-    )
+    red, blue, red_event, blue_event, red_missing, blue_missing = match_v5_matrices(result.prepared)
     pred = _predict_batched(
         result.model,
         red,
@@ -142,9 +140,7 @@ def _validation_prediction_table(
     actual_win = optional_target_matrix(result.prepared, ["red_win"])[:, 0]
     pred_win = sigmoid(pred["bin"][:, 0])
     clamped_win = np.clip(pred_win, np.finfo(float).eps, 1 - np.finfo(float).eps)
-    win_log_loss = -(
-        actual_win * np.log(clamped_win) + (1 - actual_win) * np.log(1 - clamped_win)
-    )
+    win_log_loss = -(actual_win * np.log(clamped_win) + (1 - actual_win) * np.log(1 - clamped_win))
     validation_rows = np.flatnonzero(split.validation_mask)
     table = result.prepared.iloc[validation_rows]
     return pd.DataFrame(
@@ -301,9 +297,7 @@ def _validation_foul_mse(
     names = _foul_target_names(opts)
     if not names or not np.any(split.validation_mask):
         return float("nan")
-    red, blue, red_event, blue_event, red_missing, blue_missing = match_v5_matrices(
-        result.prepared
-    )
+    red, blue, red_event, blue_event, red_missing, blue_missing = match_v5_matrices(result.prepared)
     pred = _predict_batched(
         result.model,
         red,
@@ -392,9 +386,12 @@ def _sidecar_validation_metrics(
     validation_sidecars: dict[str, pd.DataFrame],
     opts: LatentStratOptions,
 ) -> dict[str, float]:
-    indexed = index_sidecar_tables(
-        validation_sidecars, result.team_index_map, result.team_event_index_map
-    ) or {}
+    indexed = (
+        index_sidecar_tables(
+            validation_sidecars, result.team_index_map, result.team_event_index_map
+        )
+        or {}
+    )
     model = result.model
     model.eval()
     return {
@@ -414,12 +411,8 @@ def _write_walk_forward_tensorboard_fold(writer: Any, row: dict[str, Any]) -> No
     step = int(row["fold_number"])
     scalar_map = {
         "WalkForward/Validation_Loss": row.get("best_validation_loss"),
-        "WalkForward/Next_Match_Phase_Score_MSE": row.get(
-            "val_next_match_phase_score_mse"
-        ),
-        "WalkForward/Next_Match_Total_Score_MSE": row.get(
-            "val_next_match_total_score_mse"
-        ),
+        "WalkForward/Next_Match_Phase_Score_MSE": row.get("val_next_match_phase_score_mse"),
+        "WalkForward/Next_Match_Total_Score_MSE": row.get("val_next_match_total_score_mse"),
         "WalkForward/Match_Accuracy": row.get("val_match_accuracy"),
         "WalkForward/Win_Brier": row.get("val_win_brier"),
         "WalkForward/Win_Log_Loss": row.get("val_win_log_loss"),
@@ -479,9 +472,7 @@ def _average_row(metrics: pd.DataFrame) -> pd.DataFrame:
             row, "val_total_score_sse", "val_total_score_count"
         )
     if "val_match_accuracy" in metrics.columns:
-        row["val_match_accuracy"] = _weighted_metric(
-            row, "val_win_correct_count", "val_win_count"
-        )
+        row["val_match_accuracy"] = _weighted_metric(row, "val_win_correct_count", "val_win_count")
     if "val_win_brier" in metrics.columns:
         row["val_win_brier"] = _weighted_metric(row, "val_win_brier_sum", "val_win_count")
     if "val_win_log_loss" in metrics.columns:
@@ -568,10 +559,7 @@ def run_walk_forward_validation(
                     fit_max_week=train_week,
                 )
             if verbose:
-                print(
-                    f"Fold {fold_number}: train weeks <= {train_week}, "
-                    f"validate week {val_week}"
-                )
+                print(f"Fold {fold_number}: train weeks <= {train_week}, validate week {val_week}")
             fold_writer = (
                 create_tensorboard_writer(
                     str(run_logdir / f"fold_{fold_number:02d}_val_week_{val_week}")
@@ -580,12 +568,8 @@ def run_walk_forward_validation(
                 else None
             )
             try:
-                fold_resume_output = (
-                    out / "resume" / f"fold_{fold_number:02d}" / "latest.ckpt"
-                )
-                fold_resume_checkpoint = (
-                    fold_resume_output if fold_resume_output.exists() else None
-                )
+                fold_resume_output = out / "resume" / f"fold_{fold_number:02d}" / "latest.ckpt"
+                fold_resume_checkpoint = fold_resume_output if fold_resume_output.exists() else None
                 result = train_feature_table(
                     feature_table,
                     fold_opts,
@@ -596,9 +580,7 @@ def run_walk_forward_validation(
                     sidecar_tables=train_sidecars,
                     split_override=split,
                     tensorboard_writer=fold_writer,
-                    tensorboard_logdir=(
-                        run_logdir / f"fold_{fold_number:02d}_val_week_{val_week}"
-                    )
+                    tensorboard_logdir=(run_logdir / f"fold_{fold_number:02d}_val_week_{val_week}")
                     if run_logdir is not None
                     else None,
                     world_model_bundle=fold_world_model,

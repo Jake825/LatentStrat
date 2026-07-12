@@ -53,8 +53,7 @@ def _embedding_table(checkpoint: dict[str, Any], opts: PriorOpts) -> torch.Tenso
     expected_shape = (opts.max_team_number + 1, opts.latent_dim)
     if tuple(table.shape) != expected_shape:
         raise ValueError(
-            f"Prior embedding_table has shape {tuple(table.shape)}, "
-            f"expected {expected_shape}."
+            f"Prior embedding_table has shape {tuple(table.shape)}, expected {expected_shape}."
         )
     return table
 
@@ -120,9 +119,7 @@ def _sanity_checks(vectors: np.ndarray, latent_table: pd.DataFrame) -> pd.DataFr
         np.nan if known_reconstruction.empty else float(np.nanmax(known_reconstruction))
     )
     variances = (
-        np.nanvar(vectors, axis=0, ddof=1)
-        if len(vectors) > 1
-        else np.zeros(vectors.shape[1])
+        np.nanvar(vectors, axis=0, ddof=1) if len(vectors) > 1 else np.zeros(vectors.shape[1])
     )
     dominant_share = np.max(variances) / max(np.sum(variances), np.finfo(float).eps)
     rows = [

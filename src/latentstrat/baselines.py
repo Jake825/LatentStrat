@@ -120,9 +120,18 @@ def fit_baselines(
     train_targets = targets[split.train_mask]
     mean_values = np.nanmean(train_targets, axis=0)
     mean_predictions = np.tile(mean_values, (len(table), 1))
-    coefficients = fit_ridge_baseline(design[split.train_mask], train_targets, ridge_lambda)
-    if coefficients.ndim == 1:
-        coefficients = coefficients[:, None]
+    coefficient_columns: list[np.ndarray] = []
+    train_design = design[split.train_mask]
+    for target_index in range(train_targets.shape[1]):
+        finite = np.isfinite(train_targets[:, target_index])
+        if not finite.any():
+            coefficient_columns.append(np.zeros(design.shape[1], dtype=float))
+            continue
+        fitted = fit_ridge_baseline(
+            train_design[finite], train_targets[finite, target_index], ridge_lambda
+        )
+        coefficient_columns.append(np.asarray(fitted[:, 0], dtype=float))
+    coefficients = np.column_stack(coefficient_columns)
     ridge_predictions = np.asarray(design @ coefficients)
     return Baselines(
         target_names=target_names,

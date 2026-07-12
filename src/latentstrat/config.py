@@ -26,6 +26,12 @@ class LatentStratOptions(BaseModel):
     latent_dim: int = 16
     state_model: Literal["base-plus-event", "static-z-base"] = "base-plus-event"
     match_architecture: Literal["additive", "teammate-set", "full-match"] = "full-match"
+    core_objective: bool = False
+    score_target_mode: Literal["legacy", "phase-core", "official-total-core"] = "legacy"
+    score_loss_weight: float = 1.0
+    win_loss_weight: float = 1.0
+    embedding_loss_weight: float = 1.0
+    log_optimizer_steps: bool = True
     attention_heads: int = 1
     attention_dropout: float = 0.0
     ffn_dropout: float = 0.0
@@ -47,6 +53,7 @@ class LatentStratOptions(BaseModel):
     one_cycle_final_div_factor: float = 10_000.0
     deterministic_algorithms: bool = False
     checkpoint_every_epochs: int = 1
+    checkpoint_milestone_epochs: tuple[int, ...] = ()
     optimizer_log_interval: int = 10
     loss_log_var_min: float = -5.0
     loss_log_var_max: float = 5.0

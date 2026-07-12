@@ -77,8 +77,7 @@ def pair_prediction_tables(
         "candidate_duplicate_rows": 0,
         "statbotics_duplicate_rows": 0,
         "candidate_missing_predictions": {
-            column: int(candidate[column].isna().sum())
-            for column in CANDIDATE_REQUIRED_COLUMNS[2:]
+            column: int(candidate[column].isna().sum()) for column in CANDIDATE_REQUIRED_COLUMNS[2:]
         },
     }
     paired = candidate.merge(
@@ -197,9 +196,7 @@ def prediction_metrics(paired: pd.DataFrame) -> pd.DataFrame:
         weeks = pd.to_numeric(paired["val_week"], errors="coerce")
         for week in sorted(weeks.dropna().unique()):
             rows.extend(
-                _metric_rows(
-                    paired.loc[weeks == week], scope="historical_week", week=float(week)
-                )
+                _metric_rows(paired.loc[weeks == week], scope="historical_week", week=float(week))
             )
     return pd.DataFrame(rows)
 

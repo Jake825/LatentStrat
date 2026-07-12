@@ -10,6 +10,7 @@ import warnings
 from copy import deepcopy
 from dataclasses import dataclass
 from itertools import cycle
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -88,6 +89,7 @@ class TrainingDiagnostics:
 TASK_NAMES = (
     "continuous",
     "win",
+    "embedding",
     "endgame",
     "auto",
     "awards",
@@ -123,6 +125,8 @@ class MatchTensorDataset(Dataset):
         v57_bin_targets: Tensor | None = None,
         wm_award_targets: Tensor | None = None,
         auto_targets: Tensor | None = None,
+        official_total_targets: Tensor | None = None,
+        dq_mask: Tensor | None = None,
     ) -> None:
         self.red_team_idx = red_team_idx
         self.blue_team_idx = blue_team_idx
@@ -153,6 +157,14 @@ class MatchTensorDataset(Dataset):
             auto_targets
             if auto_targets is not None
             else torch.empty((len(red_team_idx), 0), dtype=torch.long)
+        )
+        self.official_total_targets = (
+            official_total_targets
+            if official_total_targets is not None
+            else torch.full((len(red_team_idx), 2), float("nan"), dtype=torch.float32)
+        )
+        self.dq_mask = (
+            dq_mask if dq_mask is not None else torch.zeros(len(red_team_idx), dtype=torch.bool)
         )
 
     @classmethod
@@ -185,6 +197,16 @@ class MatchTensorDataset(Dataset):
         award_targets = award_target_tensor(table, opts)
         world_model_opts = world_model_opts or WorldModelOptions()
         wm_award_targets = world_award_target_tensor(table, world_model_opts.award_embedding.width)
+        red_dq = (
+            table["red_has_dq"].astype(bool)
+            if "red_has_dq" in table
+            else pd.Series(False, index=table.index)
+        )
+        blue_dq = (
+            table["blue_has_dq"].astype(bool)
+            if "blue_has_dq" in table
+            else pd.Series(False, index=table.index)
+        )
         return cls(
             red_team_idx=torch.as_tensor(matrices[0], dtype=torch.long),
             blue_team_idx=torch.as_tensor(matrices[1], dtype=torch.long),
@@ -200,6 +222,11 @@ class MatchTensorDataset(Dataset):
             v57_bin_targets=torch.as_tensor(v57_bin_targets, dtype=torch.float32),
             wm_award_targets=torch.as_tensor(wm_award_targets, dtype=torch.float32),
             auto_targets=torch.as_tensor(auto_targets, dtype=torch.long),
+            official_total_targets=torch.as_tensor(
+                optional_target_matrix(table, ["red_total_score", "blue_total_score"]),
+                dtype=torch.float32,
+            ),
+            dq_mask=torch.as_tensor((red_dq | blue_dq).to_numpy(copy=True), dtype=torch.bool),
         )
 
     def __len__(self) -> int:
@@ -221,6 +248,8 @@ class MatchTensorDataset(Dataset):
             self.v57_bin_targets[index],
             self.wm_award_targets[index],
             self.auto_targets[index],
+            self.official_total_targets[index],
+            self.dq_mask[index],
         )
 
 
@@ -627,6 +656,7 @@ def _active_embedding_l2(
     coefficient: float,
     *,
     include_zero: bool = False,
+    normalized: bool = False,
 ) -> Tensor:
     if coefficient == 0 or not embedding.weight.requires_grad:
         return torch.zeros((), dtype=embedding.weight.dtype, device=indices.device)
@@ -634,7 +664,8 @@ def _active_embedding_l2(
     active = active[active >= 0] if include_zero else active[active > 0]
     if active.numel() == 0:
         return torch.zeros((), dtype=embedding.weight.dtype, device=indices.device)
-    return coefficient * embedding(active).pow(2).sum()
+    values = embedding(active).pow(2)
+    return coefficient * (values.mean() if normalized else values.sum())
 
 
 def active_embedding_l2(
@@ -642,9 +673,17 @@ def active_embedding_l2(
     red_team_idx: Tensor,
     blue_team_idx: Tensor,
     coefficient: float,
+    *,
+    normalized: bool = False,
 ) -> Tensor:
     active_indices = torch.cat([red_team_idx, blue_team_idx], dim=1)
-    return _active_embedding_l2(model.Z_base, active_indices, coefficient, include_zero=True)
+    return _active_embedding_l2(
+        model.Z_base,
+        active_indices,
+        coefficient,
+        include_zero=True,
+        normalized=normalized,
+    )
 
 
 def active_event_embedding_l2(
@@ -743,12 +782,17 @@ def model_loss(
         raw_bin_loss = zero
         bin_term = zero
     else:
-        raw_bin_loss = F.binary_cross_entropy_with_logits(
-            predictions["win"],
-            bin_targets,
-            pos_weight=positive_weights,
-        )
-        bin_term = model.balance_loss("win", raw_bin_loss, True)
+        finite = torch.isfinite(bin_targets)
+        if torch.any(finite):
+            raw_bin_loss = F.binary_cross_entropy_with_logits(
+                predictions["win"][finite],
+                bin_targets[finite],
+                pos_weight=(positive_weights if positive_weights.numel() == 1 else None),
+            )
+            bin_term = model.balance_loss("win", raw_bin_loss, True)
+        else:
+            raw_bin_loss = zero
+            bin_term = zero
 
     slot_missing = torch.cat([pred.masks.red_missing_mask, pred.masks.blue_missing_mask], dim=1)
     if endgame_targets is None or predictions["endgame"].numel() == 0:
@@ -861,7 +905,13 @@ def model_loss(
         raw_wm_award_loss, wm_award_active = zero, False
     wm_award_term = model.balance_loss("wm_award", raw_wm_award_loss, wm_award_active)
 
-    emb_l2 = active_embedding_l2(model, red_team_idx, blue_team_idx, opts.l2_embedding)
+    emb_l2 = active_embedding_l2(
+        model,
+        red_team_idx,
+        blue_team_idx,
+        opts.embedding_loss_weight if opts.core_objective else opts.l2_embedding,
+        normalized=opts.core_objective,
+    )
     event_l2 = zero
     if red_event_idx is not None and blue_event_idx is not None:
         event_l2 = active_event_embedding_l2(
@@ -930,6 +980,7 @@ def _runtime_config(opts: LatentStratOptions) -> TrainingRuntimeConfig:
         deterministic_algorithms=opts.deterministic_algorithms,
         checkpoint_every_epochs=opts.checkpoint_every_epochs,
         optimizer_log_interval=opts.optimizer_log_interval,
+        log_optimizer_steps=opts.log_optimizer_steps,
     )
 
 
@@ -937,7 +988,7 @@ def clamp_loss_log_vars(model: SetTransformerModel, opts: LatentStratOptions) ->
     model.loss_balancer.clamp_(opts.loss_log_var_min, opts.loss_log_var_max)
 
 
-def create_tensorboard_writer(log_dir: str) -> Any:
+def create_tensorboard_writer(log_dir: str, *, purge_step: int | None = None) -> Any:
     try:
         from torch.utils.tensorboard import SummaryWriter
     except ModuleNotFoundError as exc:
@@ -945,7 +996,7 @@ def create_tensorboard_writer(log_dir: str) -> Any:
             "TensorBoard logging is enabled, but tensorboard is not installed. "
             'Run `pip install -e ".[dev]"` or pass `--no-tensorboard`.'
         ) from exc
-    return SummaryWriter(str(log_dir))
+    return SummaryWriter(str(log_dir), purge_step=purge_step, flush_secs=30)
 
 
 def freeze_for_venue_mode(model: SetTransformerModel) -> None:
@@ -1085,6 +1136,7 @@ def _metrics_to_losses(metrics: LossMetrics) -> dict[str, float]:
     return {
         "continuous": metrics.continuous_loss,
         "win": metrics.binary_loss,
+        "embedding": metrics.embedding_l2_loss,
         "endgame": metrics.endgame_loss,
         "auto": metrics.auto_loss,
         "awards": metrics.award_loss,
@@ -1093,6 +1145,18 @@ def _metrics_to_losses(metrics: LossMetrics) -> dict[str, float]:
         "bonus": metrics.bonus_loss,
         "special": metrics.special_loss,
         "wm_award": metrics.wm_award_loss,
+    }
+
+
+def _core_batch_task_weights(batch: tuple[Tensor, ...]) -> dict[str, float]:
+    """Count rows that actually contribute to each fixed core objective."""
+
+    continuous = batch[6]
+    binary = batch[7]
+    return {
+        "continuous": float(torch.isfinite(continuous).any(dim=1).sum().item()),
+        "win": float(torch.isfinite(binary).any(dim=1).sum().item()),
+        "embedding": float(batch[0].shape[0]),
     }
 
 
@@ -1131,6 +1195,48 @@ def _write_feature_tensorboard_epoch(
     active_sidecars: set[str],
 ) -> None:
     epoch = int(row["epoch"])
+    if model.opts.core_objective:
+        writer.add_scalar("Loss/Train", float(row["train_loss"]), epoch)
+        validation = float(row["validation_loss"])
+        if math.isfinite(validation):
+            writer.add_scalar("Loss/Validation", validation, epoch)
+        for tag, task in (
+            ("LossComponent/Score", "continuous"),
+            ("LossComponent/Win", "win"),
+            ("LossComponent/Embedding", "embedding"),
+        ):
+            value = float(task_means.get(task, math.nan))
+            if math.isfinite(value):
+                writer.add_scalar(tag, value, epoch)
+        fields = {
+            "Forecast/Train/ScoreMAE": "train_score_mae",
+            "Forecast/Train/ScoreRMSE": "train_score_rmse",
+            "Forecast/Train/ScoreDifferentialMAE": "train_score_differential_mae",
+            "Forecast/Train/ScoreDifferentialRMSE": "train_score_differential_rmse",
+            "Forecast/Train/WinnerBrier": "train_winner_brier",
+            "Forecast/Train/WinnerLogLoss": "train_winner_log_loss",
+            "Forecast/Train/WinnerECE": "train_winner_ece",
+            "Forecast/Validation/ScoreMAE": "validation_score_mae",
+            "Forecast/Validation/ScoreRMSE": "validation_score_rmse",
+            "Forecast/Validation/ScoreDifferentialMAE": "validation_score_differential_mae",
+            "Forecast/Validation/ScoreDifferentialRMSE": "validation_score_differential_rmse",
+            "Forecast/Validation/WinnerBrier": "validation_winner_brier",
+            "Forecast/Validation/WinnerLogLoss": "validation_winner_log_loss",
+            "Forecast/Validation/WinnerECE": "validation_winner_ece",
+            "Optimization/LearningRate": "learning_rate_group_0",
+            "Optimization/GradientNormMean": "preclip_grad_norm_mean",
+            "Optimization/GradientNormMax": "preclip_grad_norm_max",
+            "Optimization/ClippingFraction": "clipping_fraction",
+            "Runtime/EpochSeconds": "epoch_seconds",
+            "Runtime/SamplesPerSecond": "samples_per_second",
+            "State/ZBaseNormMean": "z_base_norm_mean",
+            "State/ZBaseUpdateMean": "z_base_update_norm_mean",
+        }
+        for tag, field in fields.items():
+            value = float(row.get(field, math.nan))
+            if math.isfinite(value):
+                writer.add_scalar(tag, value, epoch)
+        return
     writer.add_scalar("Loss/Train/Total", float(row["train_loss"]), epoch)
     writer.add_scalar("Loss/Train_Total", float(row["train_loss"]), epoch)
     validation = float(row["validation_loss"])
@@ -1322,8 +1428,12 @@ def evaluate_task_means(
             with torch.amp.autocast(device_type="cuda", enabled=amp_enabled):
                 _, metrics, _ = _loss_from_batch(model, batch, opts, positive_weights, active_model)
             batch_rows = int(batch[0].shape[0])
+            core_weights = _core_batch_task_weights(batch) if opts.core_objective else None
             for task_name, value in _metrics_to_losses(metrics).items():
-                _accumulate_loss(sums, weights, task_name, value, batch_rows)
+                weight = (
+                    core_weights.get(task_name, 0.0) if core_weights is not None else batch_rows
+                )
+                _accumulate_loss(sums, weights, task_name, value, weight)
     if was_training:
         model.train()
         active_model.train()
@@ -1336,7 +1446,9 @@ def evaluate_forecast_metrics(
     device: torch.device,
     target_mu: Tensor,
     target_sigma: Tensor,
+    opts: LatentStratOptions,
     *,
+    score_residual: float = 0.0,
     forward_model: torch.nn.Module | None = None,
     amp_enabled: bool = False,
 ) -> dict[str, float]:
@@ -1362,22 +1474,35 @@ def evaluate_forecast_metrics(
                 )
             continuous = output.cont_z * target_sigma + target_mu
             actual_continuous = batch[6] * target_sigma + target_mu
-            if continuous.shape[1] >= 4:
+            if opts.score_target_mode == "official-total-core" and continuous.shape[1] >= 2:
+                predicted_scores.append(continuous[:, :2].cpu())
+                official = batch[14].clone()
+                official[batch[15].bool()] = float("nan")
+                actual_scores.append(official.cpu())
+            elif continuous.shape[1] >= 4:
                 predicted_scores.append(
                     torch.stack(
-                        [continuous[:, :2].sum(dim=1), continuous[:, 2:4].sum(dim=1)],
-                        dim=1,
-                    ).cpu()
-                )
-                actual_scores.append(
-                    torch.stack(
                         [
-                            actual_continuous[:, :2].sum(dim=1),
-                            actual_continuous[:, 2:4].sum(dim=1),
+                            continuous[:, :2].sum(dim=1) + score_residual,
+                            continuous[:, 2:4].sum(dim=1) + score_residual,
                         ],
                         dim=1,
                     ).cpu()
                 )
+                if opts.core_objective:
+                    official = batch[14].clone()
+                    official[batch[15].bool()] = float("nan")
+                    actual_scores.append(official.cpu())
+                else:
+                    actual_scores.append(
+                        torch.stack(
+                            [
+                                actual_continuous[:, :2].sum(dim=1),
+                                actual_continuous[:, 2:4].sum(dim=1),
+                            ],
+                            dim=1,
+                        ).cpu()
+                    )
             if output.bin_logits.shape[1] and batch[7].shape[1]:
                 probabilities.append(torch.sigmoid(output.bin_logits[:, 0]).cpu())
                 outcomes.append(batch[7][:, 0].cpu())
@@ -1621,6 +1746,20 @@ def train_model(
         target_sigma_np = np.ones(len(target_names), dtype=float)
     target_mu = torch.as_tensor(target_mu_np, dtype=torch.float32, device=device)
     target_sigma = torch.as_tensor(target_sigma_np, dtype=torch.float32, device=device)
+    score_residual = 0.0
+    if opts.score_target_mode == "phase-core":
+        eligible = ~(
+            table.iloc[train_rows].get("red_has_dq", False).astype(bool).to_numpy()
+            | table.iloc[train_rows].get("blue_has_dq", False).astype(bool).to_numpy()
+        )
+        source = table.iloc[train_rows]
+        red = source["red_total_score"].to_numpy(float) - (
+            source["red_auto_pts"].to_numpy(float) + source["red_teleop_pts"].to_numpy(float)
+        )
+        blue = source["blue_total_score"].to_numpy(float) - (
+            source["blue_auto_pts"].to_numpy(float) + source["blue_teleop_pts"].to_numpy(float)
+        )
+        score_residual = float(np.nanmean(np.concatenate([red[eligible], blue[eligible]])))
 
     scheduler = build_lr_scheduler(
         optimizer,
@@ -1736,7 +1875,7 @@ def train_model(
         if len(validation_rows) and "event_key" in table.columns
         else 0
     )
-    if tensorboard_writer is not None:
+    if tensorboard_writer is not None and not opts.core_objective:
         _write_parameter_histograms(
             tensorboard_writer,
             model,
@@ -1762,8 +1901,12 @@ def train_model(
                     model, batch, opts, positive_weights, forward_model
                 )
                 batch_rows = int(batch[0].shape[0])
+                core_weights = _core_batch_task_weights(batch) if opts.core_objective else None
                 for task_name, loss_value in _metrics_to_losses(metrics).items():
-                    _accumulate_loss(task_sums, task_weights, task_name, loss_value, batch_rows)
+                    weight = (
+                        core_weights.get(task_name, 0.0) if core_weights is not None else batch_rows
+                    )
+                    _accumulate_loss(task_sums, task_weights, task_name, loss_value, weight)
                 for name, iterator in sidecar_iters.items():
                     sidecar_batch = batch_to_device(next(iterator), device)
                     if name == "rank":
@@ -1835,6 +1978,8 @@ def train_model(
                 device,
                 target_mu,
                 target_sigma,
+                opts,
+                score_residual=score_residual,
                 forward_model=forward_model,
                 amp_enabled=amp_enabled,
             )
@@ -1846,6 +1991,8 @@ def train_model(
                     device,
                     target_mu,
                     target_sigma,
+                    opts,
+                    score_residual=score_residual,
                     forward_model=forward_model,
                     amp_enabled=amp_enabled,
                 )
@@ -1927,31 +2074,33 @@ def train_model(
             and runtime_config.checkpoint_every_epochs > 0
             and epoch % runtime_config.checkpoint_every_epochs == 0
         ):
-            save_resume_checkpoint(
-                resume_output,
-                resume_payload(
-                    trainer="season",
-                    phase="venue" if venue_mode else "fit",
-                    completed_epoch=epoch,
-                    model=model,
-                    optimizer=optimizer,
-                    scheduler=scheduler,
-                    optimizer_step=controller.optimizer_step,
-                    history=rows,
-                    config=resolved_config,
-                    source_fingerprint=source_fingerprint,
-                    scaler=scaler,
-                    loader_generator=generator,
-                    extra_state={
-                        "best_model_state_dict": best_model,
-                        "best_epoch": best_epoch,
-                        "best_validation": best_validation,
-                        "patience_counter": patience_counter,
-                        "initial_loss": initial_loss,
-                        "initial_z_base": initial_z_base,
-                    },
-                ),
+            payload = resume_payload(
+                trainer="season",
+                phase="venue" if venue_mode else "fit",
+                completed_epoch=epoch,
+                model=model,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                optimizer_step=controller.optimizer_step,
+                history=rows,
+                config=resolved_config,
+                source_fingerprint=source_fingerprint,
+                scaler=scaler,
+                loader_generator=generator,
+                extra_state={
+                    "best_model_state_dict": best_model,
+                    "best_epoch": best_epoch,
+                    "best_validation": best_validation,
+                    "patience_counter": patience_counter,
+                    "initial_loss": initial_loss,
+                    "initial_z_base": initial_z_base,
+                },
             )
+            save_resume_checkpoint(resume_output, payload)
+            if epoch in set(opts.checkpoint_milestone_epochs):
+                milestone = Path(resume_output).parent / "milestones" / f"epoch_{epoch:03d}.ckpt"
+                milestone.parent.mkdir(parents=True, exist_ok=True)
+                save_resume_checkpoint(milestone, payload)
         if stopped:
             break
 
@@ -1980,7 +2129,7 @@ def train_model(
             forward_model=forward_model,
             amp_enabled=amp_enabled,
         )
-    if tensorboard_writer is not None:
+    if tensorboard_writer is not None and not opts.core_objective:
         _write_parameter_histograms(
             tensorboard_writer,
             model,

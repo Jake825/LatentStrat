@@ -152,9 +152,7 @@ def write_prior_team_galaxy_plot(coords: pd.DataFrame, output_path: Path) -> Non
         return
     plt = _plot_setup()
     fig, axes = plt.subplots(1, 3, figsize=(16, 5))
-    scatter, label = _scatter_continuous(
-        axes[0], coords, "norm_epa_t_minus_1", "Latest EPA"
-    )
+    scatter, label = _scatter_continuous(axes[0], coords, "norm_epa_t_minus_1", "Latest EPA")
     fig.colorbar(scatter, ax=axes[0], label=label)
     scatter, label = _scatter_continuous(
         axes[1], coords, "raw_rookie_year_delta", "Rookie-Year Delta"
@@ -635,9 +633,7 @@ def selection_value_table(model, selections: pd.DataFrame | None) -> pd.DataFram
 
     frame["actual_pick_number"] = [pick_number(row) for _, row in frame.iterrows()]
     device = next(model.parameters()).device
-    base_idx = torch.as_tensor(
-        frame["pick_base_idx"].to_numpy(dtype=int, copy=True), device=device
-    )
+    base_idx = torch.as_tensor(frame["pick_base_idx"].to_numpy(dtype=int, copy=True), device=device)
     event_idx = torch.as_tensor(
         frame["pick_event_idx"].to_numpy(dtype=int, copy=True), device=device
     )

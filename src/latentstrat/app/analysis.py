@@ -133,9 +133,7 @@ def build_season_model(payload: dict[str, Any]) -> SetTransformerModel:
         num_awards=len(opts.award_targets),
         world_model_opts=_world_options(payload),
     )
-    model.load_state_dict(
-        state, strict=payload.get("checkpoint_schema_version") in {6, 7}
-    )
+    model.load_state_dict(state, strict=payload.get("checkpoint_schema_version") in {6, 7})
     model.eval()
     return model
 
@@ -148,11 +146,7 @@ def checkpoint_feature_compatibility(
     required = {
         "event_key",
         "match_key",
-        *{
-            f"{color}_team_{slot}_key"
-            for color in ("red", "blue")
-            for slot in range(1, 4)
-        },
+        *{f"{color}_team_{slot}_key" for color in ("red", "blue") for slot in range(1, 4)},
     }
     missing = sorted(required - set(table.columns))
     if missing:
@@ -167,9 +161,7 @@ def checkpoint_feature_compatibility(
     if not torch.is_tensor(base) or base.ndim != 2:
         reasons.append("checkpoint has no two-dimensional Z_base table")
     state_model = (payload.get("options") or {}).get("state_model", "base-plus-event")
-    if state_model != "static-z-base" and (
-        not torch.is_tensor(event) or event.ndim != 2
-    ):
+    if state_model != "static-z-base" and (not torch.is_tensor(event) or event.ndim != 2):
         reasons.append("checkpoint has no two-dimensional Z_event table")
     if torch.is_tensor(base) and torch.is_tensor(event) and base.shape[1] != event.shape[1]:
         reasons.append("base and event embedding dimensions disagree")
@@ -189,14 +181,10 @@ def checkpoint_feature_compatibility(
     if configured_season is not None and "season" in table:
         table_seasons = set(pd.to_numeric(table["season"], errors="coerce").dropna().astype(int))
         if table_seasons and table_seasons != {int(configured_season)}:
-            reasons.append(
-                "checkpoint season does not match the selected feature-table season"
-            )
+            reasons.append("checkpoint season does not match the selected feature-table season")
 
     team_columns = sorted(
-        column
-        for column in required
-        if column.endswith("_team_1_key") or "_team_" in column
+        column for column in required if column.endswith("_team_1_key") or "_team_" in column
     )
     if team_columns and base_map and not missing:
         teams = pd.unique(table[team_columns].astype(str).to_numpy().reshape(-1))
@@ -220,8 +208,7 @@ def season_embedding_frame(
 ) -> tuple[pd.DataFrame, tuple[str, ...], str]:
     model = build_season_model(payload)
     team_map = {
-        str(key): int(value)
-        for key, value in (payload.get("team_base_index_map") or {}).items()
+        str(key): int(value) for key, value in (payload.get("team_base_index_map") or {}).items()
     }
     inverse = sorted(team_map.items(), key=lambda pair: pair[1])
     if not inverse:
@@ -253,13 +240,10 @@ def season_event_trajectory_frame(
     payload: dict[str, Any],
 ) -> tuple[pd.DataFrame, tuple[str, ...]]:
     if (payload.get("options") or {}).get("state_model") == "static-z-base":
-        raise ValueError(
-            "Static Z_base checkpoints have no event states or temporal trajectories."
-        )
+        raise ValueError("Static Z_base checkpoints have no event states or temporal trajectories.")
     model = build_season_model(payload)
     base_map = {
-        str(key): int(value)
-        for key, value in (payload.get("team_base_index_map") or {}).items()
+        str(key): int(value) for key, value in (payload.get("team_base_index_map") or {}).items()
     }
     event_map = {
         str(key): int(value)
@@ -340,12 +324,10 @@ def _pma_tuple(value: torch.Tensor) -> tuple[float, ...]:
 def diagnose_match(payload: dict[str, Any], row: pd.Series) -> MatchDiagnostic:
     model = build_season_model(payload)
     base_map = {
-        str(key): int(value)
-        for key, value in (payload.get("team_base_index_map") or {}).items()
+        str(key): int(value) for key, value in (payload.get("team_base_index_map") or {}).items()
     }
     event_map = {
-        str(key): int(value)
-        for key, value in (payload.get("team_event_index_map") or {}).items()
+        str(key): int(value) for key, value in (payload.get("team_event_index_map") or {}).items()
     }
     event_key = str(row["event_key"])
     red_teams = tuple(str(row[f"red_team_{slot}_key"]) for slot in range(1, 4))

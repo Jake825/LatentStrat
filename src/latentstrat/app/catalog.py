@@ -113,8 +113,10 @@ def _kind_for(path: Path) -> ArtifactKind | None:
     if name.startswith("statbotics_predictions_") and name.endswith(".parquet"):
         return ArtifactKind.PREDICTIONS
     if name in {"checkpoint.pt", "pretrained_prior_2026.pt", "prior_checkpoint.pt"}:
-        if name.startswith("prior_") or "prior" in lower_parts or (
-            "pretraining" in lower_parts and "prior" in path.as_posix()
+        if (
+            name.startswith("prior_")
+            or "prior" in lower_parts
+            or ("pretraining" in lower_parts and "prior" in path.as_posix())
         ):
             return ArtifactKind.PRIOR_CHECKPOINT
         return ArtifactKind.SEASON_CHECKPOINT
@@ -151,6 +153,10 @@ def _kind_for(path: Path) -> ArtifactKind | None:
         "development_selection.json",
         "hierarchical_bootstrap.csv",
         "interaction_decisions.csv",
+        "decision_classifications.csv",
+        "paired_comparisons.csv",
+        "leave_one_division_out.csv",
+        "score_bias_slices.csv",
         "external_comparison.csv",
         "external_verdict.json",
         "validation_report.json",
@@ -219,9 +225,7 @@ def discover_workspace(root: str | Path | None = None) -> WorkspaceCatalog:
     artifact_root = resolved_root / "artifacts"
     candidates = _candidate_paths(resolved_root)
     manifests = [
-        (path, _read_manifest(path))
-        for path in candidates
-        if path.name.lower() == "manifest.json"
+        (path, _read_manifest(path)) for path in candidates if path.name.lower() == "manifest.json"
     ]
     artifacts: list[ArtifactRef] = []
     for path in candidates:
@@ -229,9 +233,7 @@ def discover_workspace(root: str | Path | None = None) -> WorkspaceCatalog:
         if kind is None:
             continue
         manifest_path, manifest = _nearest_manifest(path, artifact_root)
-        declaration_manifest, declaration = _manifest_declaration(
-            path, resolved_root, manifests
-        )
+        declaration_manifest, declaration = _manifest_declaration(path, resolved_root, manifests)
         if not manifest and declaration_manifest is not None:
             manifest_path = declaration_manifest
             manifest = _read_manifest(declaration_manifest)

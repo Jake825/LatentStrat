@@ -23,6 +23,7 @@ latentstrat season train
 latentstrat season validate
 latentstrat season validate-reference-2026
 latentstrat season run-static-reliability-study
+latentstrat season run-static-championship-diagnostic
 ```
 
 `season build-features` writes reusable Parquet. `season train` writes a strict schema-`6`
@@ -41,6 +42,12 @@ freezes clipping and duration on development week 4, treats weeks 6 and 8 as pri
 keeps week 10 as a stress test, and writes isolated TensorBoard logs under
 `runs/reference-2026-static-reliability/`. It defaults to `--smoke`; inspect its help and pass
 `--full-study` only after the smoke dashboards and runtime gate pass.
+
+`season run-static-championship-diagnostic` runs the fixed-loss 2026 static Championship study.
+It defaults to a two-epoch smoke, freezes exact match-key splits, masks DQs and winner ties, and
+compares phase-derived with direct official-total supervision across additive, teammate-set, and
+full-match architectures. Formal execution requires exactly 100 epochs, a clean Git commit, and a
+passing 360-minute timing gate. See the [study contract](2026-static-championship-core-study.md).
 
 The old `full-season-offline` alias is a tombstone. Use `season build-features` followed by
 `season train`.

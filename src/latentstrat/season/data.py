@@ -510,7 +510,7 @@ def _make_match_row(red: pd.Series, blue: pd.Series) -> dict[str, Any]:
             row[f"{color}_team_{slot}_endgame_status"] = alliance[f"endgame_tower_robot_{slot}"]
     row["win_margin"] = row["red_total_score"] - row["blue_total_score"]
     row["fouls_drawn"] = row["red_foul_pts"] - row["blue_foul_pts"]
-    row["red_win"] = row["win_margin"] > 0
+    row["red_win"] = np.nan if row["win_margin"] == 0 else row["win_margin"] > 0
     return row
 
 

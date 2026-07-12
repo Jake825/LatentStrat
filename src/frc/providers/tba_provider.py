@@ -129,8 +129,7 @@ class TbaProvider:
 
     def get_teams_page(self, page: int, simple: bool = True) -> list[TbaTeam]:
         return [
-            TbaTeam.model_validate(item)
-            for item in self._call("teams", page=page, simple=simple)
+            TbaTeam.model_validate(item) for item in self._call("teams", page=page, simple=simple)
         ]
 
     def get_event_rankings(self, event_key: str) -> dict[str, Any]:

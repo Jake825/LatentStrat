@@ -460,6 +460,7 @@ def _run_directories() -> list[Path]:
         manifest_path = path / "manifest.json"
         workflow = load_json(manifest_path).get("workflow") if manifest_path.exists() else None
         rank = {
+            "season.2026-static-championship-core": -1,
             "season.reference-2026-static-reliability": 0,
             "season.reference-2026-static": 1,
         }.get(workflow, 2)
@@ -482,7 +483,11 @@ def render_evaluation() -> None:
             for index, path in enumerate(directories)
             if (path / "manifest.json").exists()
             and load_json(path / "manifest.json").get("workflow")
-            in {"season.reference-2026-static-reliability", "season.reference-2026-static"}
+            in {
+                "season.2026-static-championship-core",
+                "season.reference-2026-static-reliability",
+                "season.reference-2026-static",
+            }
         ),
         0,
     )
@@ -503,14 +508,25 @@ def render_evaluation() -> None:
     workflow = manifest.get("workflow")
     is_reliability = workflow == "season.reference-2026-static-reliability"
     is_static_reference = workflow == "season.reference-2026-static"
-    is_reference = is_reliability or is_static_reference
+    is_championship = workflow == "season.2026-static-championship-core"
+    is_reference = is_reliability or is_static_reference or is_championship
     if is_reference:
-        complete = bool(resolved.get("complete"))
-        conclusion_ready = bool(resolved.get("conclusion_ready", complete))
-        rejection = (
-            resolved.get("rejection") if isinstance(resolved.get("rejection"), dict) else {}
+        run_coverage = (
+            load_json(selected / "coverage.json") if (selected / "coverage.json").exists() else {}
         )
-        if is_reliability and resolved.get("stage") == "development-rejected":
+        complete = bool(
+            run_coverage.get("complete") if is_championship else resolved.get("complete")
+        )
+        conclusion_ready = bool(resolved.get("conclusion_ready", complete))
+        rejection = resolved.get("rejection") if isinstance(resolved.get("rejection"), dict) else {}
+        if is_championship:
+            status_ribbon(
+                "Complete fixed-100 Championship diagnostic"
+                if complete
+                else "Incomplete Championship diagnostic - conclusions suppressed",
+                "blue" if complete else "yellow",
+            )
+        elif is_reliability and resolved.get("stage") == "development-rejected":
             status_ribbon("Development gate rejected - no test matrix", "yellow")
         elif is_reliability and complete and not conclusion_ready:
             status_ribbon("Complete neural matrix - awaiting Statbotics", "yellow")
@@ -533,13 +549,28 @@ def render_evaluation() -> None:
             "Seeds",
             ", ".join(map(str, resolved.get("seeds", [resolved.get("seed", "—")]))),
         )
-        summary_columns[4].metric(
-            "Primary weeks",
-            ", ".join(map(str, resolved.get("primary_weeks", resolved.get("test_weeks", []))))
-            or "—",
-        )
+        if is_championship:
+            summary_columns[4].metric(
+                "Test divisions", len(resolved.get("championship_event_keys", []))
+            )
+        else:
+            summary_columns[4].metric(
+                "Primary weeks",
+                ", ".join(map(str, resolved.get("primary_weeks", resolved.get("test_weeks", []))))
+                or "—",
+            )
         summary_columns[5].metric("Promotion", "NO")
-        if is_reliability:
+        if is_championship:
+            st.caption(
+                f"Fixed horizon: {resolved.get('epochs', 'unrecorded')} epochs | "
+                f"loss weights: {resolved.get('loss_weights', {})} | "
+                "Championship is reused diagnostic evidence | Einstein excluded"
+            )
+            st.warning(
+                "One seed and a reused Championship holdout make this non-promotable. "
+                "Architecture labels are fixed-horizon diagnostic effects only."
+            )
+        elif is_reliability:
             st.caption(
                 f"Initialization: {resolved.get('initialization', 'unselected')} | "
                 f"clip={resolved.get('selected_max_grad_norm', rejection.get('selected_max_grad_norm', 'unselected'))} | "
@@ -583,9 +614,7 @@ def render_evaluation() -> None:
                     "All rows are week-4 development evidence. Rejected grids remain available "
                     "for diagnosing metric and optimization conflicts."
                 )
-                st.dataframe(
-                    load_csv(grid_path), hide_index=True, width="stretch", height=360
-                )
+                st.dataframe(load_csv(grid_path), hide_index=True, width="stretch", height=360)
             confirmation_path = selected / "development_confirmation.csv"
             if confirmation_path.exists():
                 st.dataframe(
@@ -631,6 +660,21 @@ def render_evaluation() -> None:
             if "model" in history and history["model"].nunique() > 1:
                 model_value = st.selectbox("History model", sorted(history["model"].unique()))
                 plotted_history = plotted_history[plotted_history["model"] == model_value]
+            if "supervision_mode" in history and history["supervision_mode"].nunique() > 1:
+                supervision = st.selectbox(
+                    "History supervision", sorted(history["supervision_mode"].unique())
+                )
+                plotted_history = plotted_history[
+                    plotted_history["supervision_mode"] == supervision
+                ]
+            if "architecture" in history and history["architecture"].nunique() > 1:
+                architecture = st.selectbox(
+                    "History architecture", sorted(history["architecture"].unique())
+                )
+                plotted_history = plotted_history[plotted_history["architecture"] == architecture]
+            if "phase" in history and history["phase"].nunique() > 1:
+                phase = st.selectbox("History phase", sorted(history["phase"].unique()))
+                plotted_history = plotted_history[plotted_history["phase"] == phase]
             if "fold_number" in history and history["fold_number"].nunique() > 1:
                 fold = st.selectbox(
                     "History fold",
@@ -659,7 +703,54 @@ def render_evaluation() -> None:
             if path.exists():
                 st.subheader(name)
                 metrics = load_csv(path)
-                if name == "metrics.csv" and {
+                if (
+                    is_championship
+                    and name == "metrics.csv"
+                    and {
+                        "scope",
+                        "supervision_mode",
+                        "architecture",
+                        "metric",
+                        "value",
+                    }.issubset(metrics.columns)
+                ):
+                    primary = metrics[
+                        metrics["scope"].eq("primary-clean")
+                        & metrics["probability_variant"].eq("raw_pred_red_win_probability")
+                    ].copy()
+                    primary["model"] = (
+                        primary["supervision_mode"].astype(str)
+                        + " / "
+                        + primary["architecture"].astype(str)
+                    )
+                    scoreboard = primary.pivot_table(
+                        index=["metric", "direction"],
+                        columns="model",
+                        values="value",
+                        aggfunc="first",
+                    ).reset_index()
+                    st.subheader("Fixed-100 Championship scoreboard")
+                    st.caption(
+                        "All models use the exact same 1,108 primary-clean matches. Lower is "
+                        "better except winner accuracy."
+                    )
+                    st.dataframe(scoreboard, hide_index=True, width="stretch")
+                    classification_path = selected / "decision_classifications.csv"
+                    if classification_path.exists():
+                        st.subheader("Predeclared diagnostic classifications")
+                        st.dataframe(
+                            load_csv(classification_path), hide_index=True, width="stretch"
+                        )
+                    detail_scope = st.selectbox(
+                        "Metric detail scope", sorted(metrics["scope"].unique())
+                    )
+                    st.dataframe(
+                        metrics[metrics["scope"].eq(detail_scope)],
+                        hide_index=True,
+                        width="stretch",
+                        height=360,
+                    )
+                elif name == "metrics.csv" and {
                     "scope",
                     "model",
                     "metric",
@@ -670,9 +761,7 @@ def render_evaluation() -> None:
                     if is_reliability:
                         scoreboard = scoreboard[
                             scoreboard["seed"].astype(str).eq("ensemble")
-                            & scoreboard["probability_variant"].isin(
-                                ["raw", "not-applicable"]
-                            )
+                            & scoreboard["probability_variant"].isin(["raw", "not-applicable"])
                         ]
                     evidence = scoreboard.pivot_table(
                         index="metric", columns="model", values="value", aggfunc="first"
@@ -760,6 +849,15 @@ def render_evaluation() -> None:
             path = selected / "feature_calibration.csv"
         if path.exists():
             calibration = load_csv(path)
+            if is_championship and {
+                "supervision_mode",
+                "architecture",
+            }.issubset(calibration.columns):
+                calibration["model"] = (
+                    calibration["supervision_mode"].astype(str)
+                    + " / "
+                    + calibration["architecture"].astype(str)
+                )
             st.dataframe(calibration, hide_index=True, width="stretch")
             x = next(
                 (name for name in ("mean_prediction", "mean_probability") if name in calibration),
@@ -790,7 +888,15 @@ def render_evaluation() -> None:
             st.dataframe(uncertainty, hide_index=True, width="stretch")
             st.caption("Negative candidate-minus-baseline loss deltas favor the candidate.")
             decisions_path = selected / "interaction_decisions.csv"
-            if is_reliability and decisions_path.exists():
+            championship_decisions = selected / "decision_classifications.csv"
+            if is_championship and championship_decisions.exists():
+                st.subheader("Fixed-100 diagnostic effects")
+                st.dataframe(load_csv(championship_decisions), hide_index=True, width="stretch")
+                loo_path = selected / "leave_one_division_out.csv"
+                if loo_path.exists():
+                    st.subheader("Leave-one-division-out sensitivity")
+                    st.dataframe(load_csv(loo_path), hide_index=True, width="stretch")
+            elif is_reliability and decisions_path.exists():
                 decisions = load_csv(decisions_path)
                 if not bool(resolved.get("conclusion_ready")):
                     st.warning(
@@ -802,9 +908,7 @@ def render_evaluation() -> None:
                 hierarchical_path = selected / "hierarchical_bootstrap.csv"
                 if hierarchical_path.exists():
                     st.subheader("Hierarchical seed-event bootstrap")
-                    st.dataframe(
-                        load_csv(hierarchical_path), hide_index=True, width="stretch"
-                    )
+                    st.dataframe(load_csv(hierarchical_path), hide_index=True, width="stretch")
             elif (
                 is_reference
                 and resolved.get("complete")

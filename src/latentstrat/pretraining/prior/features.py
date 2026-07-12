@@ -224,8 +224,7 @@ def build_rich_team_narrative(
     ]
     if event_wins:
         narrative.append(
-            "They have won official events in the following years: "
-            f"{compress_years(event_wins)}."
+            f"They have won official events in the following years: {compress_years(event_wins)}."
         )
 
     championship_years = [
@@ -294,9 +293,7 @@ def build_gap_team_narrative(
 
 def projected_future_rookie_year(number: int, opts: PriorOpts | None = None) -> int:
     opts = opts or PriorOpts()
-    return round(
-        2026 + ((number - opts.future_baseline_team) / opts.future_growth_per_year)
-    )
+    return round(2026 + ((number - opts.future_baseline_team) / opts.future_growth_per_year))
 
 
 def build_future_rookie_narrative(number: int, opts: PriorOpts | None = None) -> str:
@@ -668,9 +665,7 @@ def add_norm_epa_trajectory_targets(
     opts = opts or PriorOpts()
     years = list(source_years or norm_epa_source_years(target_season))
     if len(years) != len(NORM_EPA_TARGET_COLUMNS):
-        raise ValueError(
-            f"Expected {len(NORM_EPA_TARGET_COLUMNS)} normalized EPA source years."
-        )
+        raise ValueError(f"Expected {len(NORM_EPA_TARGET_COLUMNS)} normalized EPA source years.")
     norm_epa_by_team = collect_norm_epa_trajectory(
         statbotics_provider, target_season, opts, source_years=years
     )
@@ -874,9 +869,7 @@ def embed_narratives(
         pending_items = list(pending.values())
         for item_batch in _chunks(pending_items, opts.embedding_batch_size):
             narrative_batch = [item[0] for item in item_batch]
-            response = _embedding_create_with_backoff(
-                client, narrative_batch, opts, stats=stats
-            )
+            response = _embedding_create_with_backoff(client, narrative_batch, opts, stats=stats)
             stats.api_batches += 1
             embeddings = _response_embeddings(response)
             if len(embeddings) != len(narrative_batch):
