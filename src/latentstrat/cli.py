@@ -901,7 +901,8 @@ def run_static_championship_diagnostic_command(
     )
     typer.echo(f"Static Championship diagnostic complete: {result}")
     if tensorboard:
-        typer.echo(f"TensorBoard: tensorboard --logdir={tensorboard_logdir / output.name}")
+        study_id = (result / "tensorboard_study_id.txt").read_text(encoding="utf-8").strip()
+        typer.echo(f"TensorBoard: tensorboard --logdir={tensorboard_logdir / study_id}")
 
 
 def finalize_static_reliability_command(

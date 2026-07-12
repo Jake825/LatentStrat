@@ -908,7 +908,25 @@ def run_championship_study(
         raise ValueError("The formal diagnostic requires exactly 100 epochs.")
     if not smoke and not _git_clean():
         raise RuntimeError("Formal training requires a clean Git working tree.")
-    study_id = output.name
+    study_id_path = output / "tensorboard_study_id.txt"
+    if study_id_path.exists():
+        study_id = study_id_path.read_text(encoding="utf-8").strip()
+    else:
+        identity_payload = json.dumps(
+            {
+                "workflow": WORKFLOW,
+                "epochs": epochs,
+                "seed": 2026,
+                "features_sha256": sha256_file(features_path),
+                "events_sha256": sha256_file(event_metadata_path),
+                "prior_sha256": sha256_file(prior_checkpoint),
+            },
+            sort_keys=True,
+        ).encode()
+        config_hash = hashlib.sha256(identity_payload).hexdigest()[:10]
+        timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+        study_id = f"{timestamp}-{config_hash}"
+        study_id_path.write_text(study_id + "\n", encoding="utf-8")
     tensorboard_dir = Path(tensorboard_root) / study_id if tensorboard_root else None
     dev_train_keys = manifest_keys(manifest, "development_train")
     dev_eval_keys = manifest_keys(manifest, "development_holdout")
@@ -1031,6 +1049,8 @@ def run_championship_study(
     baseline_contract.to_csv(output / "baseline_contract.csv", index=False)
     frozen = {
         "artifact_schema": ARTIFACT_SCHEMA,
+        "study_id": study_id,
+        "tensorboard_logdir": str(tensorboard_dir) if tensorboard_dir else None,
         "season": 2026,
         "state_model": "static-z-base",
         "latent_dim": 16,
