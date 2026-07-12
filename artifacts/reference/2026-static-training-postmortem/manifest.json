@@ -1,0 +1,110 @@
+{
+  "artifact_version": "v1",
+  "created_at_utc": "2026-07-12T21:10:32.379529+00:00",
+  "files": {
+    "development_key_epochs.csv": {
+      "bytes": 137411,
+      "sha256": "1f9eff6c8a5f3d148b4b99a11bb7498787d65bd3385013df10590ff2df4f07f0"
+    },
+    "recent_scalar_history.csv": {
+      "bytes": 12318085,
+      "sha256": "39bf6188647fa51cd3817a41dda2ebbeb063ba0310514bfbabf32a5ee1b78d37"
+    },
+    "run_inventory.csv": {
+      "bytes": 47242,
+      "sha256": "25f59aefe9fb14a36e1b34c5a901d6c0fc5c8c2cea884fcf3ebae324a04c1383"
+    },
+    "score_bias_slices.csv": {
+      "bytes": 44374,
+      "sha256": "e34b8eb86139b0039b2a24becf4177e957f8a9eca47744ccf6af2766f350f733"
+    },
+    "summary.json": {
+      "bytes": 5892,
+      "sha256": "08b243bf3f09628d035f7851dd9e6613392933f71afefc485773b8065f5bc5f2"
+    },
+    "tensorboard_tree_hashes.csv": {
+      "bytes": 43726,
+      "sha256": "6df6b928ff5309c405134a48f02291700f408df7b626df6f12c5d430810a185d"
+    }
+  },
+  "git_commit": "50a63f96001e2c62ec4c3338dc97eed6ff587473",
+  "migration_provenance": null,
+  "promotion": {
+    "eligible": false,
+    "note": "Postmortem evidence only. The reliability matrix was rejected before formal test training; raw TensorBoard logs were intentionally removed after validated export."
+  },
+  "resolved_config": {
+    "cleanup_completed": true,
+    "deleted_event_file_count": 189,
+    "promotion_eligible": false,
+    "raw_tensorboard_logs_intentionally_removed": true,
+    "scope": "static-reference-and-reliability-postmortem",
+    "season": 2026,
+    "statbotics_in_scope": false
+  },
+  "runtime_provenance": {
+    "device": "cpu",
+    "executable": "C:\\Users\\Jelle\\Documents\\Git\\FRC\\LatentStrat\\.venv\\Scripts\\python.exe",
+    "numpy_version": "2.4.6",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python_implementation": "CPython",
+    "python_version": "3.12.10",
+    "torch_num_interop_threads": 16,
+    "torch_num_threads": 16,
+    "torch_version": "2.12.0+cpu"
+  },
+  "schema_version": 1,
+  "sources": {
+    "corrected_smoke_manifest": {
+      "bytes": 10746,
+      "path": "C:/Users/Jelle/Documents/Git/FRC/LatentStrat/artifacts/smoke/2026-static-reliability-smoke/manifest.json",
+      "sha256": "c04920719787173bee8bb2818e43b010e203917af206b12542605fb92f1f40b4"
+    },
+    "corrected_smoke_predictions": {
+      "bytes": 726244,
+      "path": "C:/Users/Jelle/Documents/Git/FRC/LatentStrat/artifacts/smoke/2026-static-reliability-smoke/walk_forward_predictions.parquet",
+      "sha256": "1297e2acd86912dfcc7168c07be1a223beaed414d74e4ad14343977ea02dade8"
+    },
+    "event_metadata": {
+      "bytes": 11801,
+      "path": "C:/Users/Jelle/Documents/Git/FRC/LatentStrat/data/features/season/events_2026.parquet",
+      "sha256": "debe4a9ef20863944ac26c1dd38efb238b3fb0260601395a5132336d08668b63"
+    },
+    "initial_smoke_manifest": {
+      "bytes": 2435,
+      "path": "C:/Users/Jelle/Documents/Git/FRC/LatentStrat/artifacts/smoke/2026-static-reliability/manifest.json",
+      "sha256": "95d25be69cf3737d02caa75737d81934eabf60eb3bdd53385db5860529ae852d"
+    },
+    "rejected_reliability_grid": {
+      "bytes": 43053,
+      "path": "C:/Users/Jelle/Documents/Git/FRC/LatentStrat/artifacts/reference/2026-static-reliability-full/optimization_grid.csv",
+      "sha256": "5a26874304e4348b198989edbe5135943ea19403c80c52b32c27251a54b6a903"
+    },
+    "rejected_reliability_manifest": {
+      "bytes": 3830,
+      "path": "C:/Users/Jelle/Documents/Git/FRC/LatentStrat/artifacts/reference/2026-static-reliability-full/manifest.json",
+      "sha256": "0194a28e44efc52af91709f433b7f8581b3566a268d1e0f3bf736c5102ea6463"
+    },
+    "season_features": {
+      "bytes": 1767229,
+      "path": "C:/Users/Jelle/Documents/Git/FRC/LatentStrat/data/features/season/features_v58_2026.parquet",
+      "sha256": "00908ea599ad4b9d018c4d65ab357ebca4cb84bce676ec5236e316fe9348849d"
+    },
+    "static_reference_manifest": {
+      "bytes": 12671,
+      "path": "C:/Users/Jelle/Documents/Git/FRC/LatentStrat/artifacts/reference/2026-static-z-base/manifest.json",
+      "sha256": "fb3fdf9a8946fcd6a663066d7cd6015d3f311d71fcee020273f4f1cc23df9c98"
+    },
+    "static_reference_predictions": {
+      "bytes": 2330011,
+      "path": "C:/Users/Jelle/Documents/Git/FRC/LatentStrat/artifacts/reference/2026-static-z-base/walk_forward_predictions.parquet",
+      "sha256": "9b560b220f93c64116c0c3d010b60f96aed06a5721db1bab8360665f0bf37842"
+    },
+    "static_reference_training_history": {
+      "bytes": 349206,
+      "path": "C:/Users/Jelle/Documents/Git/FRC/LatentStrat/artifacts/reference/2026-static-z-base/training_history.csv",
+      "sha256": "544bdceacf3c4ec55d1031a8b414dc149c94e3d0af1bdef3aefd6929f4c605b7"
+    }
+  },
+  "workflow": "review.2026-static-training-postmortem"
+}

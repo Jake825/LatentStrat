@@ -1,0 +1,146 @@
+{
+  "classification": {
+    "corrected_smoke": "successful-non-scientific-smoke",
+    "formal_test_matrix_started": false,
+    "full_reliability": "scientific-development-gate-rejection",
+    "initial_smoke": "engineering-artifact-write-failure",
+    "numerical_divergence_observed": false
+  },
+  "cleanup": {
+    "browser_tabs_closed": 0,
+    "completed": true,
+    "completed_at_utc": "2026-07-12T21:10:05.8810033Z",
+    "dashboard_processes_stopped": 10,
+    "event_files_deleted": 189,
+    "launcher_logs_deleted": 4,
+    "ports_verified_closed": [
+      6008,
+      8506
+    ],
+    "raw_tensorboard_logs_preserved": false,
+    "requested_scope": "delete entire runs tree after export and documentation",
+    "runs_bytes_deleted": 32872987,
+    "runs_root_removed": true,
+    "statbotics_contacted": false
+  },
+  "confirmed_findings": [
+    "Training remained finite; the full reliability run was rejected by the planned development gate.",
+    "Interaction-model probability metrics overfit earlier than their score metrics.",
+    "Static-reference out-of-time alliance scores were systematically biased low in weeks 6, 8, and 10.",
+    "The low bias persisted across observation-count slices.",
+    "Total-minus-auto/teleop residuals were too small to explain the forecast bias."
+  ],
+  "development_clip_5": {
+    "additive_epoch_40": {
+      "brier": 0.20799529552459717,
+      "log_loss": 0.6015249490737915,
+      "score_differential_rmse": 106.76168060302734,
+      "score_rmse": 81.83228302001953
+    },
+    "full_match_epoch_40": {
+      "brier": 0.2227029800415039,
+      "log_loss": 0.9076376557350159,
+      "score_differential_rmse": 99.63483428955078,
+      "score_rmse": 75.93673706054688
+    },
+    "full_match_probability_best_epoch_6": {
+      "brier": 0.17688947916030884,
+      "log_loss": 0.5285513401031494,
+      "score_differential_rmse": 98.73330688476562,
+      "score_rmse": 78.2691879272461
+    },
+    "full_match_score_best_epoch_14": {
+      "brier": 0.19985635578632355,
+      "log_loss": 0.6584560871124268,
+      "score_differential_rmse": 97.87215423583984,
+      "score_rmse": 74.46737670898438
+    },
+    "teammate_set_epoch_40": {
+      "brier": 0.19925110042095184,
+      "log_loss": 0.7020914554595947,
+      "score_differential_rmse": 97.9125747680664,
+      "score_rmse": 74.87480926513672
+    },
+    "teammate_set_probability_best_epoch_9": {
+      "brier": 0.17559391260147095,
+      "log_loss": 0.5245789289474487,
+      "score_differential_rmse": 98.08867645263672,
+      "score_rmse": 74.82075500488281
+    }
+  },
+  "export_validation": {
+    "epochs_per_full_grid_cell": 40,
+    "full_grid_cells": 9,
+    "full_match_bias_reproduced": {
+      "10": -66.86598177807355,
+      "6": -58.33658210762116,
+      "8": -68.5548048308393
+    },
+    "max_tensorboard_grid_delta": {
+      "clipping_fraction": 8.326672684688674e-17,
+      "validation_score_differential_rmse": 1.4210854715202004e-14,
+      "validation_winner_brier": 8.326672684688674e-17,
+      "validation_winner_log_loss": 1.1102230246251565e-16
+    },
+    "recent_scalar_row_count": 93046,
+    "run_directory_count": 189,
+    "tensorboard_event_file_count": 189
+  },
+  "generated_at_utc": "2026-07-12T21:02:12.468277+00:00",
+  "out_of_time_score_bias": {
+    "actual_alliance_score_mean_by_week": {
+      "10": 434.04468275245756,
+      "6": 180.68198924731183,
+      "8": 297.50761266747867
+    },
+    "full_match_predicted_minus_actual_by_week": {
+      "10": -66.86598177807355,
+      "6": -58.33658210762116,
+      "8": -68.5548048308393
+    },
+    "total_minus_phase_mean_by_week": {
+      "10": 7.918230563002681,
+      "6": 3.953494623655914,
+      "8": 3.927222898903776
+    }
+  },
+  "plausible_contributors": [
+    "A single static Z_base cannot represent week-to-week robot improvement or event-local state.",
+    "Held-out event populations and score scales shifted strongly beyond the preceding training distribution.",
+    "Score forecasts are derived from phase heads rather than directly supervising total score and score differential.",
+    "The heterogeneous homoscedastic objective is not aligned with a single headline forecast metric."
+  ],
+  "run_objectives": [
+    {
+      "artifact": "artifacts/reference/2026-static-z-base",
+      "objective": "One-seed 2026 static-Z_base architecture reference with nested temporal weeks 6, 8, and 10.",
+      "outcome": "complete, non-promotable reference evidence",
+      "study_id": "2026-static-z-base"
+    },
+    {
+      "artifact": "artifacts/smoke/2026-static-reliability",
+      "objective": "Two-epoch end-to-end reliability smoke.",
+      "outcome": "training completed; final Parquet write rejected mixed integer/string seed identifiers",
+      "study_id": "2026-static-reliability"
+    },
+    {
+      "artifact": "artifacts/smoke/2026-static-reliability-smoke",
+      "objective": "Corrected two-epoch artifact, Streamlit, and TensorBoard acceptance smoke.",
+      "outcome": "complete smoke; one seed and week 6 only; no architecture conclusion",
+      "study_id": "2026-static-reliability-smoke"
+    },
+    {
+      "artifact": "artifacts/reference/2026-static-reliability-full",
+      "objective": "Select one clipping threshold and one common fixed duration before a three-seed weeks 6/8/10 test matrix.",
+      "outcome": "clip 5 selected; no common epoch 15-40 passed; stopped before test training",
+      "study_id": "2026-static-reliability-full"
+    }
+  ],
+  "title": "2026 Static Training Postmortem",
+  "unsupported_conclusions": [
+    "The parameter count is too small.",
+    "Attention or interaction architecture is intrinsically defective.",
+    "The pre-2026 prior caused the score bias.",
+    "Teammate or opponent interactions help out-of-time forecasting."
+  ]
+}
