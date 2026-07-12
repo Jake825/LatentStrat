@@ -39,6 +39,20 @@ The evaluator uses exact `match_key` intersections and reports unmatched coverag
 
 Paired uncertainty uses an event-cluster bootstrap. Deltas are LatentStrat minus Statbotics; negative deltas mean lower loss. The interval reflects variation across the events represented in the artifact, not uncertainty about all possible FRC seasons.
 
+The 2026 static reference extends this contract to additive, teammate-set, full-match, rolling
+pRidge, mean, ridge, and optional Statbotics rows. Its long-form metric table declares whether each metric
+is lower- or higher-is-better, preserves per-week and per-event evidence, and keeps official
+ranking/selection/playoff/award probes in `auxiliary_metrics.csv`. Interaction support is evaluated
+from event-cluster paired bootstrap probabilities by test week. A smoke or interrupted matrix is
+explicitly incomplete and cannot display an architectural conclusion.
+
+The follow-up static reliability contract treats weeks 6 and 8 as formal evidence and week 10 as
+a championship stress test. Raw probabilities are primary. Sequential calibration may use only
+earlier held-out predictions and is reported separately. Interaction deltas use a hierarchical
+bootstrap that resamples seeds and event clusters. Labels remain provisional until all three seeds
+and the metric-only Statbotics finalizer complete. See the
+[reliability-study contract](reference-2026-static-reliability.md).
+
 ## Manifest Contract
 
 New artifact directories write `manifest.json` containing:
@@ -77,4 +91,8 @@ baselines/v5.8-baseline.json
 artifacts/baselines/v5.8/
 ```
 
-The replay is reproducible historical development evidence, not unbiased promotion evidence: its fold checkpoints selected the best epoch using the same held-out weeks represented in the reported predictions. New Statbotics comparisons therefore write `promotion_eligible=false` until the nested temporal protocol in the [roadmap](roadmap.md) is implemented.
+The replay is reproducible historical development evidence, not unbiased promotion evidence: its
+fold checkpoints selected the best epoch using the same held-out weeks represented in the reported
+predictions. The static reference now implements the nested temporal protocol for its deliberately
+narrow 2026 path, but it still writes `promotion_eligible=false` because it is a one-season,
+one-seed reference. The historical V5.8 comparison remains non-promotion evidence.

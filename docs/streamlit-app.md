@@ -43,6 +43,20 @@ Do not use this configuration for public hosting. The app displays local paths, 
 - **Embeddings** provides post-training PCA and cosine-neighbor diagnostics for prior-team, season-team, or alliance-match breakdown spaces. Different bases cannot be compared as one coordinate system.
 - **Match** shows saved prediction artifacts and optional CPU checkpoint inference for an existing match, including PMA pooling and slot-zero sensitivity diagnostics.
 
+For the 2026 static reference contract, Runs + Evaluation adds a manifest summary, visibly
+separates development-only initialization selection from test evidence, shows all architecture and
+control models with metric direction, and suppresses conclusions for incomplete matrices. Model
+reports schema-`7` static-state metadata and parameter utilization. Embeddings exposes only the
+fixed `Z_base`, PCA, and neighbors; it cannot display event trajectories. Match lets the reviewer
+choose architecture, initialization, fold, and known-as-of context from saved predictions.
+
+For the static reliability contract, the evaluation page separates week-4 development selection
+from the final matrix, filters primary scoreboard evidence to the seed ensemble and raw
+probability variant, and shows hierarchical seed/event intervals plus interaction classifications.
+It labels the external verdict `awaiting-statbotics` until a verified baseline is attached. Smoke,
+interrupted, and partial runs remain visibly incomplete; Model and Match include seed, evidence
+role, calibration provenance, and the recorded static architecture.
+
 ## Interpretation Boundaries
 
 - PCA, cosine neighbors, PMA pooling weights, and slot-zero results are diagnostics, not named robot traits or causal explanations.

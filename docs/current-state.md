@@ -14,6 +14,13 @@ organized for continued pretraining work.
   `baselines/v5.8-baseline.json`.
 - V6.1 season model: supervised Set Transformer with `Z_base + Z_event`, existing readout heads,
   nested forward outputs, and strict schema-`6` checkpoint compatibility.
+- 2026 static reference path: schema-`7` checkpoints with one 16D `Z_base`, three controlled match
+  architectures, nested temporal selection/refit, isolated TensorBoard, and Workbench review. It
+  is a research reference and does not replace the schema-`6` default.
+- Static reliability follow-up: the smoke path completed, but the first full week-4 development
+  grid rejected every common duration from epochs 15-40 after selecting clip `5`. No three-seed
+  test folds ran. The project is paused at the
+  [2026 static training postmortem](2026-static-training-postmortem.md).
 - CPU-first PyTorch runtime: shared seeded optimizer steps, accumulation, clipping, cosine or one-cycle scheduling, TensorBoard telemetry, and epoch-exact resume checkpoints across training workflows.
 - Match-breakdown V1: offline all-years 16D alliance-result artifact.
 - Match-breakdown V2: explicit structured-objective ablation. It is implemented but not promoted.
@@ -29,6 +36,7 @@ organized for continued pretraining work.
 | Match-breakdown artifacts | `artifacts/pretraining/match-breakdown/` |
 | Season artifacts | `artifacts/season/` |
 | Walk-forward artifacts | `artifacts/walk-forward/` |
+| 2026 static training postmortem | `artifacts/reference/2026-static-training-postmortem/` |
 | Experimental frozen targets | `artifacts/experimental/frozen-targets/` |
 | Archived local outputs | `artifacts/archive/` |
 
@@ -58,8 +66,16 @@ These values are development evidence rather than an unbiased promotion estimate
 ## Caveats
 
 - Calibration remains the main season-model weakness.
+- The first full static-reliability development grid selected clip `5` but rejected every common
+  duration from epochs 15-40: score-differential and probability metrics peaked at incompatible
+  times for the interaction models. No formal test-week folds were run from that rejected setup.
+- The completed static reference systematically underpredicted alliance scores in weeks 6, 8, and
+  10. The measured causes and remaining hypotheses are separated in the postmortem; this evidence
+  does not justify a larger model or a temporal-state architecture by itself.
 - The runtime overhaul changes optimizer trajectories; it is implemented and regression-tested, but empirical promotion still requires the documented multi-seed calibration and non-inferiority comparison.
-- Honest nested temporal evaluation remains the next training-protocol milestone; see the [Roadmap](roadmap.md).
+- Honest temporal evaluation is implemented for the static 2026 reference path. The reliability
+  follow-up stopped at its development gate, so multi-seed architecture evidence is still absent.
+  Later temporal-state architectures remain roadmap work.
 - Match-breakdown artifacts are offline representation artifacts, not leakage-safe walk-forward
   promotion evidence.
 - Match-breakdown runtime score attachment remains disabled.

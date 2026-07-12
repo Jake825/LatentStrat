@@ -55,6 +55,20 @@ latentstrat season validate `
 Walk-forward validation is the primary temporal evaluation path. It trains only on canonical weeks
 known before each held-out week and writes paired fold-match predictions for comparison.
 
+## Static 2026 Reference
+
+The static study is a separate schema-`7` path; it does not change the schema-`6` production
+default. It removes `Z_event`, compares additive, teammate-set, and full-match architectures, and
+uses nested selection/refit folds. TensorBoard records per-task train/validation loss and activity,
+score and probability metrics, ten-bin ECE, optimizer-group rates, clipping and runtime, parameter
+utilization, and bounded `Z_base`/shared-module histograms. See the
+[reference-study contract](reference-2026-static-study.md).
+
+The [static architecture reliability study](reference-2026-static-reliability.md) is a separate
+smoke-first command. It freezes optimization on development week 4, then uses a fixed three-seed
+weeks 6/8/10 matrix. Its TensorBoard root is `runs/reference-2026-static-reliability/`; a two-epoch
+timing preflight refuses the full grid when even a conservative estimate exceeds the CPU budget.
+
 ## Deferred Integrations
 
 The historical match-breakdown artifacts remain offline-only. Runtime score auxiliary attachment is

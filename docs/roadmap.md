@@ -20,6 +20,17 @@ These levels describe different time scales and evidence boundaries. They do not
 
 ## Milestones
 
+The implemented first reference milestone is documented in the
+[2026 static robot-state reference study](reference-2026-static-study.md). Its smoke mode validates
+the code and dashboards; only a complete weeks 6/8/10 matrix can classify interaction evidence,
+and even that one-season, one-seed study remains non-promotion evidence. The milestones below are
+the roadmap after that fixed reference point.
+
+The immediate follow-up is the
+[2026 static architecture reliability study](reference-2026-static-reliability.md). It freezes
+optimization on development week 4, repeats the architecture comparison across three seeds, and
+uses hierarchical seed/event uncertainty before any event-state architecture is introduced.
+
 ### 1. Honest Temporal Evaluation
 
 Replace validation-selected walk-forward reporting with nested temporal evaluation. Tune only on past weeks, refit on all information available before the test snapshot, and evaluate the next week once after training. Keep normalization, calibration, sidecars, and all learned preprocessing inside the same temporal boundary.
