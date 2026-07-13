@@ -20,6 +20,10 @@ related:
   four fixed objective arms, Additive and Full-match controls, three-seed development selection,
   exact refit continuation, hierarchical interaction-rescue comparisons, isolated TensorBoard,
   and an authoritative generated-report contract. Formal results are not yet claimed.
+- Completed the corrected 16-leaf smoke and browser-reviewed TensorBoard acceptance. The full
+  eight-cell timing pilot then rejected formal training at `1,810.1` projected minutes with margin
+  against the fixed 720-minute budget, so no Championship predictions or architecture claim were
+  produced.
 
 - Added the fixed-100 2026 static Championship diagnostic with exact match-key splits, DQ and tie
   masking, fixed score/win/embedding losses, six controlled model configurations, transferred

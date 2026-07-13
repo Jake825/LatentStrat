@@ -1,0 +1,64 @@
+{
+  "budget_seconds": 43200.0,
+  "leaves": [
+    {
+      "architecture": "additive",
+      "arm": "primary-only",
+      "fixed_leaf_seconds": 50.381679499929305,
+      "mean_epoch_seconds": 12.80540555002517,
+      "total_leaf_seconds": 75.99249059997965
+    },
+    {
+      "architecture": "full-match",
+      "arm": "primary-only",
+      "fixed_leaf_seconds": 47.23550810001325,
+      "mean_epoch_seconds": 18.04592924998724,
+      "total_leaf_seconds": 83.32736659998773
+    },
+    {
+      "architecture": "additive",
+      "arm": "dense-breakdown",
+      "fixed_leaf_seconds": 44.9389736999874,
+      "mean_epoch_seconds": 9.47167995001655,
+      "total_leaf_seconds": 63.8823336000205
+    },
+    {
+      "architecture": "full-match",
+      "arm": "dense-breakdown",
+      "fixed_leaf_seconds": 52.90878070000326,
+      "mean_epoch_seconds": 17.579077100002905,
+      "total_leaf_seconds": 88.06693490000907
+    },
+    {
+      "architecture": "additive",
+      "arm": "physics-consistent",
+      "fixed_leaf_seconds": 28.763023799925577,
+      "mean_epoch_seconds": 8.340970700024627,
+      "total_leaf_seconds": 45.44496519997483
+    },
+    {
+      "architecture": "full-match",
+      "arm": "physics-consistent",
+      "fixed_leaf_seconds": 55.03071449993877,
+      "mean_epoch_seconds": 28.545679700007895,
+      "total_leaf_seconds": 112.12207389995456
+    },
+    {
+      "architecture": "additive",
+      "arm": "full-structured",
+      "fixed_leaf_seconds": 28.408532599976752,
+      "mean_epoch_seconds": 9.865913899993757,
+      "total_leaf_seconds": 48.140360399964266
+    },
+    {
+      "architecture": "full-match",
+      "arm": "full-structured",
+      "fixed_leaf_seconds": 61.30864709999878,
+      "mean_epoch_seconds": 34.972695750009734,
+      "total_leaf_seconds": 131.25403860001825
+    }
+  ],
+  "passes": false,
+  "projected_seconds": 90502.5194987614,
+  "projected_seconds_with_margin": 108603.02339851367
+}

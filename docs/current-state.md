@@ -27,11 +27,11 @@ organized for continued pretraining work.
   horizon. The remaining `-56.6`-point additive bias and early development optima make this
   non-promotable evidence. See the
   [authoritative report](2026-static-championship-core-report.md).
-- Physics-consistent multitask follow-up: implementation and smoke validation are in progress. It
-  keeps the same static Championship boundary and tests primary-only, dense atomic breakdown,
-  audited physics consistency, and corrected probe objectives across Additive and Full-match with
-  three seeds. No scientific result should be inferred until the generated
-  `docs/2026-static-multitask-physics-report.md` exists.
+- Physics-consistent multitask follow-up: the corrected smoke completed, including nonzero ranking,
+  playoff, and award probes and the isolated TensorBoard contract. The formal eight-cell timing
+  pilot projected `1,810.1` minutes with its 20% margin, so the runner rejected the campaign before
+  all 24 development trajectories. No Championship predictions or scientific result exist. See the
+  [timing-gate report](2026-static-multitask-physics-timing-gate.md).
 - CPU-first PyTorch runtime: shared seeded optimizer steps, accumulation, clipping, cosine or one-cycle scheduling, TensorBoard telemetry, and epoch-exact resume checkpoints across training workflows.
 - Match-breakdown V1: offline all-years 16D alliance-result artifact.
 - Match-breakdown V2: explicit structured-objective ablation. It is implemented but not promoted.
@@ -92,6 +92,8 @@ These values are development evidence rather than an unbiased promotion estimate
   3-7 and deteriorated substantially by epoch 100 while training loss kept falling.
 - The physics-consistent multitask study is diagnostic, not promotion evidence. It reuses the same
   Championship divisions and cannot establish whether temporal state is necessary or sufficient.
+  Its formal matrix has not run because the conservative local CPU estimate exceeded the fixed
+  12-hour budget.
 - The runtime overhaul changes optimizer trajectories; it is implemented and regression-tested, but empirical promotion still requires the documented multi-seed calibration and non-inferiority comparison.
 - Honest temporal evaluation is implemented for the static 2026 reference path. The reliability
   follow-up stopped at its development gate, and the Championship diagnostic used one seed and a

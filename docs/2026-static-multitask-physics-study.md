@@ -1,5 +1,7 @@
 # 2026 Physics-Consistent Multitask Study
 
+> Status: the corrected smoke passed, but the complete eight-cell timing pilot rejected formal training at `1,810.1` projected minutes with margin versus a 720-minute budget. See the [timing-gate report](2026-static-multitask-physics-timing-gate.md). No scientific result is available.
+
 This non-promotable diagnostic asks:
 
 > Does dense breakdown supervision, particularly when coupled through an exact differentiable 2026 score composer, improve the out-of-time Championship generalization of Full-match relative to Additive without harming official-score accuracy, relative-strength estimation, or winner probabilities?

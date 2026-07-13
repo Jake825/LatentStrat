@@ -22,6 +22,8 @@ controlled score-supervision and interaction experiment; its completed
 The follow-up [physics-consistent multitask study](2026-static-multitask-physics-study.md) tests
 whether dense atomic targets, audited scoring consistency, and corrected probes rescue Full-match
 generalization relative to Additive under the same static-state evidence boundary.
+Its [timing-gate report](2026-static-multitask-physics-timing-gate.md) records why the formal matrix
+did not start under the fixed 12-hour CPU budget.
 
 ## Active References
 
@@ -36,6 +38,7 @@ generalization relative to Additive under the same static-state evidence boundar
 - [2026 fixed-100 Championship diagnostic](2026-static-championship-core-study.md)
 - [2026 fixed-100 Championship diagnostic report](2026-static-championship-core-report.md)
 - [2026 physics-consistent multitask study](2026-static-multitask-physics-study.md)
+- [2026 physics-consistent multitask timing gate](2026-static-multitask-physics-timing-gate.md)
 - [Changelog](changelog.md)
 - [Student primer](student-primer.md)
 - [Scouting data layer](scouting-data-layer.md)

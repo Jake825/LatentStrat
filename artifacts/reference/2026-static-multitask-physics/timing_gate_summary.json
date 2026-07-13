@@ -1,0 +1,16 @@
+{
+  "budget_minutes": 720.0,
+  "championship_predictions_generated": false,
+  "development_leaves_started": 0,
+  "formal_campaign_started": false,
+  "gate_classification": "rejected-before-formal-training",
+  "pilot_cells_completed": 8,
+  "pilot_epochs_per_cell": 2,
+  "projected_minutes": 1508.3753249793566,
+  "projected_minutes_with_margin": 1810.0503899752278,
+  "safety_margin": 0.2,
+  "scientific_report_available": false,
+  "tensorboard_smoke_accepted": true,
+  "timing_pilot_sha256": "49ccab62b92307e9015c3d3a3ba6842330748049e64649b8cfd63f1b011cdd2d",
+  "workflow": "season.2026-static-multitask-physics"
+}

@@ -1,0 +1,32 @@
+{
+  "artifacts": {
+    "docs/2026-static-multitask-physics-timing-gate.md": {
+      "sha256": "2df428fa2212f9ca1bff32712153603359eab3419b77748a8970a5f4f16475b3"
+    },
+    "pretraining_contract.json": {
+      "sha256": "bafcb7cff960ac7f78de30caa94c18ebfd42ee08d250693d13fecb650d2e4c30"
+    },
+    "pretraining_manifest.json": {
+      "sha256": "aa24589461c07e17758844ae8be3d2096c2cfdb54c624c1980cdf9b3af23b1ae"
+    },
+    "thread_pilot.csv": {
+      "sha256": "7e492b1c4126a1681a81494ad68861ec33a0ef2eafb9135d122287b6386a6d4e"
+    },
+    "timing_gate_summary.json": {
+      "sha256": "70d81f8a6e68200f4a3ced5241374ea9b84ac166e134609b809ab4db9b3e4394"
+    },
+    "timing_pilot.json": {
+      "sha256": "49ccab62b92307e9015c3d3a3ba6842330748049e64649b8cfd63f1b011cdd2d"
+    }
+  },
+  "budget_minutes": 720.0,
+  "championship_predictions_generated": false,
+  "formal_campaign_started": false,
+  "gate_classification": "rejected-before-formal-training",
+  "implementation_commit": "d11962e",
+  "pretraining_boundary_commit": "0780450",
+  "projected_minutes_with_margin": 1810.0503899752278,
+  "promotion_eligible": false,
+  "report_question_answered": false,
+  "workflow": "season.2026-static-multitask-physics"
+}

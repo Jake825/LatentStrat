@@ -1,0 +1,3 @@
+threads,architecture,arm,epochs,total_leaf_seconds,mean_epoch_seconds,epoch_1_seconds,epoch_2_seconds
+4,full-match,full-structured,2,98.25536790001206,23.10121729999082,28.401460099965334,17.80097450001631
+8,full-match,full-structured,2,86.79593390005175,19.553290000010747,20.15101329999743,18.955566700024065
