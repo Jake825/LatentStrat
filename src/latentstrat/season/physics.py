@@ -11,7 +11,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import torch
-from sklearn.linear_model import LogisticRegression
 from torch import Tensor
 
 HUB_PERIODS = ("auto", "transition", "shift1", "shift2", "shift3", "shift4", "endgame")
@@ -257,8 +256,14 @@ def compose_predicted_scores(
     )
 
 
-def fit_positive_score_logit_scale(table: pd.DataFrame) -> dict[str, float | int]:
-    """Fit a positive zero-intercept score-difference winner scale."""
+def fit_positive_score_logit_scale(table: pd.DataFrame) -> dict[str, float | int | str]:
+    """Fit a finite positive zero-intercept score-difference winner scale.
+
+    Official winner labels are perfectly separated by the sign of official score
+    differential. A raw logistic maximum-likelihood slope therefore diverges. Five-percent
+    label smoothing is used only for this consistency-scale fit; the supervised winner BCE
+    remains unsmoothed.
+    """
 
     red = pd.to_numeric(table["red_total_score"], errors="coerce").to_numpy(float)
     blue = pd.to_numeric(table["blue_total_score"], errors="coerce").to_numpy(float)
@@ -268,13 +273,32 @@ def fit_positive_score_logit_scale(table: pd.DataFrame) -> dict[str, float | int
     labels = outcome[valid].astype(int)
     if len(labels) < 2 or len(np.unique(labels)) != 2:
         raise ValueError("Score-logit scale requires both winner classes.")
-    estimator = LogisticRegression(C=1e6, fit_intercept=False, solver="lbfgs", max_iter=10_000)
-    estimator.fit(difference, labels)
-    alpha = float(estimator.coef_[0, 0])
+    label_smoothing = 0.05
+    smoothed = labels * (1 - 2 * label_smoothing) + label_smoothing
+    values = difference[:, 0]
+    alpha = 0.01
+    for _ in range(100):
+        logits = np.clip(alpha * values, -40.0, 40.0)
+        probabilities = 1.0 / (1.0 + np.exp(-logits))
+        gradient = float(np.mean((probabilities - smoothed) * values))
+        hessian = float(np.mean(probabilities * (1 - probabilities) * values**2))
+        if not math.isfinite(hessian) or hessian <= 1e-12:
+            raise ValueError("Score-logit scale fit has invalid curvature.")
+        updated = max(alpha - gradient / hessian, 1e-8)
+        if abs(updated - alpha) <= 1e-12:
+            alpha = updated
+            break
+        alpha = updated
     if not math.isfinite(alpha) or alpha <= 0:
         raise ValueError(f"Resolved score-logit scale is not positive: {alpha}")
     logits = alpha * difference[:, 0]
     sigma = float(np.std(logits))
     if not math.isfinite(sigma) or sigma <= 0:
         raise ValueError("Resolved score-logit standard deviation is invalid.")
-    return {"alpha": alpha, "sigma_logit": sigma, "row_count": int(len(labels))}
+    return {
+        "alpha": alpha,
+        "sigma_logit": sigma,
+        "row_count": int(len(labels)),
+        "fit_method": "zero-intercept-logistic-newton",
+        "label_smoothing": label_smoothing,
+    }

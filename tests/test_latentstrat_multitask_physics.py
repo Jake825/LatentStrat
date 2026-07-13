@@ -18,6 +18,7 @@ from latentstrat.season.physics import (
     HUB_PERIODS,
     build_physics_target_table,
     compose_predicted_scores,
+    fit_positive_score_logit_scale,
     hard_composed_scores,
     validate_hard_composer,
 )
@@ -209,6 +210,20 @@ def test_award_candidates_use_observed_winners_and_explicit_event_negatives():
     candidates = build_award_candidates(features, rankings, {"2026test"})
     assert candidates["award_auto"].tolist() == [1.0, 0.0, 0.0]
     assert candidates[["award_design", "award_control", "award_excellence"]].isna().all().all()
+
+
+def test_score_logit_scale_is_finite_for_deterministic_winner_labels():
+    table = pd.DataFrame(
+        {
+            "red_total_score": [100, 110, 120, 90, 80, 70],
+            "blue_total_score": [90, 80, 100, 100, 110, 120],
+            "red_win": [1, 1, 1, 0, 0, 0],
+        }
+    )
+    fit = fit_positive_score_logit_scale(table)
+    assert 0 < fit["alpha"] < 1
+    assert fit["sigma_logit"] > 0
+    assert fit["label_smoothing"] == pytest.approx(0.05)
 
 
 @pytest.mark.skipif(

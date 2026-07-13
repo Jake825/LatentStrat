@@ -25,6 +25,8 @@ The cached 2026 breakdown corpus provides seven hub-period counts, per-team auto
 
 The model predicts atomic nonnegative counts with `softplus`, categorical tower distributions, a direct official score, and an anti-symmetric winner logit. Redundant phase and total fields are not separate targets. The composed score is not optimized against the official score; atomic labels ground the breakdown path, while a bidirectional Smooth L1 consistency term couples it to the directly supervised score path. No consistency term uses `detach` or stop-gradient.
 
+The positive zero-intercept score-to-winner scale is fit on clean development-training outcomes with 5% label smoothing. Smoothing is confined to this scale fit because official winner labels are perfectly separated by the sign of official score differential; without it, the logistic slope has no finite maximum-likelihood solution. The authoritative winner target and winner BCE are not smoothed.
+
 All loss weights are fixed. DQ matches contribute no supervised or consistency loss and are excluded from primary metrics. Ties remain eligible for score and breakdown losses but not winner losses. All auxiliary outcomes are split-local labels, never predictive inputs.
 
 ## Command
