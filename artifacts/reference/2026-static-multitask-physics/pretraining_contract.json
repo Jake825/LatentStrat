@@ -1,0 +1,67 @@
+{
+  "architectures": [
+    "additive",
+    "full-match"
+  ],
+  "arms": [
+    "primary-only",
+    "dense-breakdown",
+    "physics-consistent",
+    "full-structured"
+  ],
+  "award_candidates_sha256": "86b75d0c22819e5d1c77bb1bad4ce5f4a232dffe6b5db0d6a6bf922938e0fab1",
+  "contract_state": "prepared-before-training",
+  "development_epochs": 100,
+  "git_clean_at_launch": true,
+  "git_commit": "d11962e9f251582d173f79ec86d6314c139b2cdc",
+  "match_key_hashes": {
+    "championship_test": "ef38f7b6a3f970230debb0009c3188aeec656a0f00d44b65986a5b3817f37337",
+    "development_holdout": "38e6c93404c1bfd552b05dd6d2b6a85d7a501435390f83f80fa70c5966890bec",
+    "development_train": "5ca014e7e1c4dabf89f7b24bc45713964226c979dced4a1e68c54674c2985110",
+    "excluded_einstein": "cc90750329aa03cd60c27d428614364fbc958242e20cb09d027a6e2ae3e044a6",
+    "excluded_invalid": "f3459bd881d89c9ee9c1b52380ad4c8363f06ad1816bcf888ec38c32ace0b9c4",
+    "final_train": "5a9fa566d783654a22105c4866b76e85a2e8e39a70b2f316a07d8e32428f926a"
+  },
+  "physics_audit": {
+    "adjustment_without_dq": 0,
+    "alliance_rows": 36328,
+    "match_rows": 18164,
+    "max_absolute_error": 0.0,
+    "nonzero_adjustment_alliances": 41
+  },
+  "physics_targets_sha256": "6a6a61cbb4f32eb12feb39a9aa463ee2a9d3c2d63ff66e1abe60070db7f40548",
+  "promotion_eligible": false,
+  "report_question": "Does dense breakdown supervision, particularly when coupled through an exact differentiable 2026 score composer, improve the out-of-time Championship generalization of Full-match relative to Additive without harming official-score accuracy, relative-strength estimation, or winner probabilities?",
+  "score_logit": {
+    "alpha": 0.026856807842560174,
+    "fit_method": "zero-intercept-logistic-newton",
+    "label_smoothing": 0.05,
+    "row_count": 14986,
+    "sigma_logit": 3.8895276527525735
+  },
+  "seeds": [
+    2026,
+    2027,
+    2028
+  ],
+  "source_hashes": {
+    "corpus": "736761289158f95a25f5e3e14dd46a9a6b52a6f5dee892eab96ec6eb6a4e8a1c",
+    "events": "debe4a9ef20863944ac26c1dd38efb238b3fb0260601395a5132336d08668b63",
+    "features": "00908ea599ad4b9d018c4d65ab357ebca4cb84bce676ec5236e316fe9348849d",
+    "playoffs": "d2302f4e99644dc26d56a26bb2893605afb933edb3a58fbdcba190c172986b7d",
+    "prior": "e0c729f3cb2bfd1bb740f53188aaaeffb3e8ffecff556fcb56dc87c67a85aa6f",
+    "rankings": "95489fbbcdf1eac5e1981c8bbb2c972b50272cf8bdf08aedbbce02127d7e5e76"
+  },
+  "split_counts": {
+    "championship_test": 1119,
+    "development_holdout": 1642,
+    "development_train": 15373,
+    "excluded_dq": 367,
+    "excluded_einstein": 16,
+    "excluded_invalid": 31,
+    "final_train": 17029
+  },
+  "split_manifest_sha256": "a01afb54dc358bb63a0f2b3ebf5f6da749cd0ffb05722862ef22a3ef88596771",
+  "tensorboard_study_id": "20260713-053606-99d471cb55",
+  "workflow": "season.2026-static-multitask-physics"
+}
