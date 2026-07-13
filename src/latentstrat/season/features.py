@@ -519,7 +519,7 @@ def index_sidecar_tables(
         if out.empty:
             indexed[name] = out
             continue
-        if name == "rankings" and "team_key" in out.columns:
+        if name in {"rankings", "award_candidates"} and "team_key" in out.columns:
             out["team_base_idx"] = [
                 _base_idx_for_key(str(key), team_index_map) for key in out["team_key"]
             ]

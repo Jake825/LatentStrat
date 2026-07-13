@@ -24,6 +24,7 @@ latentstrat season validate
 latentstrat season validate-reference-2026
 latentstrat season run-static-reliability-study
 latentstrat season run-static-championship-diagnostic
+latentstrat season run-static-multitask-study
 ```
 
 `season build-features` writes reusable Parquet. `season train` writes a strict schema-`6`
@@ -48,6 +49,13 @@ It defaults to a two-epoch smoke, freezes exact match-key splits, masks DQs and 
 compares phase-derived with direct official-total supervision across additive, teammate-set, and
 full-match architectures. Formal execution requires exactly 100 epochs, a clean Git commit, and a
 passing 360-minute timing gate. See the [study contract](2026-static-championship-core-study.md).
+
+`season run-static-multitask-study` runs the four-arm physics-consistent follow-up across Additive
+and Full-match. It defaults to a one-seed, two-epoch smoke. `--prepare-only --full-study` writes the
+hashed physics targets, exact split, corrected award candidates, and pre-training contract without
+training. Formal execution requires `--full-study`, a clean commit, and a passing 720-minute timing
+gate; `--resume` permits only exact contract-preserving continuation. See the
+[multitask study contract](2026-static-multitask-physics-study.md).
 
 The old `full-season-offline` alias is a tombstone. Use `season build-features` followed by
 `season train`.

@@ -35,6 +35,7 @@ from latentstrat.season.evaluate import evaluate_model
 from latentstrat.season.metrics import write_prediction_evaluation
 from latentstrat.season.statbotics_baseline import build_statbotics_prediction_artifact
 from latentstrat.season.championship_study import run_championship_study
+from latentstrat.season.multitask_study import run_multitask_study
 from latentstrat.season.reference_study import run_reference_study
 from latentstrat.season.reliability_study import (
     finalize_reliability_statbotics,
@@ -905,6 +906,51 @@ def run_static_championship_diagnostic_command(
         typer.echo(f"TensorBoard: tensorboard --logdir={tensorboard_logdir / study_id}")
 
 
+def run_static_multitask_study_command(
+    study_dir: Annotated[
+        Path, typer.Option("--study-dir", help="Self-contained study artifact directory.")
+    ] = Path("artifacts/reference/2026-static-multitask-physics"),
+    tensorboard_dir: Annotated[
+        Path, typer.Option("--tensorboard-dir", help="Isolated TensorBoard root.")
+    ] = Path("runs/2026-static-multitask-physics"),
+    max_wall_minutes: Annotated[float, typer.Option("--max-wall-minutes", min=1)] = 720.0,
+    bootstrap_resamples: Annotated[int, typer.Option("--bootstrap-resamples", min=1)] = 5_000,
+    tensorboard: Annotated[bool, typer.Option("--tensorboard/--no-tensorboard")] = True,
+    smoke: Annotated[
+        bool,
+        typer.Option(
+            "--smoke/--full-study",
+            help="Run all eight arm/architecture cells for two epochs with one seed.",
+        ),
+    ] = True,
+    resume: Annotated[
+        bool, typer.Option("--resume", help="Resume only from exact existing leaf contracts.")
+    ] = False,
+    prepare_only: Annotated[
+        bool,
+        typer.Option(
+            "--prepare-only",
+            help="Freeze data sidecars and the pre-training contract without training.",
+        ),
+    ] = False,
+) -> None:
+    """Run the 2026 physics-consistent static multitask study."""
+
+    result = run_multitask_study(
+        output_dir=study_dir,
+        tensorboard_root=tensorboard_dir if tensorboard else None,
+        max_wall_minutes=max_wall_minutes,
+        bootstrap_resamples=bootstrap_resamples,
+        smoke=smoke,
+        resume=resume,
+        prepare_only=prepare_only,
+    )
+    typer.echo(f"Static multitask study complete: {result}")
+    if tensorboard:
+        study_id = (result / "tensorboard_study_id.txt").read_text(encoding="utf-8").strip()
+        typer.echo(f"TensorBoard: tensorboard --logdir={tensorboard_dir / study_id}")
+
+
 def finalize_static_reliability_command(
     study: Annotated[Path, typer.Option("--study", help="Completed reliability-study directory.")],
     statbotics: Annotated[
@@ -1684,6 +1730,7 @@ season_app.command("validate")(validate_walk_forward)
 season_app.command("validate-reference-2026")(validate_reference_2026_command)
 season_app.command("run-static-reliability-study")(run_static_reliability_study_command)
 season_app.command("run-static-championship-diagnostic")(run_static_championship_diagnostic_command)
+season_app.command("run-static-multitask-study")(run_static_multitask_study_command)
 season_app.command("build-statbotics-baseline")(build_statbotics_baseline_command)
 artifact_app.command("baseline-manifest")(write_baseline_manifest_command)
 artifact_app.command("compare-predictions")(compare_world_model)

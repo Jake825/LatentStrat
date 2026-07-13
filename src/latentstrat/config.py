@@ -27,10 +27,22 @@ class LatentStratOptions(BaseModel):
     state_model: Literal["base-plus-event", "static-z-base"] = "base-plus-event"
     match_architecture: Literal["additive", "teammate-set", "full-match"] = "full-match"
     core_objective: bool = False
+    study_arm: Literal[
+        "none", "primary-only", "dense-breakdown", "physics-consistent", "full-structured"
+    ] = "none"
     score_target_mode: Literal["legacy", "phase-core", "official-total-core"] = "legacy"
     score_loss_weight: float = 1.0
     win_loss_weight: float = 1.0
     embedding_loss_weight: float = 1.0
+    breakdown_loss_weight: float = 0.5
+    winner_primary_loss_weight: float = 0.25
+    score_consistency_loss_weight: float = 0.10
+    score_ordering_loss_weight: float = 0.10
+    winner_consistency_loss_weight: float = 0.05
+    competition_probe_loss_weight: float = 0.10
+    award_probe_loss_weight: float = 0.10
+    physics_score_logit_alpha: float = 1.0
+    physics_score_logit_sigma: float = 1.0
     log_optimizer_steps: bool = True
     attention_heads: int = 1
     attention_dropout: float = 0.0

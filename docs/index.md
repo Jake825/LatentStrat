@@ -19,6 +19,9 @@ reference, smoke runs, rejected reliability grid, score-bias analysis, and clean
 The [fixed-100 Championship diagnostic](2026-static-championship-core-study.md) defines the
 controlled score-supervision and interaction experiment; its completed
 [authoritative report](2026-static-championship-core-report.md) records the result.
+The follow-up [physics-consistent multitask study](2026-static-multitask-physics-study.md) tests
+whether dense atomic targets, audited scoring consistency, and corrected probes rescue Full-match
+generalization relative to Additive under the same static-state evidence boundary.
 
 ## Active References
 
@@ -32,6 +35,7 @@ controlled score-supervision and interaction experiment; its completed
 - [2026 static training postmortem](2026-static-training-postmortem.md)
 - [2026 fixed-100 Championship diagnostic](2026-static-championship-core-study.md)
 - [2026 fixed-100 Championship diagnostic report](2026-static-championship-core-report.md)
+- [2026 physics-consistent multitask study](2026-static-multitask-physics-study.md)
 - [Changelog](changelog.md)
 - [Student primer](student-primer.md)
 - [Scouting data layer](scouting-data-layer.md)

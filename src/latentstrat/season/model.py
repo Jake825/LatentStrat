@@ -265,6 +265,17 @@ class JudgesRoomHead(nn.Module):
         return self.linear(slot_context)
 
 
+class CategoricalStatusHead(nn.Module):
+    """Per-slot categorical status head used by the audited physics study."""
+
+    def __init__(self, latent_dim: int, num_classes: int) -> None:
+        super().__init__()
+        self.linear = nn.Linear(latent_dim, num_classes)
+
+    def forward(self, slot_context: Tensor) -> Tensor:
+        return self.linear(slot_context)
+
+
 class TeamValueHead(nn.Module):
     def __init__(self, latent_dim: int) -> None:
         super().__init__()
@@ -378,6 +389,13 @@ class SetTransformerModel(nn.Module):
         self.num_special_targets = 2 * len(opts.special_binary_targets)
         self.world_model_opts = world_model_opts or WorldModelOptions()
         self.world_model_opts.active_spaces()
+        physics_study = opts.study_arm != "none"
+        dense_study = opts.study_arm in {
+            "dense-breakdown",
+            "physics-consistent",
+            "full-structured",
+        }
+        full_structured = opts.study_arm == "full-structured"
 
         self.Z_base = nn.Embedding(max(num_teams, 1), latent_dim)
         if opts.state_model == "base-plus-event":
@@ -403,17 +421,19 @@ class SetTransformerModel(nn.Module):
 
         self.cont_head = nn.Linear(latent_dim, max(num_cont_targets // 2, 1))
         self.atomic_head = (
-            None
-            if opts.core_objective
-            else nn.Linear(latent_dim, max(len(opts.atomic_count_targets), 1))
+            nn.Linear(latent_dim, max(len(opts.atomic_count_targets), 1))
+            if (not opts.core_objective or dense_study)
+            else None
         )
         self.foul_head = (
-            None if opts.core_objective else nn.Linear(latent_dim, max(len(opts.foul_targets), 1))
+            nn.Linear(latent_dim, max(len(opts.foul_targets), 1))
+            if (not opts.core_objective or dense_study)
+            else None
         )
         self.bonus_head = (
-            None
-            if opts.core_objective
-            else nn.Linear(latent_dim, max(len(opts.bonus_binary_targets), 1))
+            nn.Linear(latent_dim, max(len(opts.bonus_binary_targets), 1))
+            if (not opts.core_objective or dense_study)
+            else None
         )
         self.special_head = (
             None
@@ -425,18 +445,30 @@ class SetTransformerModel(nn.Module):
             if opts.match_architecture == "additive"
             else SiameseWinHead(latent_dim)
         )
-        self.endgame_head = (
-            None
-            if opts.core_objective
-            else OrdinalEndgameHead(latent_dim, self.num_endgame_classes)
-        )
-        if opts.state_model == "static-z-base" and not opts.core_objective:
-            self.auto_head = OrdinalEndgameHead(latent_dim, len(opts.auto_class_order))
+        self.endgame_head = None
+        if not opts.core_objective or dense_study:
+            self.endgame_head = (
+                CategoricalStatusHead(latent_dim, self.num_endgame_classes)
+                if physics_study
+                else OrdinalEndgameHead(latent_dim, self.num_endgame_classes)
+            )
+        if opts.state_model == "static-z-base" and (not opts.core_objective or dense_study):
+            self.auto_head = (
+                CategoricalStatusHead(latent_dim, len(opts.auto_class_order))
+                if physics_study
+                else OrdinalEndgameHead(latent_dim, len(opts.auto_class_order))
+            )
         self.award_head = (
-            None if opts.core_objective else JudgesRoomHead(latent_dim, self.num_awards)
+            JudgesRoomHead(latent_dim, self.num_awards)
+            if (not opts.core_objective or full_structured)
+            else None
         )
-        self.team_value_head = None if opts.core_objective else TeamValueHead(latent_dim)
-        self.alliance_value_head = None if opts.core_objective else AllianceValueHead(latent_dim)
+        self.team_value_head = (
+            TeamValueHead(latent_dim) if (not opts.core_objective or full_structured) else None
+        )
+        self.alliance_value_head = (
+            AllianceValueHead(latent_dim) if (not opts.core_objective or full_structured) else None
+        )
         if opts.state_model == "base-plus-event":
             self.delta_integration_gate = DeltaIntegrationGate(latent_dim)
         self.award_prototype_predictor = (
@@ -472,10 +504,40 @@ class SetTransformerModel(nn.Module):
         ]
         if opts.state_model == "static-z-base":
             task_names.insert(3, "auto")
-        self.loss_balancer = (
-            FixedTaskBalancer({"continuous": opts.score_loss_weight, "win": opts.win_loss_weight})
-            if opts.core_objective
-            else HomoscedasticTaskBalancer(tuple(task_names))
+        if physics_study:
+            dense_family_weight = opts.breakdown_loss_weight / 5.0
+            weights = {
+                "continuous": opts.score_loss_weight,
+                "win": opts.winner_primary_loss_weight,
+                "atomic": dense_family_weight,
+                "foul": dense_family_weight,
+                "bonus": dense_family_weight,
+                "auto": dense_family_weight,
+                "endgame": dense_family_weight,
+                "rank": opts.competition_probe_loss_weight / 2.0,
+                "playoff": opts.competition_probe_loss_weight / 2.0,
+                "award_probe": opts.award_probe_loss_weight,
+            }
+            self.loss_balancer = FixedTaskBalancer(weights)
+        elif opts.core_objective:
+            self.loss_balancer = FixedTaskBalancer(
+                {"continuous": opts.score_loss_weight, "win": opts.win_loss_weight}
+            )
+        else:
+            self.loss_balancer = HomoscedasticTaskBalancer(tuple(task_names))
+
+        self.register_buffer("physics_cont_mu", torch.zeros(max(num_cont_targets, 1)))
+        self.register_buffer("physics_cont_sigma", torch.ones(max(num_cont_targets, 1)))
+        self.register_buffer("physics_atomic_mu", torch.zeros(self.num_atomic_targets))
+        self.register_buffer("physics_atomic_sigma", torch.ones(self.num_atomic_targets))
+        self.register_buffer("physics_foul_mu", torch.zeros(self.num_foul_targets))
+        self.register_buffer("physics_foul_sigma", torch.ones(self.num_foul_targets))
+        self.register_buffer("physics_score_sigma", torch.ones(()))
+        self.register_buffer(
+            "physics_score_logit_alpha", torch.tensor(float(opts.physics_score_logit_alpha))
+        )
+        self.register_buffer(
+            "physics_score_logit_sigma", torch.tensor(float(opts.physics_score_logit_sigma))
         )
 
     def balance_loss(self, task_name: str, loss: Tensor, active: bool) -> Tensor:
@@ -491,6 +553,11 @@ class SetTransformerModel(nn.Module):
 
     def team_value(self, team_base_idx: Tensor, team_event_idx: Tensor | None = None) -> Tensor:
         return self.team_value_head(self.team_latent(team_base_idx, team_event_idx))
+
+    def award_probe(self, team_base_idx: Tensor, team_event_idx: Tensor | None = None) -> Tensor:
+        if self.award_head is None:
+            raise RuntimeError("Award probe head is inactive.")
+        return self.award_head(self.team_latent(team_base_idx, team_event_idx))
 
     def predict_rank_embedding(
         self, team_base_idx: Tensor, team_event_idx: Tensor | None = None

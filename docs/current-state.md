@@ -27,6 +27,11 @@ organized for continued pretraining work.
   horizon. The remaining `-56.6`-point additive bias and early development optima make this
   non-promotable evidence. See the
   [authoritative report](2026-static-championship-core-report.md).
+- Physics-consistent multitask follow-up: implementation and smoke validation are in progress. It
+  keeps the same static Championship boundary and tests primary-only, dense atomic breakdown,
+  audited physics consistency, and corrected probe objectives across Additive and Full-match with
+  three seeds. No scientific result should be inferred until the generated
+  `docs/2026-static-multitask-physics-report.md` exists.
 - CPU-first PyTorch runtime: shared seeded optimizer steps, accumulation, clipping, cosine or one-cycle scheduling, TensorBoard telemetry, and epoch-exact resume checkpoints across training workflows.
 - Match-breakdown V1: offline all-years 16D alliance-result artifact.
 - Match-breakdown V2: explicit structured-objective ablation. It is implemented but not promoted.
@@ -44,6 +49,7 @@ organized for continued pretraining work.
 | Walk-forward artifacts | `artifacts/walk-forward/` |
 | 2026 static training postmortem | `artifacts/reference/2026-static-training-postmortem/` |
 | Fixed-100 Championship diagnostic | `artifacts/reference/2026-static-championship-core/` |
+| Physics-consistent multitask study | `artifacts/reference/2026-static-multitask-physics/` |
 | Experimental frozen targets | `artifacts/experimental/frozen-targets/` |
 | Archived local outputs | `artifacts/archive/` |
 
@@ -84,12 +90,14 @@ These values are development evidence rather than an unbiased promotion estimate
   over phase-core additive, but rolling pRidge remained slightly better on score, differential, and
   calibrated probability metrics. Interaction-model development metrics peaked around epochs
   3-7 and deteriorated substantially by epoch 100 while training loss kept falling.
+- The physics-consistent multitask study is diagnostic, not promotion evidence. It reuses the same
+  Championship divisions and cannot establish whether temporal state is necessary or sufficient.
 - The runtime overhaul changes optimizer trajectories; it is implemented and regression-tested, but empirical promotion still requires the documented multi-seed calibration and non-inferiority comparison.
 - Honest temporal evaluation is implemented for the static 2026 reference path. The reliability
   follow-up stopped at its development gate, and the Championship diagnostic used one seed and a
   reused holdout, so multi-seed promotion evidence is still absent. The next controlled experiment
-  should compare event or week context against the official-total additive static control without
-  changing the split, loss, or horizon.
+  first tests whether structured supervision rescues interaction generalization. A later controlled
+  study should compare event or week context against the retained static control.
 - Match-breakdown artifacts are offline representation artifacts, not leakage-safe walk-forward
   promotion evidence.
 - Match-breakdown runtime score attachment remains disabled.

@@ -16,6 +16,11 @@ related:
 
 ## Unreleased
 
+- Added the 2026 physics-consistent multitask study workflow with exact cached score composition,
+  four fixed objective arms, Additive and Full-match controls, three-seed development selection,
+  exact refit continuation, hierarchical interaction-rescue comparisons, isolated TensorBoard,
+  and an authoritative generated-report contract. Formal results are not yet claimed.
+
 - Added the fixed-100 2026 static Championship diagnostic with exact match-key splits, DQ and tie
   masking, fixed score/win/embedding losses, six controlled model configurations, transferred
   calibration, frozen controls, event bootstrap, leave-one-division-out sensitivity, and an

@@ -30,6 +30,12 @@ from latentstrat.season.data import (
     v57_continuous_target_names,
 )
 from latentstrat.season.model import SetTransformerModel, init_model, optimizer_parameter_groups
+from latentstrat.season.physics import (
+    compose_predicted_scores,
+    ordered_atomic_columns,
+    ordered_bonus_columns,
+    ordered_foul_columns,
+)
 from latentstrat.training_runtime import (
     OptimizationController,
     TrainingRuntimeConfig,
@@ -67,6 +73,12 @@ class LossMetrics:
     wm_award_loss: float = 0.0
     wm_rank_loss: float = 0.0
     wm_pick_loss: float = 0.0
+    score_consistency_loss: float = 0.0
+    score_ordering_loss: float = 0.0
+    winner_consistency_loss: float = 0.0
+    composed_score_rmse: float = 0.0
+    score_disagreement_mae: float = 0.0
+    winner_logit_disagreement_mae: float = 0.0
 
 
 @dataclass
@@ -103,6 +115,13 @@ TASK_NAMES = (
     "wm_award",
     "wm_rank",
     "wm_pick",
+    "score_consistency",
+    "score_ordering",
+    "winner_consistency",
+    "award_probe",
+    "composed_score_rmse",
+    "direct_composed_score_mae",
+    "winner_logit_disagreement_mae",
 )
 
 
@@ -180,8 +199,15 @@ class MatchTensorDataset(Dataset):
             table, [f"{mapping.target_name}_z" for mapping in opts.target_map]
         )
         bin_targets = target_matrix(table, list(opts.binary_targets))
-        v57_cont_columns = [f"{name}_z" for name in v57_continuous_target_names(opts)]
-        v57_bin_columns = v57_binary_target_names(opts)
+        if opts.study_arm != "none":
+            v57_cont_columns = [
+                *ordered_atomic_columns(standardized=True),
+                *ordered_foul_columns(standardized=True),
+            ]
+            v57_bin_columns = ordered_bonus_columns()
+        else:
+            v57_cont_columns = [f"{name}_z" for name in v57_continuous_target_names(opts)]
+            v57_bin_columns = v57_binary_target_names(opts)
         v57_cont_targets = (
             optional_target_matrix(table, v57_cont_columns)
             if any(column in table.columns for column in v57_cont_columns)
@@ -301,6 +327,48 @@ class RankPairDataset(Dataset):
             self.higher_event_idx[index],
             self.lower_event_idx[index],
         )
+
+
+class AwardCandidateDataset(Dataset):
+    """One explicit team-event candidate row per supported robot-award category."""
+
+    def __init__(self, team_idx: Tensor, event_idx: Tensor, targets: Tensor) -> None:
+        self.team_idx = team_idx
+        self.event_idx = event_idx
+        self.targets = targets
+
+    @classmethod
+    def from_table(cls, table: pd.DataFrame, categories: tuple[str, ...]) -> AwardCandidateDataset:
+        columns = [f"award_{category}" for category in categories]
+        if table is None or table.empty:
+            values = np.empty((0, len(columns)), dtype=np.float32)
+            teams = events = np.empty((0,), dtype=np.int64)
+        else:
+            missing = set(columns) - set(table)
+            if missing:
+                raise ValueError(
+                    "Award candidate sidecar is missing: " + ", ".join(sorted(missing))
+                )
+            values = (
+                table[columns]
+                .apply(pd.to_numeric, errors="coerce")
+                .to_numpy(dtype=np.float32, copy=True)
+            )
+            teams = table["team_base_idx"].to_numpy(dtype=np.int64, copy=True)
+            events = table.get("team_event_idx", pd.Series(0, index=table.index)).to_numpy(
+                dtype=np.int64, copy=True
+            )
+        return cls(
+            torch.as_tensor(teams, dtype=torch.long),
+            torch.as_tensor(events, dtype=torch.long),
+            torch.as_tensor(values, dtype=torch.float32),
+        )
+
+    def __len__(self) -> int:
+        return int(self.team_idx.shape[0])
+
+    def __getitem__(self, index: int) -> tuple[Tensor, ...]:
+        return self.team_idx[index], self.event_idx[index], self.targets[index]
 
 
 class AlliancePairDataset(Dataset):
@@ -721,6 +789,23 @@ def _masked_bce_with_logits(prediction: Tensor, target: Tensor) -> tuple[Tensor,
     return F.binary_cross_entropy_with_logits(prediction[valid], target[valid]), True
 
 
+def _masked_physical_mse(
+    raw_prediction: Tensor,
+    standardized_target: Tensor,
+    mu: Tensor,
+    sigma: Tensor,
+) -> tuple[Tensor, bool]:
+    """Compare nonnegative physical predictions using train-standardized residuals."""
+
+    valid = torch.isfinite(standardized_target)
+    if not torch.any(valid):
+        return raw_prediction.sum() * 0.0, False
+    physical_prediction = F.softplus(raw_prediction)
+    physical_target = standardized_target * sigma + mu
+    residual = (physical_prediction - physical_target) / sigma.clamp_min(1e-6)
+    return torch.mean(residual[valid] ** 2), True
+
+
 def _split_v57_targets(
     values: Tensor,
     opts: LatentStratOptions,
@@ -756,6 +841,8 @@ def model_loss(
     v57_bin_targets: Tensor | None = None,
     wm_award_targets: Tensor | None = None,
     auto_targets: Tensor | None = None,
+    official_total_targets: Tensor | None = None,
+    dq_mask: Tensor | None = None,
 ) -> tuple[Tensor, LossMetrics, object]:
     opts = opts or default_options()
     pred = (forward_model or model)(
@@ -795,16 +882,28 @@ def model_loss(
             bin_term = zero
 
     slot_missing = torch.cat([pred.masks.red_missing_mask, pred.masks.blue_missing_mask], dim=1)
+    clean_rows = (
+        torch.ones(slot_missing.shape[0], dtype=torch.bool, device=slot_missing.device)
+        if dq_mask is None
+        else ~dq_mask.bool()
+    )
     if endgame_targets is None or predictions["endgame"].numel() == 0:
         raw_endgame_loss = zero
         endgame_term = zero
     else:
-        cumulative = ordinal_targets_to_cumulative(endgame_targets, model.num_endgame_classes)
-        valid = ~slot_missing
+        valid = ~slot_missing & clean_rows.unsqueeze(1)
         if torch.any(valid):
-            raw_endgame_loss = F.binary_cross_entropy_with_logits(
-                predictions["endgame"][valid], cumulative[valid]
-            )
+            if opts.study_arm != "none":
+                raw_endgame_loss = F.cross_entropy(
+                    predictions["endgame"][valid], endgame_targets[valid]
+                )
+            else:
+                cumulative = ordinal_targets_to_cumulative(
+                    endgame_targets, model.num_endgame_classes
+                )
+                raw_endgame_loss = F.binary_cross_entropy_with_logits(
+                    predictions["endgame"][valid], cumulative[valid]
+                )
             endgame_term = model.balance_loss("endgame", raw_endgame_loss, True)
         else:
             raw_endgame_loss = zero
@@ -815,12 +914,15 @@ def model_loss(
         auto_term = zero
         auto_active = False
     else:
-        cumulative = ordinal_targets_to_cumulative(auto_targets, len(opts.auto_class_order))
-        valid = ~slot_missing
+        valid = ~slot_missing & clean_rows.unsqueeze(1)
         if torch.any(valid):
-            raw_auto_loss = F.binary_cross_entropy_with_logits(
-                predictions["auto"][valid], cumulative[valid]
-            )
+            if opts.study_arm != "none":
+                raw_auto_loss = F.cross_entropy(predictions["auto"][valid], auto_targets[valid])
+            else:
+                cumulative = ordinal_targets_to_cumulative(auto_targets, len(opts.auto_class_order))
+                raw_auto_loss = F.binary_cross_entropy_with_logits(
+                    predictions["auto"][valid], cumulative[valid]
+                )
             auto_term = model.balance_loss("auto", raw_auto_loss, True)
             auto_active = True
         else:
@@ -828,7 +930,7 @@ def model_loss(
             auto_term = zero
             auto_active = False
 
-    if award_targets is None or predictions["award"].numel() == 0:
+    if opts.study_arm != "none" or award_targets is None or predictions["award"].numel() == 0:
         raw_award_loss = zero
         award_term = zero
     else:
@@ -859,12 +961,28 @@ def model_loss(
         )
     )
     if atomic_targets.numel() and predictions["atomic"].numel():
-        raw_atomic_loss, atomic_active = _masked_mse(predictions["atomic"], atomic_targets)
+        if opts.study_arm != "none":
+            raw_atomic_loss, atomic_active = _masked_physical_mse(
+                predictions["atomic"],
+                atomic_targets,
+                model.physics_atomic_mu,
+                model.physics_atomic_sigma,
+            )
+        else:
+            raw_atomic_loss, atomic_active = _masked_mse(predictions["atomic"], atomic_targets)
     else:
         raw_atomic_loss, atomic_active = zero, False
     atomic_term = model.balance_loss("atomic", raw_atomic_loss, atomic_active)
     if foul_targets.numel() and predictions["foul"].numel():
-        raw_foul_loss, foul_active = _masked_mse(predictions["foul"], foul_targets)
+        if opts.study_arm != "none":
+            raw_foul_loss, foul_active = _masked_physical_mse(
+                predictions["foul"],
+                foul_targets,
+                model.physics_foul_mu,
+                model.physics_foul_sigma,
+            )
+        else:
+            raw_foul_loss, foul_active = _masked_mse(predictions["foul"], foul_targets)
     else:
         raw_foul_loss, foul_active = zero, False
     foul_term = model.balance_loss("foul", raw_foul_loss, foul_active)
@@ -905,6 +1023,92 @@ def model_loss(
         raw_wm_award_loss, wm_award_active = zero, False
     wm_award_term = model.balance_loss("wm_award", raw_wm_award_loss, wm_award_active)
 
+    raw_score_consistency = zero
+    raw_score_ordering = zero
+    raw_winner_consistency = zero
+    composed_score_rmse = math.nan
+    score_disagreement_mae = math.nan
+    winner_logit_disagreement_mae = math.nan
+    score_consistency_term = zero
+    score_ordering_term = zero
+    winner_consistency_term = zero
+    consistency_active = opts.study_arm in {"physics-consistent", "full-structured"}
+    if consistency_active:
+        composed_scores = compose_predicted_scores(
+            predictions["atomic"],
+            predictions["foul"],
+            predictions["auto"],
+            predictions["endgame"],
+        )
+        direct_scores = (
+            predictions["continuous"] * model.physics_cont_sigma[:2] + model.physics_cont_mu[:2]
+        )
+        clean = (
+            torch.ones(direct_scores.shape[0], dtype=torch.bool, device=direct_scores.device)
+            if dq_mask is None
+            else ~dq_mask.bool()
+        )
+        score_valid = (
+            clean.unsqueeze(1) & torch.isfinite(direct_scores) & torch.isfinite(composed_scores)
+        )
+        if torch.any(score_valid):
+            score_residual = (
+                direct_scores - composed_scores
+            ) / model.physics_score_sigma.clamp_min(1e-6)
+            raw_score_consistency = F.smooth_l1_loss(
+                score_residual[score_valid], torch.zeros_like(score_residual[score_valid]), beta=1.0
+            )
+            score_consistency_term = (
+                float(opts.score_consistency_loss_weight) * raw_score_consistency
+            )
+            score_disagreement_mae = float(
+                torch.mean(torch.abs(direct_scores[score_valid] - composed_scores[score_valid]))
+                .detach()
+                .cpu()
+            )
+        score_logit = model.physics_score_logit_alpha * (direct_scores[:, 0] - direct_scores[:, 1])
+        winner_logit = predictions["win"][:, 0]
+        winner_target = (
+            bin_targets[:, 0] if bin_targets.shape[1] else zero.new_full((len(clean),), math.nan)
+        )
+        winner_valid = clean & torch.isfinite(winner_target)
+        if torch.any(winner_valid):
+            raw_score_ordering = F.binary_cross_entropy_with_logits(
+                score_logit[winner_valid], winner_target[winner_valid]
+            )
+            raw_winner_consistency = F.smooth_l1_loss(
+                ((winner_logit - score_logit) / model.physics_score_logit_sigma.clamp_min(1e-6))[
+                    winner_valid
+                ],
+                torch.zeros_like(winner_logit[winner_valid]),
+                beta=1.0,
+            )
+            score_ordering_term = float(opts.score_ordering_loss_weight) * raw_score_ordering
+            winner_consistency_term = (
+                float(opts.winner_consistency_loss_weight) * raw_winner_consistency
+            )
+            winner_logit_disagreement_mae = float(
+                torch.mean(torch.abs(winner_logit[winner_valid] - score_logit[winner_valid]))
+                .detach()
+                .cpu()
+            )
+        if official_total_targets is not None:
+            official_valid = clean.unsqueeze(1) & torch.isfinite(official_total_targets)
+            if torch.any(official_valid):
+                composed_score_rmse = float(
+                    torch.sqrt(
+                        torch.mean(
+                            (
+                                composed_scores[official_valid]
+                                - official_total_targets[official_valid]
+                            )
+                            ** 2
+                        )
+                    )
+                    .detach()
+                    .cpu()
+                )
+
     emb_l2 = active_embedding_l2(
         model,
         red_team_idx,
@@ -928,6 +1132,9 @@ def model_loss(
         + bonus_term
         + special_term
         + wm_award_term
+        + score_consistency_term
+        + score_ordering_term
+        + winner_consistency_term
         + emb_l2
         + event_l2
     )
@@ -947,6 +1154,12 @@ def model_loss(
         special_loss=float(raw_special_loss.detach().cpu()),
         auto_loss=float(raw_auto_loss.detach().cpu()) if auto_active else math.nan,
         wm_award_loss=float(raw_wm_award_loss.detach().cpu()),
+        score_consistency_loss=float(raw_score_consistency.detach().cpu()),
+        score_ordering_loss=float(raw_score_ordering.detach().cpu()),
+        winner_consistency_loss=float(raw_winner_consistency.detach().cpu()),
+        composed_score_rmse=composed_score_rmse,
+        score_disagreement_mae=score_disagreement_mae,
+        winner_logit_disagreement_mae=winner_logit_disagreement_mae,
     )
     return total, metrics, pred
 
@@ -1058,6 +1271,8 @@ def _loss_from_batch(
         wm_award,
     ) = batch[:13]
     auto = batch[13] if len(batch) > 13 else None
+    official_total = batch[14] if len(batch) > 14 else None
+    dq_mask = batch[15] if len(batch) > 15 else None
     return model_loss(
         model,
         red,
@@ -1077,6 +1292,8 @@ def _loss_from_batch(
         v57_bin_targets=v57_bin,
         wm_award_targets=wm_award,
         auto_targets=auto,
+        official_total_targets=official_total,
+        dq_mask=dq_mask,
     )
 
 
@@ -1100,6 +1317,15 @@ def _playoff_loss_from_batch(
     return F.margin_ranking_loss(
         better_score, worse_score, target, margin=float(opts.playoff_margin)
     )
+
+
+def _award_probe_loss_from_batch(model: SetTransformerModel, batch: tuple[Tensor, ...]) -> Tensor:
+    team, event, targets = batch
+    logits = model.award_probe(team, event)
+    finite = torch.isfinite(targets)
+    if not torch.any(finite):
+        return logits.sum() * 0.0
+    return F.binary_cross_entropy_with_logits(logits[finite], targets[finite])
 
 
 def _selection_loss_from_batch(
@@ -1145,19 +1371,51 @@ def _metrics_to_losses(metrics: LossMetrics) -> dict[str, float]:
         "bonus": metrics.bonus_loss,
         "special": metrics.special_loss,
         "wm_award": metrics.wm_award_loss,
+        "score_consistency": metrics.score_consistency_loss,
+        "score_ordering": metrics.score_ordering_loss,
+        "winner_consistency": metrics.winner_consistency_loss,
+        "composed_score_rmse": metrics.composed_score_rmse,
+        "direct_composed_score_mae": metrics.score_disagreement_mae,
+        "winner_logit_disagreement_mae": metrics.winner_logit_disagreement_mae,
     }
 
 
-def _core_batch_task_weights(batch: tuple[Tensor, ...]) -> dict[str, float]:
+def _core_batch_task_weights(
+    batch: tuple[Tensor, ...], opts: LatentStratOptions | None = None
+) -> dict[str, float]:
     """Count rows that actually contribute to each fixed core objective."""
 
     continuous = batch[6]
     binary = batch[7]
-    return {
+    opts = opts or default_options().model_copy(update={"core_objective": True})
+    counts = {
         "continuous": float(torch.isfinite(continuous).any(dim=1).sum().item()),
         "win": float(torch.isfinite(binary).any(dim=1).sum().item()),
         "embedding": float(batch[0].shape[0]),
     }
+    if opts.study_arm != "none":
+        missing = torch.cat([batch[4], batch[5]], dim=1)
+        v57_cont = batch[10]
+        v57_bin = batch[11]
+        atomic_width = 2 * len(opts.atomic_count_targets)
+        counts.update(
+            {
+                "atomic": float(torch.isfinite(v57_cont[:, :atomic_width]).sum().item()),
+                "foul": float(torch.isfinite(v57_cont[:, atomic_width:]).sum().item()),
+                "bonus": float(torch.isfinite(v57_bin).sum().item()),
+                "auto": float((~missing).sum().item()),
+                "endgame": float((~missing).sum().item()),
+                "score_consistency": float(torch.isfinite(batch[14]).all(dim=1).sum().item()),
+                "score_ordering": counts["win"],
+                "winner_consistency": counts["win"],
+                "composed_score_rmse": float(torch.isfinite(batch[14]).all(dim=1).sum().item()),
+                "direct_composed_score_mae": float(
+                    torch.isfinite(batch[14]).all(dim=1).sum().item()
+                ),
+                "winner_logit_disagreement_mae": counts["win"],
+            }
+        )
+    return counts
 
 
 def _empty_epoch_accumulators() -> tuple[dict[str, float], dict[str, float]]:
@@ -1200,11 +1458,47 @@ def _write_feature_tensorboard_epoch(
         validation = float(row["validation_loss"])
         if math.isfinite(validation):
             writer.add_scalar("Loss/Validation", validation, epoch)
-        for tag, task in (
-            ("LossComponent/Score", "continuous"),
-            ("LossComponent/Win", "win"),
-            ("LossComponent/Embedding", "embedding"),
-        ):
+        component_tasks = (
+            ("Score", "continuous"),
+            ("Win", "win"),
+            ("Embedding", "embedding"),
+            ("AtomicCounts", "atomic"),
+            ("AutoStatus", "auto"),
+            ("EndgameStatus", "endgame"),
+            ("Fouls", "foul"),
+            ("Bonuses", "bonus"),
+            ("ScoreConsistency", "score_consistency"),
+            ("ScoreOrdering", "score_ordering"),
+            ("WinnerConsistency", "winner_consistency"),
+            ("CompetitionRank", "rank"),
+            ("CompetitionPlayoff", "playoff"),
+            ("AwardProbe", "award_probe"),
+        )
+        for label, task in component_tasks:
+            value = float(task_means.get(task, math.nan))
+            if math.isfinite(value):
+                writer.add_scalar(f"LossComponent/{label}", value, epoch)
+            validation_value = float(validation_task_means.get(task, math.nan))
+            if math.isfinite(validation_value):
+                writer.add_scalar(f"ValidationLossComponent/{label}", validation_value, epoch)
+            count = float(task_counts.get(task, 0.0))
+            if count > 0 or task in active_sidecars:
+                writer.add_scalar(f"ActiveLabelCount/{label}", count, epoch)
+        breakdown_values = [
+            float(task_means.get(task, math.nan))
+            for task in ("atomic", "auto", "endgame", "foul", "bonus")
+        ]
+        active_breakdown = [value for value in breakdown_values if math.isfinite(value)]
+        if active_breakdown:
+            writer.add_scalar(
+                "LossComponent/BreakdownMacro", float(np.mean(active_breakdown)), epoch
+            )
+        diagnostics = {
+            "Physics/ComposedScoreRMSE": "composed_score_rmse",
+            "Physics/DirectComposedScoreMAE": "direct_composed_score_mae",
+            "Physics/WinnerLogitDisagreementMAE": "winner_logit_disagreement_mae",
+        }
+        for tag, task in diagnostics.items():
             value = float(task_means.get(task, math.nan))
             if math.isfinite(value):
                 writer.add_scalar(tag, value, epoch)
@@ -1359,6 +1653,10 @@ def _prepare_sidecar_loaders(
         datasets["rank"] = RankPairDataset.from_table(sidecar_tables["rankings"])
     if "playoffs" in sidecar_tables:
         datasets["playoff"] = AlliancePairDataset.from_table(sidecar_tables["playoffs"])
+    if "award_candidates" in sidecar_tables:
+        datasets["award_probe"] = AwardCandidateDataset.from_table(
+            sidecar_tables["award_candidates"], opts.award_targets
+        )
     if "selections" in sidecar_tables:
         datasets["selection"] = SelectionTripletDataset.from_table(sidecar_tables["selections"])
     if "world_rank" in sidecar_tables and world_model_opts.rank_embedding.enabled:
@@ -1428,7 +1726,7 @@ def evaluate_task_means(
             with torch.amp.autocast(device_type="cuda", enabled=amp_enabled):
                 _, metrics, _ = _loss_from_batch(model, batch, opts, positive_weights, active_model)
             batch_rows = int(batch[0].shape[0])
-            core_weights = _core_batch_task_weights(batch) if opts.core_objective else None
+            core_weights = _core_batch_task_weights(batch, opts) if opts.core_objective else None
             for task_name, value in _metrics_to_losses(metrics).items():
                 weight = (
                     core_weights.get(task_name, 0.0) if core_weights is not None else batch_rows
@@ -1746,6 +2044,59 @@ def train_model(
         target_sigma_np = np.ones(len(target_names), dtype=float)
     target_mu = torch.as_tensor(target_mu_np, dtype=torch.float32, device=device)
     target_sigma = torch.as_tensor(target_sigma_np, dtype=torch.float32, device=device)
+    if opts.study_arm != "none":
+        if len(target_mu) != 2:
+            raise ValueError("Physics study requires exactly red/blue direct score targets.")
+
+        def physical_stats(columns: list[str]) -> tuple[Tensor, Tensor]:
+            values = table.iloc[train_rows][columns].apply(pd.to_numeric, errors="coerce")
+            mu = values.mean(axis=0).to_numpy(float, copy=True)
+            sigma = values.std(axis=0, ddof=0).to_numpy(float, copy=True)
+            sigma[~np.isfinite(sigma) | (sigma == 0)] = 1.0
+            if not np.isfinite(mu).all():
+                raise ValueError("Physics training target statistics contain non-finite means.")
+            return (
+                torch.as_tensor(mu, dtype=torch.float32, device=device),
+                torch.as_tensor(sigma, dtype=torch.float32, device=device),
+            )
+
+        atomic_mu, atomic_sigma = (
+            physical_stats(ordered_atomic_columns())
+            if model.physics_atomic_mu.numel()
+            else (model.physics_atomic_mu, model.physics_atomic_sigma)
+        )
+        foul_mu, foul_sigma = (
+            physical_stats(ordered_foul_columns())
+            if model.physics_foul_mu.numel()
+            else (model.physics_foul_mu, model.physics_foul_sigma)
+        )
+        score_values = table.iloc[train_rows][["red_total_score", "blue_total_score"]]
+        score_values = score_values.apply(pd.to_numeric, errors="coerce").to_numpy(float).ravel()
+        score_scale = float(np.nanstd(score_values))
+        if not math.isfinite(score_scale) or score_scale <= 0:
+            raise ValueError("Physics score standard deviation is invalid.")
+        with torch.no_grad():
+            model.physics_cont_mu[:2].copy_(target_mu)
+            model.physics_cont_sigma[:2].copy_(target_sigma)
+            if model.physics_atomic_mu.numel():
+                model.physics_atomic_mu.copy_(atomic_mu)
+                model.physics_atomic_sigma.copy_(atomic_sigma)
+            if model.physics_foul_mu.numel():
+                model.physics_foul_mu.copy_(foul_mu)
+                model.physics_foul_sigma.copy_(foul_sigma)
+            model.physics_score_sigma.fill_(score_scale)
+            if resume_checkpoint is None:
+
+                def inverse_softplus(values: Tensor) -> Tensor:
+                    values = values.clamp_min(1e-3)
+                    return torch.where(values > 20, values, torch.log(torch.expm1(values)))
+
+                if model.atomic_head is not None and atomic_mu.numel():
+                    alliance_atomic_mu = (atomic_mu[:7] + atomic_mu[7:]) / 2
+                    model.atomic_head.bias.copy_(inverse_softplus(alliance_atomic_mu))
+                if model.foul_head is not None and foul_mu.numel():
+                    alliance_foul_mu = (foul_mu[:2] + foul_mu[2:]) / 2
+                    model.foul_head.bias.copy_(inverse_softplus(alliance_foul_mu))
     score_residual = 0.0
     if opts.score_target_mode == "phase-core":
         eligible = ~(
@@ -1901,7 +2252,9 @@ def train_model(
                     model, batch, opts, positive_weights, forward_model
                 )
                 batch_rows = int(batch[0].shape[0])
-                core_weights = _core_batch_task_weights(batch) if opts.core_objective else None
+                core_weights = (
+                    _core_batch_task_weights(batch, opts) if opts.core_objective else None
+                )
                 for task_name, loss_value in _metrics_to_losses(metrics).items():
                     weight = (
                         core_weights.get(task_name, 0.0) if core_weights is not None else batch_rows
@@ -1913,6 +2266,8 @@ def train_model(
                         raw_loss = _rank_loss_from_batch(model, sidecar_batch, opts)
                     elif name == "playoff":
                         raw_loss = _playoff_loss_from_batch(model, sidecar_batch, opts)
+                    elif name == "award_probe":
+                        raw_loss = _award_probe_loss_from_batch(model, sidecar_batch)
                     elif name == "selection":
                         raw_loss = _selection_loss_from_batch(model, sidecar_batch, opts)
                     elif name == "wm_rank":

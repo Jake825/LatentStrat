@@ -40,7 +40,8 @@ class EvaluationReport:
 
 
 def sigmoid(values: np.ndarray) -> np.ndarray:
-    return 1 / (1 + np.exp(-values))
+    clipped = np.clip(values, -709.0, 709.0)
+    return 1 / (1 + np.exp(-clipped))
 
 
 def continuous_metrics(
@@ -538,6 +539,7 @@ def _predict_batched(
         "bonus": [],
         "special": [],
         "endgame": [],
+        "auto": [],
         "award": [],
         "red_pma": [],
         "blue_pma": [],
@@ -574,6 +576,7 @@ def _predict_batched(
             chunks["bonus"].append(predictions["bonus"].detach().cpu().numpy())
             chunks["special"].append(predictions["special"].detach().cpu().numpy())
             chunks["endgame"].append(predictions["endgame"].detach().cpu().numpy())
+            chunks["auto"].append(predictions["auto"].detach().cpu().numpy())
             chunks["award"].append(predictions["award"].detach().cpu().numpy())
             chunks["red_pma"].append(representations.red_pma_weights.detach().cpu().numpy())
             chunks["blue_pma"].append(representations.blue_pma_weights.detach().cpu().numpy())
