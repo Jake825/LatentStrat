@@ -1,0 +1,14 @@
+{
+  "asset_bytes": 70949859,
+  "asset_name": "2026-static-championship-core-checkpoints-20260712-233618-c957c753c7.zip",
+  "asset_sha256": "8c761c98697db4f510ed828cb24ccb3595515c6e7cbf6c3897e1b08bbd526b47",
+  "download_url": "https://github.com/Jake825/LatentStrat/releases/download/2026-static-championship-core-20260712-233618-c957c753c7/2026-static-championship-core-checkpoints-20260712-233618-c957c753c7.zip",
+  "included_file_count": 96,
+  "included_roots": [
+    "development/",
+    "refit/"
+  ],
+  "release_name": "2026 Static Championship Core Checkpoints",
+  "release_tag": "2026-static-championship-core-20260712-233618-c957c753c7",
+  "source_manifest_sha256_before_bundle_record": "b968b1a9fa10dc8023156ee14aa98ab4c48354b4513193744cd05f54a066d854"
+}

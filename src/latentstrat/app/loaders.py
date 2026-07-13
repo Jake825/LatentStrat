@@ -267,6 +267,28 @@ def _state_dict(payload: dict[str, Any]) -> dict[str, torch.Tensor]:
     return {"embedding_table": embedding} if torch.is_tensor(embedding) else {}
 
 
+def _unique_parameter_count(state: dict[str, torch.Tensor]) -> int:
+    """Count exact tensor aliases once while retaining distinct shared-storage views."""
+
+    seen: set[tuple[object, ...]] = set()
+    total = 0
+    for tensor in state.values():
+        identity = (
+            tensor.device.type,
+            tensor.device.index,
+            tensor.untyped_storage().data_ptr(),
+            tensor.storage_offset(),
+            tuple(tensor.shape),
+            tuple(tensor.stride()),
+            tensor.dtype,
+        )
+        if identity in seen:
+            continue
+        seen.add(identity)
+        total += int(tensor.numel())
+    return total
+
+
 def parameter_table(payload: dict[str, Any]) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     for name, tensor in _state_dict(payload).items():
@@ -360,7 +382,7 @@ def checkpoint_summary(path: Path, payload: dict[str, Any]) -> CheckpointSummary
         schema_version=int(schema) if schema is not None else None,
         season=int(season) if season is not None else None,
         latent_dim=latent_dim,
-        parameter_count=sum(int(tensor.numel()) for tensor in state.values()),
+        parameter_count=_unique_parameter_count(state),
         options=options,
         metadata=metadata,
     )

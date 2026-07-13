@@ -22,6 +22,12 @@ related:
   authoritative generated report.
 - Added a simple epoch-domain TensorBoard profile and Research Workbench support for the new
   non-promotable diagnostic artifact contract.
+- Completed the 12-run fixed-100 campaign. Direct official-total supervision improved the additive
+  score RMSE by `2.76%` but did not remove the Championship score bias; fixed-horizon teammate
+  interaction was harmful in both supervision modes, and opponent interaction was uncertain versus
+  teammate-only. Added the generated report and compact, hash-verified evidence.
+- Corrected Workbench parameter reporting for shared checkpoint aliases and the diagnostic's wide
+  parameter-utilization contract.
 
 This changelog connects LatentStrat's research version names, Git commits, and local artifact eras. It is meant to help an FRC student understand the project timeline and help an agent find the closest code snapshot for an older design.
 

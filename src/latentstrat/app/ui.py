@@ -1011,11 +1011,35 @@ def render_model() -> None:
         test_week = summary.metadata.get("test_week")
         if "model" in utilization and architecture:
             utilization = utilization[utilization["model"].astype(str) == str(architecture)]
+        if "architecture" in utilization and architecture:
+            utilization = utilization[utilization["architecture"].astype(str) == str(architecture)]
+        score_target_mode = summary.options.get("score_target_mode")
+        if "supervision_mode" in utilization and score_target_mode:
+            utilization = utilization[
+                utilization["supervision_mode"].astype(str) == str(score_target_mode)
+            ]
+        checkpoint_phase = next(
+            (phase for phase in ("development", "refit") if phase in artifact.path.parts),
+            None,
+        )
+        if "phase" in utilization and checkpoint_phase:
+            utilization = utilization[utilization["phase"].astype(str) == checkpoint_phase]
         if "test_week" in utilization and test_week is not None:
             utilization = utilization[
                 pd.to_numeric(utilization["test_week"], errors="coerce") == int(test_week)
             ]
         if not utilization.empty:
+            if "epoch" in utilization:
+                latest_epoch = pd.to_numeric(utilization["epoch"], errors="coerce").max()
+                utilization = utilization[
+                    pd.to_numeric(utilization["epoch"], errors="coerce") == latest_epoch
+                ]
+            wide_contract = {
+                "nominal_parameter_count",
+                "trainable_parameter_count",
+                "gradient_receiving_parameter_count",
+                "active_team_rows",
+            }.issubset(utilization.columns)
             total_rows = (
                 utilization[utilization["module"].astype(str) == "<all>"]
                 if "module" in utilization
@@ -1023,14 +1047,49 @@ def render_model() -> None:
             )
             total = total_rows.iloc[0]
             utilization_columns = st.columns(4)
-            utilization_columns[0].metric("Nominal", f"{int(total['nominal_parameters']):,}")
-            utilization_columns[1].metric("Trainable", f"{int(total['trainable_parameters']):,}")
+            nominal_column = "nominal_parameter_count" if wide_contract else "nominal_parameters"
+            trainable_column = (
+                "trainable_parameter_count" if wide_contract else "trainable_parameters"
+            )
+            gradient_column = (
+                "gradient_receiving_parameter_count"
+                if wide_contract
+                else "gradient_receiving_parameters"
+            )
+            active_column = "active_team_rows" if wide_contract else "active_z_base_rows"
+            utilization_columns[0].metric("Nominal", f"{int(total[nominal_column]):,}")
+            utilization_columns[1].metric("Trainable", f"{int(total[trainable_column]):,}")
             utilization_columns[2].metric(
                 "Gradient receiving",
-                f"{int(total['gradient_receiving_parameters']):,}",
+                f"{int(total[gradient_column]):,}",
             )
-            utilization_columns[3].metric("Active Z_base rows", int(total["active_z_base_rows"]))
-            if "module" in utilization:
+            utilization_columns[3].metric("Active Z_base rows", int(total[active_column]))
+            if wide_contract:
+                module_rows = []
+                for column in utilization.columns:
+                    prefix = "module_"
+                    suffix = "_nominal_parameter_count"
+                    if not column.startswith(prefix) or not column.endswith(suffix):
+                        continue
+                    if pd.isna(total[column]):
+                        continue
+                    module = column[len(prefix) : -len(suffix)]
+                    module_rows.append(
+                        {
+                            "module": module,
+                            "nominal_parameters": int(total[column]),
+                            "trainable_parameters": int(
+                                total[f"module_{module}_trainable_parameter_count"]
+                            ),
+                            "gradient_receiving_parameters": int(
+                                total[f"module_{module}_gradient_receiving_parameter_count"]
+                            ),
+                        }
+                    )
+                if module_rows:
+                    st.caption(f"Final {checkpoint_phase or 'run'} parameter utilization by module")
+                    st.dataframe(pd.DataFrame(module_rows), hide_index=True, width="stretch")
+            elif "module" in utilization:
                 st.caption("Final refit parameter utilization by module")
                 st.dataframe(utilization, hide_index=True, width="stretch")
     metadata_tab, parameters_tab, options_tab = st.tabs(["Metadata", "Parameters", "Options"])

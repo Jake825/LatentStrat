@@ -1,0 +1,872 @@
+{
+  "artifact_version": "v1",
+  "created_at_utc": "2026-07-13T02:15:57.287749+00:00",
+  "files": {
+    "baseline_contract.csv": {
+      "bytes": 475,
+      "sha256": "4e86fed26cceab216b5d153f3d7623c1b791b4724202586559a5595d47be72fd"
+    },
+    "calibration.csv": {
+      "bytes": 847093,
+      "sha256": "ec0468623d53384fbefb8254a6ac5cc28653caf04857f9ff1dfedebafb0c0cc0"
+    },
+    "calibrators.csv": {
+      "bytes": 3728,
+      "sha256": "d2132afedfda5f952985ca60995424c0db3e42eabe83853814c73079920528fb"
+    },
+    "championship_predictions.parquet": {
+      "bytes": 853612,
+      "sha256": "aa7a8d00b2120eac2c16eec3aba83086bc658561f23cff6c31be7c4f854f0b24"
+    },
+    "checkpoint_bundle.json": {
+      "bytes": 762,
+      "sha256": "715381c5579299b71ea06e7d7b43616b48725d4460215ed75b023a49fb0374d2"
+    },
+    "coverage.json": {
+      "bytes": 679,
+      "sha256": "25904d9f94501b292dceaeb43f49a37973833b0b623b475972c92ec0e2938e49"
+    },
+    "decision_classifications.csv": {
+      "bytes": 1289,
+      "sha256": "344aacf7c566fe4751106eb1da5d598f76d95dabca6d4717e1963e57b1f5f52c"
+    },
+    "development/official-total-core/additive/checkpoint.pt": {
+      "bytes": 950779,
+      "sha256": "d6970e165a70d11995e3e16b425f5d41c48ada2bcf28d17f32f285c645ff59dc"
+    },
+    "development/official-total-core/additive/contract.json": {
+      "bytes": 428667,
+      "sha256": "ea75238380b065b59882e1869bc2008f1d114d999bd6f866342d3c685d65875d"
+    },
+    "development/official-total-core/additive/resume/latest.ckpt": {
+      "bytes": 1591935,
+      "sha256": "de42773c2a277e44feb233aa82bd4c4bcbfa6a1809bbbf1037c4a4672b147dab"
+    },
+    "development/official-total-core/additive/resume/milestones/epoch_025.ckpt": {
+      "bytes": 1301081,
+      "sha256": "ca98f14196b1a82da9495a8677c556080328d2629476b0f472d671dbdc46f270"
+    },
+    "development/official-total-core/additive/resume/milestones/epoch_050.ckpt": {
+      "bytes": 1398105,
+      "sha256": "c9dc90471e0f68a7e3b835ce7ef3006206fe04846af8adfa501a553c2c779035"
+    },
+    "development/official-total-core/additive/resume/milestones/epoch_075.ckpt": {
+      "bytes": 1495129,
+      "sha256": "f62a9df14a797818d4b909d46edb5786d69d0ed8b5ccb16f52b5dace8795bacd"
+    },
+    "development/official-total-core/additive/resume/milestones/epoch_100.ckpt": {
+      "bytes": 1592089,
+      "sha256": "d8ed7ab7a5510538ef2323a20af36108453f21cf492c1ae813f667a8bbabd14d"
+    },
+    "development/official-total-core/additive/training_history.csv": {
+      "bytes": 100966,
+      "sha256": "4ae29ca95cee582655c33a86b000a1fd4027ccd51ea541b08601676450bcb62e"
+    },
+    "development/official-total-core/full-match/checkpoint.pt": {
+      "bytes": 986293,
+      "sha256": "5f4ab704edb934d8287e9ab4d55dc4a26ed90b9d7551e4b659d91e7cf547e19e"
+    },
+    "development/official-total-core/full-match/contract.json": {
+      "bytes": 428671,
+      "sha256": "c8cb1f158dc31d40a4879b14171a903ac59963b1a6bd02295ec60c71d1fa8bfb"
+    },
+    "development/official-total-core/full-match/resume/latest.ckpt": {
+      "bytes": 1800471,
+      "sha256": "f08e939edab785e1516c75aed8711e0abc6c1c4b86f2ca7736470203beaf816c"
+    },
+    "development/official-total-core/full-match/resume/milestones/epoch_025.ckpt": {
+      "bytes": 1466234,
+      "sha256": "0552d620ca6cfba530ec7fbf81adc4458818e6b6b6b5e5e16fd8de0e73cb7a7d"
+    },
+    "development/official-total-core/full-match/resume/milestones/epoch_050.ckpt": {
+      "bytes": 1577914,
+      "sha256": "49f8ce39ff2986ba3a3503a199dba882c5d50e2d99f1538e9d2375e55def8dee"
+    },
+    "development/official-total-core/full-match/resume/milestones/epoch_075.ckpt": {
+      "bytes": 1689530,
+      "sha256": "539c73cb6d441f34dc64da08a96b77e48923682f8cd626502292fe94a66c6c82"
+    },
+    "development/official-total-core/full-match/resume/milestones/epoch_100.ckpt": {
+      "bytes": 1801210,
+      "sha256": "ae342c2089cc0faa9c30da4cb963f96b267bdf8421949a6365815a4af66a5555"
+    },
+    "development/official-total-core/full-match/training_history.csv": {
+      "bytes": 109278,
+      "sha256": "de0674de2e4c2f2b57233808202a341b4f07be89b98c8216c5225787988b2946"
+    },
+    "development/official-total-core/teammate-set/checkpoint.pt": {
+      "bytes": 975605,
+      "sha256": "f7fc47c3c12693c4b1309b00ac5dad2ab81ea4b9414fb2ceb6afc7aa46107990"
+    },
+    "development/official-total-core/teammate-set/contract.json": {
+      "bytes": 428675,
+      "sha256": "230fb90c6683e64c8f3dfaddce84bc98ce67846f68c7f2a92c156a289df6bba8"
+    },
+    "development/official-total-core/teammate-set/resume/latest.ckpt": {
+      "bytes": 1738951,
+      "sha256": "885ffbb7c560bd60dc44f9e697423730977fbd62f8ec11ce449f36186ee42d69"
+    },
+    "development/official-total-core/teammate-set/resume/milestones/epoch_025.ckpt": {
+      "bytes": 1416566,
+      "sha256": "50f88c88104cf0768818c748adf247bde0a96da309b10919aa2d8d53b0725bfe"
+    },
+    "development/official-total-core/teammate-set/resume/milestones/epoch_050.ckpt": {
+      "bytes": 1524214,
+      "sha256": "e59b06c789a65bd66c0e97c1aa091b1602fee484391323319d7e5ab3b7358780"
+    },
+    "development/official-total-core/teammate-set/resume/milestones/epoch_075.ckpt": {
+      "bytes": 1631862,
+      "sha256": "c39b4206f6d64249e0ecde5be77ac41a90cab7f0e85eeb4d7dbebee9f24d455b"
+    },
+    "development/official-total-core/teammate-set/resume/milestones/epoch_100.ckpt": {
+      "bytes": 1739510,
+      "sha256": "dfbd387334034827181412479e1a4ba7d5a74eb7e7de55eec999c01ebe6aa2a3"
+    },
+    "development/official-total-core/teammate-set/training_history.csv": {
+      "bytes": 107639,
+      "sha256": "0ed7353f010504d474e0598587fcad7825a021781173e53a1de7db67a5a3f7ee"
+    },
+    "development/phase-core/additive/checkpoint.pt": {
+      "bytes": 951547,
+      "sha256": "4e97d1fe3af11dd429bdf161239231026624954485dff6d837213cf21968b3c1"
+    },
+    "development/phase-core/additive/contract.json": {
+      "bytes": 430070,
+      "sha256": "e33f95932931e28254fb11340b625a259a2230065f8818052a4860fa556d3f66"
+    },
+    "development/phase-core/additive/resume/latest.ckpt": {
+      "bytes": 1592319,
+      "sha256": "75095e5224ec019274507325c9ed3f5f8a3ba395c51cc27e7be2995f98c6caed"
+    },
+    "development/phase-core/additive/resume/milestones/epoch_025.ckpt": {
+      "bytes": 1301529,
+      "sha256": "91a5769a2eaae51fbbaa170fc61c5559a9df086a6ca36a6814919725033b2471"
+    },
+    "development/phase-core/additive/resume/milestones/epoch_050.ckpt": {
+      "bytes": 1398489,
+      "sha256": "c333cb939c298c69d1265809df9d3a1010c26ff6356f9def252a8f4190a3bae9"
+    },
+    "development/phase-core/additive/resume/milestones/epoch_075.ckpt": {
+      "bytes": 1495513,
+      "sha256": "99c5481bf0168457a266df453053ba696f542c5d7c0c49aa08aa19a43fda77b8"
+    },
+    "development/phase-core/additive/resume/milestones/epoch_100.ckpt": {
+      "bytes": 1592473,
+      "sha256": "c91581794085bea70391a335cbc1a7d7dad5bf44c27c84dba0d890d69cbdb51f"
+    },
+    "development/phase-core/additive/training_history.csv": {
+      "bytes": 100882,
+      "sha256": "b9f6214c2d4274f3aee122afa58abe8cf3bcc7c8d130905aa554154e9ebfaa2c"
+    },
+    "development/phase-core/full-match/checkpoint.pt": {
+      "bytes": 987125,
+      "sha256": "7007ee11fb6b470be8ab5abd2d73f49ed5e33bc9b1a031d5571e9b96d7856268"
+    },
+    "development/phase-core/full-match/contract.json": {
+      "bytes": 430074,
+      "sha256": "b8faa897fe6542ef0a4dc926c778360bed954d20c9d751ce1e6326460807fde9"
+    },
+    "development/phase-core/full-match/resume/latest.ckpt": {
+      "bytes": 1800855,
+      "sha256": "1603cdb94c8ab829b9cace79c97831335595b0ea726693c0aa2af73b60f06182"
+    },
+    "development/phase-core/full-match/resume/milestones/epoch_025.ckpt": {
+      "bytes": 1466618,
+      "sha256": "94dc44b09cd4b70c641c12d70b72837d185cf3977378091789dd94874e892245"
+    },
+    "development/phase-core/full-match/resume/milestones/epoch_050.ckpt": {
+      "bytes": 1578298,
+      "sha256": "0af2f9bd6a2a68af0f2a5683a270f99dbd5a89220dcfc6b05a53184965ce8eae"
+    },
+    "development/phase-core/full-match/resume/milestones/epoch_075.ckpt": {
+      "bytes": 1689914,
+      "sha256": "16d74f55ba0d8e5a4018d15c62614be0af0ab255e1da730aeccc226533f8256e"
+    },
+    "development/phase-core/full-match/resume/milestones/epoch_100.ckpt": {
+      "bytes": 1801594,
+      "sha256": "65bf5a94470387bb40d49c4bf4827c52416268625ba21d7c68c7d7c8876ae9f6"
+    },
+    "development/phase-core/full-match/training_history.csv": {
+      "bytes": 109285,
+      "sha256": "f5ac8df6f5c3a3b6e38233688b9703a11ae6b064b80def2589fd4d6fd8551fef"
+    },
+    "development/phase-core/teammate-set/checkpoint.pt": {
+      "bytes": 976373,
+      "sha256": "70ea57b38f5547afd5c0931cbdec708e889ca1282c2964da3539463d3d3db6fc"
+    },
+    "development/phase-core/teammate-set/contract.json": {
+      "bytes": 430078,
+      "sha256": "08c52f406f81f69050937c9415d7f2cdf3181b4ab09ef6b3541817c28c5fe19c"
+    },
+    "development/phase-core/teammate-set/resume/latest.ckpt": {
+      "bytes": 1739399,
+      "sha256": "efa17c04ff2fbdf8b6ce58d3083d9ae2e5327689e947025fd5eb421c93d2c981"
+    },
+    "development/phase-core/teammate-set/resume/milestones/epoch_025.ckpt": {
+      "bytes": 1416950,
+      "sha256": "31fd88cdbca0dc309eba2f3147efebe602b5d27a4cf95aefb3aa7920b85bb080"
+    },
+    "development/phase-core/teammate-set/resume/milestones/epoch_050.ckpt": {
+      "bytes": 1524662,
+      "sha256": "140a69ce4f96d319c339b2dfb3c6a19d0f518b6601cd1e96de3d3767f7cf460c"
+    },
+    "development/phase-core/teammate-set/resume/milestones/epoch_075.ckpt": {
+      "bytes": 1632310,
+      "sha256": "96633085eddec71fe4c8645ab537692bca44e35e506570f308d198fa7ec07593"
+    },
+    "development/phase-core/teammate-set/resume/milestones/epoch_100.ckpt": {
+      "bytes": 1739958,
+      "sha256": "70ccb2e53b2341f22ba341aaec349a1d005a5e5ae2e8309d0e67b1b386aa7511"
+    },
+    "development/phase-core/teammate-set/training_history.csv": {
+      "bytes": 107548,
+      "sha256": "2a59e3d26bd03bbe7b95d8c1e74558e468c1640703e055e607401d54e8838e2f"
+    },
+    "development_predictions.parquet": {
+      "bytes": 360150,
+      "sha256": "4f859280e460f364028929403bc99d30bc32e687a3417406279705fdcf567200"
+    },
+    "frozen_final_contract.json": {
+      "bytes": 11152,
+      "sha256": "e69f0cc457e2818cddd219f6e259b6a9b7edee426f0e6513fc8042ee35cf6df0"
+    },
+    "leave_one_division_out.csv": {
+      "bytes": 38999,
+      "sha256": "56b9129d2fabc14f3836c6076424fa2c8f4005e4400675766997f47867e2b692"
+    },
+    "metrics.csv": {
+      "bytes": 959710,
+      "sha256": "407d31f269a44f457cbd2bb93d7119469511a76f04662c7429bea9239dff6444"
+    },
+    "paired_bootstrap.csv": {
+      "bytes": 13266404,
+      "sha256": "858fde521e044b86a7ee2eb1fe05ad2a08199254751d8d96f8b98c6db8540136"
+    },
+    "paired_comparisons.csv": {
+      "bytes": 8204,
+      "sha256": "9aee74d4dc9c660f2c9b51d6068ee94dcdfda07fdc1598b728c1bb5e2baeb0a1"
+    },
+    "parameter_utilization.csv": {
+      "bytes": 157293,
+      "sha256": "33e98aa282a44d7e25ba7d0ef01fabe2decd2c56ae498dbcf0bec96f2607e6ce"
+    },
+    "phase_residuals.json": {
+      "bytes": 9911,
+      "sha256": "de073ab87451f001a01a5f3eefd0e8469ccb4b5b35b76cf16f4fbe899e29fb7a"
+    },
+    "refit/official-total-core/additive/checkpoint.pt": {
+      "bytes": 995259,
+      "sha256": "78ab520d9331ae52fbcd514b940c96bd6944aa2dfa2ff53f1b60cf4bdab70e99"
+    },
+    "refit/official-total-core/additive/contract.json": {
+      "bytes": 455022,
+      "sha256": "3d4ee7fe7aaece17b9308c7d3ae3f1b30833092969c17a3cc064b339373596a2"
+    },
+    "refit/official-total-core/additive/resume/latest.ckpt": {
+      "bytes": 1359315,
+      "sha256": "f34834b67063bb3d6194703c2092065f8ddc45935a584ee7d1d342faae8d999d"
+    },
+    "refit/official-total-core/additive/resume/milestones/epoch_025.ckpt": {
+      "bytes": 1068513,
+      "sha256": "5bf6e57390b048925abc25ec7165835615752b1dbbe85151cd61c96a53462f23"
+    },
+    "refit/official-total-core/additive/resume/milestones/epoch_050.ckpt": {
+      "bytes": 1165473,
+      "sha256": "dfeb38cfccec1c4be33644dcc9383c336dca433975748cf0049706ea62294800"
+    },
+    "refit/official-total-core/additive/resume/milestones/epoch_075.ckpt": {
+      "bytes": 1262433,
+      "sha256": "ef1094274bd65ce7988bde006d44b56320049875137317c69316b11edb30ce1e"
+    },
+    "refit/official-total-core/additive/resume/milestones/epoch_100.ckpt": {
+      "bytes": 1359457,
+      "sha256": "556c2ef862d3e1a056712992f55924640467ba4efa70105c99c825f5b2e12778"
+    },
+    "refit/official-total-core/additive/training_history.csv": {
+      "bytes": 78248,
+      "sha256": "31d4cfc5a1bffaf376d5dd5aaa14661b0977009f000f6f8c7a0ce8c214aec900"
+    },
+    "refit/official-total-core/full-match/checkpoint.pt": {
+      "bytes": 1030773,
+      "sha256": "879f634c71035ca4c34e09703e89a5b3ef19c4a52456d0b89991b8aebf334fb2"
+    },
+    "refit/official-total-core/full-match/contract.json": {
+      "bytes": 455026,
+      "sha256": "83c8fb950dbe0c9db339cf227b7b928219ddc240ba9041294007f3e79f659757"
+    },
+    "refit/official-total-core/full-match/resume/latest.ckpt": {
+      "bytes": 1531795,
+      "sha256": "493beb962fd4c1637a06f12507c08de7de1aa9ad58bd7e05a3557eb1e0ecf89f"
+    },
+    "refit/official-total-core/full-match/resume/milestones/epoch_025.ckpt": {
+      "bytes": 1197557,
+      "sha256": "9e345810f281775c28d36552e93d3d9dba01bf938702e7f3e329ab0ca1423669"
+    },
+    "refit/official-total-core/full-match/resume/milestones/epoch_050.ckpt": {
+      "bytes": 1309173,
+      "sha256": "242dcf52a6aa99d53ba2e3f5cb8d311f881692335a0f7eda96d866a4cf685020"
+    },
+    "refit/official-total-core/full-match/resume/milestones/epoch_075.ckpt": {
+      "bytes": 1420789,
+      "sha256": "9e6e4f5ee1fb198d5869683a02ea580663df198fff6c0ecb689f274635ae5c7f"
+    },
+    "refit/official-total-core/full-match/resume/milestones/epoch_100.ckpt": {
+      "bytes": 1532405,
+      "sha256": "7c68ff3fc31cd9975bdc1b7abf859906e3b57e6ef7ca41c6facda0ad5e21d85a"
+    },
+    "refit/official-total-core/full-match/training_history.csv": {
+      "bytes": 85986,
+      "sha256": "b80ee0da14c69989c4e5bad3c861748d529603004c2057c65caeb59c7bfe1eb1"
+    },
+    "refit/official-total-core/teammate-set/checkpoint.pt": {
+      "bytes": 1020021,
+      "sha256": "28d38286f97f2eca829e9e11ff353b8a7df3befeb19ee1b76b71781698e7d681"
+    },
+    "refit/official-total-core/teammate-set/contract.json": {
+      "bytes": 455030,
+      "sha256": "ffa392c717f316d3fef4bd710ed3b5852878693c6d36977a8c876dda73df8cca"
+    },
+    "refit/official-total-core/teammate-set/resume/latest.ckpt": {
+      "bytes": 1481235,
+      "sha256": "31c7e11ccd656aeb2158a0e6e9aedd579f5b65c94fc0e2c93a7f917532f9accd"
+    },
+    "refit/official-total-core/teammate-set/resume/milestones/epoch_025.ckpt": {
+      "bytes": 1158821,
+      "sha256": "baaddfb43ed6f8bd24f089da003ddf37c2a936acca22217fd49cf8f5d0f9c0fa"
+    },
+    "refit/official-total-core/teammate-set/resume/milestones/epoch_050.ckpt": {
+      "bytes": 1266469,
+      "sha256": "e4ce7ce7f52c268f609287da13ee68c12a5b5959983fdef89ef481237a2946e6"
+    },
+    "refit/official-total-core/teammate-set/resume/milestones/epoch_075.ckpt": {
+      "bytes": 1374053,
+      "sha256": "b9b960ccd7b81878601c663e414b31c225c97316a78031d2765bb65d52a550fd"
+    },
+    "refit/official-total-core/teammate-set/resume/milestones/epoch_100.ckpt": {
+      "bytes": 1481701,
+      "sha256": "e2148e26335dfce26bd06558325805a792f22378e7c828f23c9c04e479dbdc2c"
+    },
+    "refit/official-total-core/teammate-set/training_history.csv": {
+      "bytes": 84239,
+      "sha256": "44d24cb487b177a62a29d56703c8dcd065a46a8d62f904e751bf5a586d14c000"
+    },
+    "refit/phase-core/additive/checkpoint.pt": {
+      "bytes": 996219,
+      "sha256": "08859e43541639f88475de32709c90d77d05724e0bf3587046d17bcafe4103b1"
+    },
+    "refit/phase-core/additive/contract.json": {
+      "bytes": 456785,
+      "sha256": "7bfdad126cfa47467d1bb525281f14a354a133101566caa06815849993999720"
+    },
+    "refit/phase-core/additive/resume/latest.ckpt": {
+      "bytes": 1359635,
+      "sha256": "24097d5ec67f08d00419c9c959a84f960da1ae217902a51b8dc313a343c4dfce"
+    },
+    "refit/phase-core/additive/resume/milestones/epoch_025.ckpt": {
+      "bytes": 1068833,
+      "sha256": "42157ebed7996ddbd9fecf6eb9c409c878a7c16e7f41f63d165b1364e39f612c"
+    },
+    "refit/phase-core/additive/resume/milestones/epoch_050.ckpt": {
+      "bytes": 1165793,
+      "sha256": "f55bdb4a1ab0731ba39b011ccb13493dbffe03ecd2fd4d604b7014232b3c8fdd"
+    },
+    "refit/phase-core/additive/resume/milestones/epoch_075.ckpt": {
+      "bytes": 1262753,
+      "sha256": "956347b47008fb295794846dfef2c74b53046d745b18c62b04b9e9f0e5f56c31"
+    },
+    "refit/phase-core/additive/resume/milestones/epoch_100.ckpt": {
+      "bytes": 1359777,
+      "sha256": "dc40e2c182e34d5c9a62cc98cb3151e015cf8109a1b0df75fb1b66b0b8589a79"
+    },
+    "refit/phase-core/additive/training_history.csv": {
+      "bytes": 78210,
+      "sha256": "a17d0862539795ad69f304b52814660202dba51af98540175a62cb362783879e"
+    },
+    "refit/phase-core/full-match/checkpoint.pt": {
+      "bytes": 1031733,
+      "sha256": "ea0610a49f94b2197bdd686f942df10b1868ae388b9921f2719a9d1d869f4d5b"
+    },
+    "refit/phase-core/full-match/contract.json": {
+      "bytes": 456789,
+      "sha256": "e7d407c282eb43299443d86c26868933bf13956241d053d91074b7a469d98171"
+    },
+    "refit/phase-core/full-match/resume/latest.ckpt": {
+      "bytes": 1532115,
+      "sha256": "942a2234ca934ece3f3454416e1d5b5b147ae1634528dfb4671f9e7b48649e9f"
+    },
+    "refit/phase-core/full-match/resume/milestones/epoch_025.ckpt": {
+      "bytes": 1197877,
+      "sha256": "8f2e5a8d574d58019b29b6e269dcdcb3a76e753fca3d1f8a146dbb7112eae774"
+    },
+    "refit/phase-core/full-match/resume/milestones/epoch_050.ckpt": {
+      "bytes": 1309493,
+      "sha256": "4ed1fcfb36e6758a70c528d54a7e9b24ccba7ad59af14dcd071fe6bf1feb36ef"
+    },
+    "refit/phase-core/full-match/resume/milestones/epoch_075.ckpt": {
+      "bytes": 1421109,
+      "sha256": "f00bafb45dfe77ca20de374a497224b97e3ad0428b1f44211a4b8d708a8b7069"
+    },
+    "refit/phase-core/full-match/resume/milestones/epoch_100.ckpt": {
+      "bytes": 1532725,
+      "sha256": "2ca5de5a4aa13dd165e6b8a669059f1c5f100607f7d863b5ab5f89b7b456e356"
+    },
+    "refit/phase-core/full-match/training_history.csv": {
+      "bytes": 85950,
+      "sha256": "9154e8ecb2c70b56e83a36e2e48bb77b4f8fbd6a70f1c9e2f770a4fe30cba192"
+    },
+    "refit/phase-core/teammate-set/checkpoint.pt": {
+      "bytes": 1020981,
+      "sha256": "a5c67cbfa8f9d264e04137c34011eb28eea41ba6400b7853021b1a201a4d3825"
+    },
+    "refit/phase-core/teammate-set/contract.json": {
+      "bytes": 456793,
+      "sha256": "818aa187bf3790c27d758bf05fa9a536c749f5c9f8f3def3fc70f0975cdc11a1"
+    },
+    "refit/phase-core/teammate-set/resume/latest.ckpt": {
+      "bytes": 1481555,
+      "sha256": "6dc10666983b1ebf9f064bb2b5cf70f6f131647b8520402cfd5dd2fb8cc0266f"
+    },
+    "refit/phase-core/teammate-set/resume/milestones/epoch_025.ckpt": {
+      "bytes": 1159141,
+      "sha256": "742e4966bcc2cf03a8f7a07eb6d4eba1c7ed9448b9fe9f51d49d9edc0cc389c1"
+    },
+    "refit/phase-core/teammate-set/resume/milestones/epoch_050.ckpt": {
+      "bytes": 1266789,
+      "sha256": "120890f4ce87ff2238b22dc124d4d0cca2e90a9184140c104152014817755aa5"
+    },
+    "refit/phase-core/teammate-set/resume/milestones/epoch_075.ckpt": {
+      "bytes": 1374373,
+      "sha256": "c0d6bdc7e5bd21da19ffbc5b90c8436e10375b9374ef52626de94bcd65a1143f"
+    },
+    "refit/phase-core/teammate-set/resume/milestones/epoch_100.ckpt": {
+      "bytes": 1482021,
+      "sha256": "e94ec7612e25641e1f715414e4fd0d993acbf0b1f5748075851b0818f5b0582e"
+    },
+    "refit/phase-core/teammate-set/training_history.csv": {
+      "bytes": 84239,
+      "sha256": "60641e3f418d090e796f9ff62985ea0a1bf37bbadc318205b1238dbad07b92df"
+    },
+    "report.md": {
+      "bytes": 44466,
+      "sha256": "c1747bd7342671ea6105b99bfad9a9697629d0f30c4da2eac91eb044f932beb0"
+    },
+    "report_data.json": {
+      "bytes": 9203208,
+      "sha256": "55918b828e5d73d0d1c7d9f3686684f58039e571ab31df8c10c72af4d39bb551"
+    },
+    "report_hashes.json": {
+      "bytes": 427,
+      "sha256": "aced6fc655730ce0f5e002cd87ed3be14fc5be98a1e41d3778f598d35f325fff"
+    },
+    "score_bias_slices.csv": {
+      "bytes": 285298,
+      "sha256": "5b934e16d84e44b0819fdd0b947a06119192ecb8f32f8a7b81532110e5df96ff"
+    },
+    "split_manifest.csv": {
+      "bytes": 2468459,
+      "sha256": "0cecdeafc6ff8a70c660fa0086dd80bddb985ba54ff222ba1ea96bac7671c64e"
+    },
+    "split_manifest.parquet": {
+      "bytes": 160531,
+      "sha256": "a01afb54dc358bb63a0f2b3ebf5f6da749cd0ffb05722862ef22a3ef88596771"
+    },
+    "tensorboard_study_id.txt": {
+      "bytes": 28,
+      "sha256": "75a4e6bc66624636c7be46abbee23b7dec1943196b7c58c2241e916143fec3a0"
+    },
+    "timing-pilot/official-total-core/additive/checkpoint.pt": {
+      "bytes": 950779,
+      "sha256": "f0e3451056b50a212aedbdeb103805789f31833323e3e2c10dea714b58cbbca6"
+    },
+    "timing-pilot/official-total-core/additive/contract.json": {
+      "bytes": 428613,
+      "sha256": "6b95fe84784821d1c9c511ab3bee5d9c2f509f1b3038ede4b44a2670359194c4"
+    },
+    "timing-pilot/official-total-core/additive/resume/latest.ckpt": {
+      "bytes": 1211711,
+      "sha256": "3152e72ad9ddc2a6ef3b421cc5da4b4f0666fd92564873b271123cd813ecce60"
+    },
+    "timing-pilot/official-total-core/additive/training_history.csv": {
+      "bytes": 4470,
+      "sha256": "84fb0330fc64772a0d2947543c0e11f13e13c57a58027792c087f461da3893c7"
+    },
+    "timing-pilot/official-total-core/full-match/checkpoint.pt": {
+      "bytes": 986293,
+      "sha256": "352e03a7b71c31f3cbabbf606f46472812ed6e1f00060baaa095b86230df3022"
+    },
+    "timing-pilot/official-total-core/full-match/contract.json": {
+      "bytes": 428617,
+      "sha256": "d701204f0c66d9fad57cb9158a87bdeb64f78592a40f95d80bc46cda33175f2e"
+    },
+    "timing-pilot/official-total-core/full-match/resume/latest.ckpt": {
+      "bytes": 1362775,
+      "sha256": "f126c7403b40f1beb427c39bdfbe3d0f982d899012d1c0424b418639e898f5d2"
+    },
+    "timing-pilot/official-total-core/full-match/training_history.csv": {
+      "bytes": 4989,
+      "sha256": "0a1ef0129d214fb1a2d0fe2e667e8101ad0eca7c5e73881707bfe174de36c516"
+    },
+    "timing-pilot/official-total-core/teammate-set/checkpoint.pt": {
+      "bytes": 975541,
+      "sha256": "c1c3d6ea284f3e59f6de2c41310b2b634aca545a96a86cc90c3379ad4ce916a0"
+    },
+    "timing-pilot/official-total-core/teammate-set/contract.json": {
+      "bytes": 428621,
+      "sha256": "9a0d1350e3b2b3f2fb16774c29de7ec7e76a3bf0e28d60ec7a6f7f5c94f4b489"
+    },
+    "timing-pilot/official-total-core/teammate-set/resume/latest.ckpt": {
+      "bytes": 1316999,
+      "sha256": "298a025e31d5445c64651199925d1a45988fc3e23f722abda1da4cc8ac8d92fe"
+    },
+    "timing-pilot/official-total-core/teammate-set/training_history.csv": {
+      "bytes": 4828,
+      "sha256": "4411c30df6128fdc32e0af54660e963cfa773c9838d75ec674edfaa4970e7abf"
+    },
+    "timing-pilot/phase-core/additive/checkpoint.pt": {
+      "bytes": 951547,
+      "sha256": "3ea1791aa085deb171e7e3d783a26891dd5cc663b4732443cbf8b0e17f34279b"
+    },
+    "timing-pilot/phase-core/additive/contract.json": {
+      "bytes": 430016,
+      "sha256": "30c058f60833d099b39a13175cff5d61d5304aff2a714088f9aeba5ea8ea221c"
+    },
+    "timing-pilot/phase-core/additive/resume/latest.ckpt": {
+      "bytes": 1212095,
+      "sha256": "0fcf5e037c2d7f7b359f714104e3101a9f88901c6f759185eda50bec18c6b1a5"
+    },
+    "timing-pilot/phase-core/additive/training_history.csv": {
+      "bytes": 4474,
+      "sha256": "0c35faf030f8f537578e3e790354af81558f7179635d72515815056de5e4ccdd"
+    },
+    "timing-pilot/phase-core/full-match/checkpoint.pt": {
+      "bytes": 987125,
+      "sha256": "ff4fb76ba88b542a8644ea7508309ef53085aac2b2b967ae0f8d2c82fb942655"
+    },
+    "timing-pilot/phase-core/full-match/contract.json": {
+      "bytes": 430020,
+      "sha256": "10103c6b001a27a51259f6d99fabff9e148fe4b8cbabc27e86573204f4ddb430"
+    },
+    "timing-pilot/phase-core/full-match/resume/latest.ckpt": {
+      "bytes": 1363159,
+      "sha256": "bd4ab32ad1939c764c9bb54350d827c5f275d90c8bb5f1332933b7b497607712"
+    },
+    "timing-pilot/phase-core/full-match/training_history.csv": {
+      "bytes": 4988,
+      "sha256": "6ea9310806b4e22b4427717a910b0795507a35a09a1c60b4b29ad85f51bd677d"
+    },
+    "timing-pilot/phase-core/teammate-set/checkpoint.pt": {
+      "bytes": 976373,
+      "sha256": "4c51e7e1005d7fd3bb487295689b64a5157d705c711ddf290573870d1b42270e"
+    },
+    "timing-pilot/phase-core/teammate-set/contract.json": {
+      "bytes": 430024,
+      "sha256": "b91bd987e4c82fad7ddc4618a2e4fc90684527a35111a474da1c42ab1169a16d"
+    },
+    "timing-pilot/phase-core/teammate-set/resume/latest.ckpt": {
+      "bytes": 1317383,
+      "sha256": "91c4cf7c6f8b431eb0df91906404d15672fcf7bfe75612ea232a89e41c436151"
+    },
+    "timing-pilot/phase-core/teammate-set/training_history.csv": {
+      "bytes": 4811,
+      "sha256": "61e697ab36c0521dba9a341e6667f6269237819da89eb3b58caa04607c61c98b"
+    },
+    "timing_pilot.json": {
+      "bytes": 1330,
+      "sha256": "7fab91876ce228da56ce97693952b0329c9b35a9d4ddb1152f665abe528913d6"
+    },
+    "training_history.csv": {
+      "bytes": 1161979,
+      "sha256": "13e96fd90d235da0ed20f22fd7383dc393a3c0978361ca43f1dd3efc8e37ebf7"
+    }
+  },
+  "git_commit": "962a0d9fdcea72b7880742394ce5c55d8bcfd3b2",
+  "migration_provenance": null,
+  "promotion": {
+    "eligible": false,
+    "note": "One-seed fixed-100-epoch reused Championship diagnostic."
+  },
+  "resolved_config": {
+    "artifact_schema": "2026-static-championship-core-v1",
+    "baseline_settings": {
+      "direct-total-pridge": {
+        "alpha": 1.0,
+        "fit_intercept": true,
+        "recency_decay": 0.7
+      },
+      "direct-total-ridge": {
+        "alpha": 1.0,
+        "fit_intercept": true
+      },
+      "mean-total": {
+        "target": "official alliance total"
+      }
+    },
+    "budget_minutes": 360.0,
+    "calibrators": [
+      {
+        "architecture": "additive",
+        "calibrator": "independent-platt",
+        "coefficient": 0.31762600786815615,
+        "development_model_hash": "4e97d1fe3af11dd429bdf161239231026624954485dff6d837213cf21968b3c1",
+        "development_prediction_hash": "fc46795cd5dd4cdabbe478be747df72929c034c89bee73f0994eb22b4253def4",
+        "intercept": 0.09029771383752498,
+        "source_match_key_hash": "38e6c93404c1bfd552b05dd6d2b6a85d7a501435390f83f80fa70c5966890bec",
+        "source_non_tie_count": 1625,
+        "source_row_count": 1642,
+        "supervision_mode": "phase-core"
+      },
+      {
+        "architecture": "additive",
+        "calibrator": "score-differential-logistic",
+        "coefficient": 0.015017448923490356,
+        "development_model_hash": "4e97d1fe3af11dd429bdf161239231026624954485dff6d837213cf21968b3c1",
+        "development_prediction_hash": "fc46795cd5dd4cdabbe478be747df72929c034c89bee73f0994eb22b4253def4",
+        "intercept": -0.24905206318781506,
+        "source_match_key_hash": "38e6c93404c1bfd552b05dd6d2b6a85d7a501435390f83f80fa70c5966890bec",
+        "source_non_tie_count": 1625,
+        "source_row_count": 1642,
+        "supervision_mode": "phase-core"
+      },
+      {
+        "architecture": "teammate-set",
+        "calibrator": "independent-platt",
+        "coefficient": 0.1437038170568018,
+        "development_model_hash": "70ea57b38f5547afd5c0931cbdec708e889ca1282c2964da3539463d3d3db6fc",
+        "development_prediction_hash": "c91ca9d663b6cf73a3f29f0ac93df4b0c744df8202d8eb4629788caf32a0f61d",
+        "intercept": 0.08512142510009385,
+        "source_match_key_hash": "38e6c93404c1bfd552b05dd6d2b6a85d7a501435390f83f80fa70c5966890bec",
+        "source_non_tie_count": 1625,
+        "source_row_count": 1642,
+        "supervision_mode": "phase-core"
+      },
+      {
+        "architecture": "teammate-set",
+        "calibrator": "score-differential-logistic",
+        "coefficient": 0.011381231416444941,
+        "development_model_hash": "70ea57b38f5547afd5c0931cbdec708e889ca1282c2964da3539463d3d3db6fc",
+        "development_prediction_hash": "c91ca9d663b6cf73a3f29f0ac93df4b0c744df8202d8eb4629788caf32a0f61d",
+        "intercept": -0.16717577038122655,
+        "source_match_key_hash": "38e6c93404c1bfd552b05dd6d2b6a85d7a501435390f83f80fa70c5966890bec",
+        "source_non_tie_count": 1625,
+        "source_row_count": 1642,
+        "supervision_mode": "phase-core"
+      },
+      {
+        "architecture": "full-match",
+        "calibrator": "independent-platt",
+        "coefficient": 0.14969693262838082,
+        "development_model_hash": "7007ee11fb6b470be8ab5abd2d73f49ed5e33bc9b1a031d5571e9b96d7856268",
+        "development_prediction_hash": "0dd31aae2e1b01d855fbac63f8dfe5702841012025a87ea875467835f6b9194f",
+        "intercept": 0.11074064050672235,
+        "source_match_key_hash": "38e6c93404c1bfd552b05dd6d2b6a85d7a501435390f83f80fa70c5966890bec",
+        "source_non_tie_count": 1625,
+        "source_row_count": 1642,
+        "supervision_mode": "phase-core"
+      },
+      {
+        "architecture": "full-match",
+        "calibrator": "score-differential-logistic",
+        "coefficient": 0.010878744724781552,
+        "development_model_hash": "7007ee11fb6b470be8ab5abd2d73f49ed5e33bc9b1a031d5571e9b96d7856268",
+        "development_prediction_hash": "0dd31aae2e1b01d855fbac63f8dfe5702841012025a87ea875467835f6b9194f",
+        "intercept": -0.10486379511015984,
+        "source_match_key_hash": "38e6c93404c1bfd552b05dd6d2b6a85d7a501435390f83f80fa70c5966890bec",
+        "source_non_tie_count": 1625,
+        "source_row_count": 1642,
+        "supervision_mode": "phase-core"
+      },
+      {
+        "architecture": "additive",
+        "calibrator": "independent-platt",
+        "coefficient": 0.31485862781209134,
+        "development_model_hash": "d6970e165a70d11995e3e16b425f5d41c48ada2bcf28d17f32f285c645ff59dc",
+        "development_prediction_hash": "ed0d1ec1f818f4dbc17fe3948c1ccd9c0e034033fd5b0623084c2ea953dff424",
+        "intercept": 0.09118047043171419,
+        "source_match_key_hash": "38e6c93404c1bfd552b05dd6d2b6a85d7a501435390f83f80fa70c5966890bec",
+        "source_non_tie_count": 1625,
+        "source_row_count": 1642,
+        "supervision_mode": "official-total-core"
+      },
+      {
+        "architecture": "additive",
+        "calibrator": "score-differential-logistic",
+        "coefficient": 0.014885401890920438,
+        "development_model_hash": "d6970e165a70d11995e3e16b425f5d41c48ada2bcf28d17f32f285c645ff59dc",
+        "development_prediction_hash": "ed0d1ec1f818f4dbc17fe3948c1ccd9c0e034033fd5b0623084c2ea953dff424",
+        "intercept": -0.2617580595663837,
+        "source_match_key_hash": "38e6c93404c1bfd552b05dd6d2b6a85d7a501435390f83f80fa70c5966890bec",
+        "source_non_tie_count": 1625,
+        "source_row_count": 1642,
+        "supervision_mode": "official-total-core"
+      },
+      {
+        "architecture": "teammate-set",
+        "calibrator": "independent-platt",
+        "coefficient": 0.17586149991604716,
+        "development_model_hash": "f7fc47c3c12693c4b1309b00ac5dad2ab81ea4b9414fb2ceb6afc7aa46107990",
+        "development_prediction_hash": "a583dd6c88dd16d5060a0d9f88b5b27a76b5aba1764e854b869c34d279594ed4",
+        "intercept": 0.08609139982701926,
+        "source_match_key_hash": "38e6c93404c1bfd552b05dd6d2b6a85d7a501435390f83f80fa70c5966890bec",
+        "source_non_tie_count": 1625,
+        "source_row_count": 1642,
+        "supervision_mode": "official-total-core"
+      },
+      {
+        "architecture": "teammate-set",
+        "calibrator": "score-differential-logistic",
+        "coefficient": 0.01100498074405554,
+        "development_model_hash": "f7fc47c3c12693c4b1309b00ac5dad2ab81ea4b9414fb2ceb6afc7aa46107990",
+        "development_prediction_hash": "a583dd6c88dd16d5060a0d9f88b5b27a76b5aba1764e854b869c34d279594ed4",
+        "intercept": -0.17948103073966362,
+        "source_match_key_hash": "38e6c93404c1bfd552b05dd6d2b6a85d7a501435390f83f80fa70c5966890bec",
+        "source_non_tie_count": 1625,
+        "source_row_count": 1642,
+        "supervision_mode": "official-total-core"
+      },
+      {
+        "architecture": "full-match",
+        "calibrator": "independent-platt",
+        "coefficient": 0.1573057349729971,
+        "development_model_hash": "5f4ab704edb934d8287e9ab4d55dc4a26ed90b9d7551e4b659d91e7cf547e19e",
+        "development_prediction_hash": "e42e649670e4962310190d4dde5753015bc1a50eac6138d73253777ebecca792",
+        "intercept": 0.11841668412572148,
+        "source_match_key_hash": "38e6c93404c1bfd552b05dd6d2b6a85d7a501435390f83f80fa70c5966890bec",
+        "source_non_tie_count": 1625,
+        "source_row_count": 1642,
+        "supervision_mode": "official-total-core"
+      },
+      {
+        "architecture": "full-match",
+        "calibrator": "score-differential-logistic",
+        "coefficient": 0.01025944081065658,
+        "development_model_hash": "5f4ab704edb934d8287e9ab4d55dc4a26ed90b9d7551e4b659d91e7cf547e19e",
+        "development_prediction_hash": "e42e649670e4962310190d4dde5753015bc1a50eac6138d73253777ebecca792",
+        "intercept": -0.12451879357022394,
+        "source_match_key_hash": "38e6c93404c1bfd552b05dd6d2b6a85d7a501435390f83f80fa70c5966890bec",
+        "source_non_tie_count": 1625,
+        "source_row_count": 1642,
+        "supervision_mode": "official-total-core"
+      }
+    ],
+    "calibrators_sha256": "d2132afedfda5f952985ca60995424c0db3e42eabe83853814c73079920528fb",
+    "championship_event_keys": [
+      "2026arc",
+      "2026cur",
+      "2026dal",
+      "2026gal",
+      "2026hop",
+      "2026joh",
+      "2026mil",
+      "2026new"
+    ],
+    "configurations": [
+      {
+        "architecture": "additive",
+        "supervision_mode": "phase-core"
+      },
+      {
+        "architecture": "teammate-set",
+        "supervision_mode": "phase-core"
+      },
+      {
+        "architecture": "full-match",
+        "supervision_mode": "phase-core"
+      },
+      {
+        "architecture": "additive",
+        "supervision_mode": "official-total-core"
+      },
+      {
+        "architecture": "teammate-set",
+        "supervision_mode": "official-total-core"
+      },
+      {
+        "architecture": "full-match",
+        "supervision_mode": "official-total-core"
+      }
+    ],
+    "created_at_utc": "2026-07-13T00:58:53.849939+00:00",
+    "decision_rules": "comparison-specific practical tolerances with event bootstrap and leave-one-division-out veto",
+    "development_predictions_sha256": "4f859280e460f364028929403bc99d30bc32e687a3417406279705fdcf567200",
+    "einstein_event_key": "2026cmptx",
+    "epochs": 100,
+    "events_sha256": "debe4a9ef20863944ac26c1dd38efb238b3fb0260601395a5132336d08668b63",
+    "evidence_role": "reused-diagnostic-holdout",
+    "features_sha256": "00908ea599ad4b9d018c4d65ab357ebca4cb84bce676ec5236e316fe9348849d",
+    "git_clean": true,
+    "git_commit": "962a0d9fdcea72b7880742394ce5c55d8bcfd3b2",
+    "historical_reference_sha256": "9b560b220f93c64116c0c3d010b60f96aed06a5721db1bab8360665f0bf37842",
+    "latent_dim": 16,
+    "lockfile_sha256": "559a16212dd3313be417460868fd2878473c0c003e16e2614df0566299f9b530",
+    "loss_weights": {
+      "embedding": 1.0,
+      "score": 1.0,
+      "win": 1.0
+    },
+    "match_key_hashes": {
+      "championship_test": "ef38f7b6a3f970230debb0009c3188aeec656a0f00d44b65986a5b3817f37337",
+      "development_holdout": "38e6c93404c1bfd552b05dd6d2b6a85d7a501435390f83f80fa70c5966890bec",
+      "development_train": "5ca014e7e1c4dabf89f7b24bc45713964226c979dced4a1e68c54674c2985110",
+      "final_train": "5a9fa566d783654a22105c4866b76e85a2e8e39a70b2f316a07d8e32428f926a"
+    },
+    "optimizer": {
+      "batch_size": 256,
+      "early_stopping": false,
+      "max_grad_norm": 5.0,
+      "name": "AdamW",
+      "restore_best": false,
+      "scheduler": "cosine",
+      "scheduler_horizon_epochs": 100
+    },
+    "prior_checkpoint_sha256": "e0c729f3cb2bfd1bb740f53188aaaeffb3e8ffecff556fcb56dc87c67a85aa6f",
+    "promotion_eligible": false,
+    "relevant_source_hashes": {
+      "src\\latentstrat\\config.py": "3808e37a68a716e5affe16ad90c0d3ad8e5099c83370d460417789485b5b0fe2",
+      "src\\latentstrat\\season\\championship_study.py": "c5236f3de76baab15e2ecd8b0716fe51bbaf5d1f8e30db88f74fcf66b0621428",
+      "src\\latentstrat\\season\\model.py": "5fda623391749c22ececabeb655f8d1d6ff1aeac1291caece9b940fd29fb5754",
+      "src\\latentstrat\\season\\static_core.py": "d5a1d2f94ea6be3fc7c568425aebe240ca3ce6478a0e9dccab0d7a416c43630f",
+      "src\\latentstrat\\season\\train.py": "7926547f6dbefb644b01967e9cb8a0a19cffa40095b623caa8f81e3ea4ca628b"
+    },
+    "season": 2026,
+    "seed": 2026,
+    "split_manifest_sha256": "a01afb54dc358bb63a0f2b3ebf5f6da749cd0ffb05722862ef22a3ef88596771",
+    "state_model": "static-z-base",
+    "study_id": "20260712-233618-c957c753c7",
+    "tensorboard_logdir": "runs\\2026-static-championship-core\\20260712-233618-c957c753c7"
+  },
+  "runtime_provenance": {
+    "device": "cpu",
+    "executable": "C:\\Users\\Jelle\\Documents\\Git\\FRC\\LatentStrat\\.venv\\Scripts\\python.exe",
+    "numpy_version": "2.4.6",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python_implementation": "CPython",
+    "python_version": "3.12.10",
+    "torch_num_interop_threads": 16,
+    "torch_num_threads": 16,
+    "torch_version": "2.12.0+cpu"
+  },
+  "schema_version": 1,
+  "sources": {
+    "events": {
+      "bytes": 11801,
+      "path": "data/features/season/events_2026.parquet",
+      "sha256": "debe4a9ef20863944ac26c1dd38efb238b3fb0260601395a5132336d08668b63"
+    },
+    "features": {
+      "bytes": 1767229,
+      "path": "data/features/season/features_v58_2026.parquet",
+      "sha256": "00908ea599ad4b9d018c4d65ab357ebca4cb84bce676ec5236e316fe9348849d"
+    },
+    "historical_reference": {
+      "bytes": 2330011,
+      "path": "artifacts/reference/2026-static-z-base/walk_forward_predictions.parquet",
+      "sha256": "9b560b220f93c64116c0c3d010b60f96aed06a5721db1bab8360665f0bf37842"
+    },
+    "prior_checkpoint": {
+      "bytes": 1080062,
+      "path": "artifacts/pretraining/prior/prior_v564_latent16/checkpoint.pt",
+      "sha256": "e0c729f3cb2bfd1bb740f53188aaaeffb3e8ffecff556fcb56dc87c67a85aa6f"
+    }
+  },
+  "workflow": "season.2026-static-championship-core"
+}

@@ -20,6 +20,13 @@ This non-promotable diagnostic asks one question:
 
 The experiment does not compare static and temporal state. Persistent bias would motivate a controlled time/event-context experiment; it would not prove that temporal state is either the cause or the solution.
 
+The formal matrix completed on July 12, 2026. Direct official-total supervision was supported only
+for the additive architecture, where it reduced Championship score RMSE by `2.76%` but left a
+`-56.6`-point mean bias. Teammate interaction was harmful relative to additive strength under both
+supervision modes at epoch 100; opponent interaction remained uncertain relative to teammate-only.
+Read the [authoritative report](2026-static-championship-core-report.md) for the complete metrics,
+calibration transfer, bootstrap, leave-one-division-out, and interpretation boundaries.
+
 ## Matrix
 
 The study crosses two score targets with three match architectures:
@@ -76,5 +83,9 @@ The Research Workbench recognizes the study manifest and separates history, the 
 ## Evidence and report
 
 The durable study directory contains the split and frozen contracts, six development and six refit histories, calibrators, epoch-100 Championship predictions, baselines, metrics, calibration, bias slices, event bootstraps, leave-one-division-out results, parameter utilization, and hashes. `report_data.json` drives one report whose bytes are copied to both the artifact directory and `docs/2026-static-championship-core-report.md`.
+
+The 96 development/refit checkpoint and resume files are published outside Git as one release
+asset. `checkpoint_bundle.json` records its URL, byte size, SHA-256 digest, included roots, and the
+source manifest digest; `manifest.json` retains hashes for every individual checkpoint file.
 
 The formal report is intentionally absent until all 12 leaves are terminal. The implementation and two-epoch smoke do not answer the scientific question.

@@ -1,0 +1,48 @@
+{
+  "budget_seconds": 21600.0,
+  "development_rows": 15373,
+  "leaves": [
+    {
+      "architecture": "additive",
+      "mean_epoch_seconds": 7.816953799992916,
+      "measured_epochs": 2,
+      "supervision_mode": "phase-core"
+    },
+    {
+      "architecture": "teammate-set",
+      "mean_epoch_seconds": 8.453860699999495,
+      "measured_epochs": 2,
+      "supervision_mode": "phase-core"
+    },
+    {
+      "architecture": "full-match",
+      "mean_epoch_seconds": 13.938669099996332,
+      "measured_epochs": 2,
+      "supervision_mode": "phase-core"
+    },
+    {
+      "architecture": "additive",
+      "mean_epoch_seconds": 3.201864200003911,
+      "measured_epochs": 2,
+      "supervision_mode": "official-total-core"
+    },
+    {
+      "architecture": "teammate-set",
+      "mean_epoch_seconds": 8.345581900008256,
+      "measured_epochs": 2,
+      "supervision_mode": "official-total-core"
+    },
+    {
+      "architecture": "full-match",
+      "mean_epoch_seconds": 19.095061400003033,
+      "measured_epochs": 2,
+      "supervision_mode": "official-total-core"
+    }
+  ],
+  "passes": true,
+  "projected_seconds": 12825.9039590342,
+  "projected_seconds_with_margin": 15391.084750841039,
+  "refit_rows": 17029,
+  "row_ratio": 1.1077213296038508,
+  "safety_margin": 1.2
+}

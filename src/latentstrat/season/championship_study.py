@@ -751,6 +751,47 @@ def _render_report(
             "",
         ]
     )
+    if complete and not diagnostics_table.empty:
+        score_best_epochs = diagnostics_table["best_score_epoch"].astype(int)
+        differential_best_epochs = diagnostics_table["best_differential_epoch"].astype(int)
+        probability_best_epochs = pd.concat(
+            [
+                diagnostics_table["best_brier_epoch"],
+                diagnostics_table["best_log_loss_epoch"],
+            ],
+            ignore_index=True,
+        ).astype(int)
+        z_updates = diagnostics_table["final_z_base_update"].astype(float)
+        phase_bias = float(pivot.loc[("phase-core", "additive"), "mean_bias"])
+        total_bias = float(pivot.loc[("official-total-core", "additive"), "mean_bias"])
+        lines.extend(
+            [
+                "### Direct answers about the long horizon",
+                "",
+                f"- Direct totals made mean bias less negative in all three architectures, but "
+                f"only the additive comparison met the full support rule: its bias changed from "
+                f"`{phase_bias:.1f}` to `{total_bias:.1f}` points. The remaining bias is still "
+                "material.",
+                f"- Extra epochs mostly reduced training loss after forecast quality had stopped "
+                f"improving. Development score RMSE reached its optimum between epochs "
+                f"{score_best_epochs.min()} and {score_best_epochs.max()}, never at epoch 100.",
+                f"- Relative-strength estimates did not keep improving through epoch 100: "
+                f"score-differential RMSE reached its development optimum between epochs "
+                f"{differential_best_epochs.min()} and {differential_best_epochs.max()}.",
+                f"- Probability quality worsened after an earlier optimum. Brier and log-loss "
+                f"optima occurred between epochs {probability_best_epochs.min()} and "
+                f"{probability_best_epochs.max()}, while every epoch-100 value was worse.",
+                f"- `Z_base` changed measurably: mean update distance ended between "
+                f"`{z_updates.min():.3f}` and `{z_updates.max():.3f}` across development leaves. "
+                "This quantifies movement, not semantic meaning or useful adaptation.",
+                "- The long horizon did not help the interaction architectures at the formal "
+                "checkpoint. Teammate models were harmful versus additive strength in both "
+                "supervision modes; opponent interaction was uncertain versus teammate-only and "
+                "harmful versus additive. This is fixed-horizon sensitivity, not an intrinsic "
+                "architecture ranking.",
+                "",
+            ]
+        )
     calibration_table = neural[
         neural["scope"].eq("primary-clean")
         & neural["metric"].isin(["winner_brier", "winner_log_loss", "winner_ece"])
@@ -865,12 +906,13 @@ def _render_report(
             "",
             "## Next Decision",
             "",
-            "Use the supported parts of this matrix as the fixed static control for one next "
-            "experiment. If material score bias remains, vary only time/event context while "
-            "holding the selected supervision, interaction architecture, split, fixed loss, and "
-            "100-epoch horizon constant. Repeat across seeds before any promotion claim. "
-            "Persistent bias motivates that test but does not prove a temporal model will "
-            "solve it.",
+            "Use official-total additive as the fixed static control for one next experiment. "
+            "Compare it against one minimal week/event-context model while holding the exact "
+            "split, fixed loss, initialization, and optimizer contract constant. Treat 100 epochs "
+            "as the maximum trajectory, select duration only on a sealed non-Championship "
+            "development block, refit for that frozen duration, and evaluate Championship once. "
+            "Run at least three seeds before any promotion claim. Persistent bias motivates this "
+            "test but does not prove a temporal model will solve it.",
             "",
         ]
     )

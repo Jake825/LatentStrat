@@ -1,0 +1,249 @@
+{
+  "artifact_schema": "2026-static-championship-core-v1",
+  "baseline_settings": {
+    "direct-total-pridge": {
+      "alpha": 1.0,
+      "fit_intercept": true,
+      "recency_decay": 0.7
+    },
+    "direct-total-ridge": {
+      "alpha": 1.0,
+      "fit_intercept": true
+    },
+    "mean-total": {
+      "target": "official alliance total"
+    }
+  },
+  "budget_minutes": 360.0,
+  "calibrators": [
+    {
+      "architecture": "additive",
+      "calibrator": "independent-platt",
+      "coefficient": 0.31762600786815615,
+      "development_model_hash": "4e97d1fe3af11dd429bdf161239231026624954485dff6d837213cf21968b3c1",
+      "development_prediction_hash": "fc46795cd5dd4cdabbe478be747df72929c034c89bee73f0994eb22b4253def4",
+      "intercept": 0.09029771383752498,
+      "source_match_key_hash": "38e6c93404c1bfd552b05dd6d2b6a85d7a501435390f83f80fa70c5966890bec",
+      "source_non_tie_count": 1625,
+      "source_row_count": 1642,
+      "supervision_mode": "phase-core"
+    },
+    {
+      "architecture": "additive",
+      "calibrator": "score-differential-logistic",
+      "coefficient": 0.015017448923490356,
+      "development_model_hash": "4e97d1fe3af11dd429bdf161239231026624954485dff6d837213cf21968b3c1",
+      "development_prediction_hash": "fc46795cd5dd4cdabbe478be747df72929c034c89bee73f0994eb22b4253def4",
+      "intercept": -0.24905206318781506,
+      "source_match_key_hash": "38e6c93404c1bfd552b05dd6d2b6a85d7a501435390f83f80fa70c5966890bec",
+      "source_non_tie_count": 1625,
+      "source_row_count": 1642,
+      "supervision_mode": "phase-core"
+    },
+    {
+      "architecture": "teammate-set",
+      "calibrator": "independent-platt",
+      "coefficient": 0.1437038170568018,
+      "development_model_hash": "70ea57b38f5547afd5c0931cbdec708e889ca1282c2964da3539463d3d3db6fc",
+      "development_prediction_hash": "c91ca9d663b6cf73a3f29f0ac93df4b0c744df8202d8eb4629788caf32a0f61d",
+      "intercept": 0.08512142510009385,
+      "source_match_key_hash": "38e6c93404c1bfd552b05dd6d2b6a85d7a501435390f83f80fa70c5966890bec",
+      "source_non_tie_count": 1625,
+      "source_row_count": 1642,
+      "supervision_mode": "phase-core"
+    },
+    {
+      "architecture": "teammate-set",
+      "calibrator": "score-differential-logistic",
+      "coefficient": 0.011381231416444941,
+      "development_model_hash": "70ea57b38f5547afd5c0931cbdec708e889ca1282c2964da3539463d3d3db6fc",
+      "development_prediction_hash": "c91ca9d663b6cf73a3f29f0ac93df4b0c744df8202d8eb4629788caf32a0f61d",
+      "intercept": -0.16717577038122655,
+      "source_match_key_hash": "38e6c93404c1bfd552b05dd6d2b6a85d7a501435390f83f80fa70c5966890bec",
+      "source_non_tie_count": 1625,
+      "source_row_count": 1642,
+      "supervision_mode": "phase-core"
+    },
+    {
+      "architecture": "full-match",
+      "calibrator": "independent-platt",
+      "coefficient": 0.14969693262838082,
+      "development_model_hash": "7007ee11fb6b470be8ab5abd2d73f49ed5e33bc9b1a031d5571e9b96d7856268",
+      "development_prediction_hash": "0dd31aae2e1b01d855fbac63f8dfe5702841012025a87ea875467835f6b9194f",
+      "intercept": 0.11074064050672235,
+      "source_match_key_hash": "38e6c93404c1bfd552b05dd6d2b6a85d7a501435390f83f80fa70c5966890bec",
+      "source_non_tie_count": 1625,
+      "source_row_count": 1642,
+      "supervision_mode": "phase-core"
+    },
+    {
+      "architecture": "full-match",
+      "calibrator": "score-differential-logistic",
+      "coefficient": 0.010878744724781552,
+      "development_model_hash": "7007ee11fb6b470be8ab5abd2d73f49ed5e33bc9b1a031d5571e9b96d7856268",
+      "development_prediction_hash": "0dd31aae2e1b01d855fbac63f8dfe5702841012025a87ea875467835f6b9194f",
+      "intercept": -0.10486379511015984,
+      "source_match_key_hash": "38e6c93404c1bfd552b05dd6d2b6a85d7a501435390f83f80fa70c5966890bec",
+      "source_non_tie_count": 1625,
+      "source_row_count": 1642,
+      "supervision_mode": "phase-core"
+    },
+    {
+      "architecture": "additive",
+      "calibrator": "independent-platt",
+      "coefficient": 0.31485862781209134,
+      "development_model_hash": "d6970e165a70d11995e3e16b425f5d41c48ada2bcf28d17f32f285c645ff59dc",
+      "development_prediction_hash": "ed0d1ec1f818f4dbc17fe3948c1ccd9c0e034033fd5b0623084c2ea953dff424",
+      "intercept": 0.09118047043171419,
+      "source_match_key_hash": "38e6c93404c1bfd552b05dd6d2b6a85d7a501435390f83f80fa70c5966890bec",
+      "source_non_tie_count": 1625,
+      "source_row_count": 1642,
+      "supervision_mode": "official-total-core"
+    },
+    {
+      "architecture": "additive",
+      "calibrator": "score-differential-logistic",
+      "coefficient": 0.014885401890920438,
+      "development_model_hash": "d6970e165a70d11995e3e16b425f5d41c48ada2bcf28d17f32f285c645ff59dc",
+      "development_prediction_hash": "ed0d1ec1f818f4dbc17fe3948c1ccd9c0e034033fd5b0623084c2ea953dff424",
+      "intercept": -0.2617580595663837,
+      "source_match_key_hash": "38e6c93404c1bfd552b05dd6d2b6a85d7a501435390f83f80fa70c5966890bec",
+      "source_non_tie_count": 1625,
+      "source_row_count": 1642,
+      "supervision_mode": "official-total-core"
+    },
+    {
+      "architecture": "teammate-set",
+      "calibrator": "independent-platt",
+      "coefficient": 0.17586149991604716,
+      "development_model_hash": "f7fc47c3c12693c4b1309b00ac5dad2ab81ea4b9414fb2ceb6afc7aa46107990",
+      "development_prediction_hash": "a583dd6c88dd16d5060a0d9f88b5b27a76b5aba1764e854b869c34d279594ed4",
+      "intercept": 0.08609139982701926,
+      "source_match_key_hash": "38e6c93404c1bfd552b05dd6d2b6a85d7a501435390f83f80fa70c5966890bec",
+      "source_non_tie_count": 1625,
+      "source_row_count": 1642,
+      "supervision_mode": "official-total-core"
+    },
+    {
+      "architecture": "teammate-set",
+      "calibrator": "score-differential-logistic",
+      "coefficient": 0.01100498074405554,
+      "development_model_hash": "f7fc47c3c12693c4b1309b00ac5dad2ab81ea4b9414fb2ceb6afc7aa46107990",
+      "development_prediction_hash": "a583dd6c88dd16d5060a0d9f88b5b27a76b5aba1764e854b869c34d279594ed4",
+      "intercept": -0.17948103073966362,
+      "source_match_key_hash": "38e6c93404c1bfd552b05dd6d2b6a85d7a501435390f83f80fa70c5966890bec",
+      "source_non_tie_count": 1625,
+      "source_row_count": 1642,
+      "supervision_mode": "official-total-core"
+    },
+    {
+      "architecture": "full-match",
+      "calibrator": "independent-platt",
+      "coefficient": 0.1573057349729971,
+      "development_model_hash": "5f4ab704edb934d8287e9ab4d55dc4a26ed90b9d7551e4b659d91e7cf547e19e",
+      "development_prediction_hash": "e42e649670e4962310190d4dde5753015bc1a50eac6138d73253777ebecca792",
+      "intercept": 0.11841668412572148,
+      "source_match_key_hash": "38e6c93404c1bfd552b05dd6d2b6a85d7a501435390f83f80fa70c5966890bec",
+      "source_non_tie_count": 1625,
+      "source_row_count": 1642,
+      "supervision_mode": "official-total-core"
+    },
+    {
+      "architecture": "full-match",
+      "calibrator": "score-differential-logistic",
+      "coefficient": 0.01025944081065658,
+      "development_model_hash": "5f4ab704edb934d8287e9ab4d55dc4a26ed90b9d7551e4b659d91e7cf547e19e",
+      "development_prediction_hash": "e42e649670e4962310190d4dde5753015bc1a50eac6138d73253777ebecca792",
+      "intercept": -0.12451879357022394,
+      "source_match_key_hash": "38e6c93404c1bfd552b05dd6d2b6a85d7a501435390f83f80fa70c5966890bec",
+      "source_non_tie_count": 1625,
+      "source_row_count": 1642,
+      "supervision_mode": "official-total-core"
+    }
+  ],
+  "calibrators_sha256": "d2132afedfda5f952985ca60995424c0db3e42eabe83853814c73079920528fb",
+  "championship_event_keys": [
+    "2026arc",
+    "2026cur",
+    "2026dal",
+    "2026gal",
+    "2026hop",
+    "2026joh",
+    "2026mil",
+    "2026new"
+  ],
+  "configurations": [
+    {
+      "architecture": "additive",
+      "supervision_mode": "phase-core"
+    },
+    {
+      "architecture": "teammate-set",
+      "supervision_mode": "phase-core"
+    },
+    {
+      "architecture": "full-match",
+      "supervision_mode": "phase-core"
+    },
+    {
+      "architecture": "additive",
+      "supervision_mode": "official-total-core"
+    },
+    {
+      "architecture": "teammate-set",
+      "supervision_mode": "official-total-core"
+    },
+    {
+      "architecture": "full-match",
+      "supervision_mode": "official-total-core"
+    }
+  ],
+  "created_at_utc": "2026-07-13T00:58:53.849939+00:00",
+  "decision_rules": "comparison-specific practical tolerances with event bootstrap and leave-one-division-out veto",
+  "development_predictions_sha256": "4f859280e460f364028929403bc99d30bc32e687a3417406279705fdcf567200",
+  "einstein_event_key": "2026cmptx",
+  "epochs": 100,
+  "events_sha256": "debe4a9ef20863944ac26c1dd38efb238b3fb0260601395a5132336d08668b63",
+  "evidence_role": "reused-diagnostic-holdout",
+  "features_sha256": "00908ea599ad4b9d018c4d65ab357ebca4cb84bce676ec5236e316fe9348849d",
+  "git_clean": true,
+  "git_commit": "962a0d9fdcea72b7880742394ce5c55d8bcfd3b2",
+  "historical_reference_sha256": "9b560b220f93c64116c0c3d010b60f96aed06a5721db1bab8360665f0bf37842",
+  "latent_dim": 16,
+  "lockfile_sha256": "559a16212dd3313be417460868fd2878473c0c003e16e2614df0566299f9b530",
+  "loss_weights": {
+    "embedding": 1.0,
+    "score": 1.0,
+    "win": 1.0
+  },
+  "match_key_hashes": {
+    "championship_test": "ef38f7b6a3f970230debb0009c3188aeec656a0f00d44b65986a5b3817f37337",
+    "development_holdout": "38e6c93404c1bfd552b05dd6d2b6a85d7a501435390f83f80fa70c5966890bec",
+    "development_train": "5ca014e7e1c4dabf89f7b24bc45713964226c979dced4a1e68c54674c2985110",
+    "final_train": "5a9fa566d783654a22105c4866b76e85a2e8e39a70b2f316a07d8e32428f926a"
+  },
+  "optimizer": {
+    "batch_size": 256,
+    "early_stopping": false,
+    "max_grad_norm": 5.0,
+    "name": "AdamW",
+    "restore_best": false,
+    "scheduler": "cosine",
+    "scheduler_horizon_epochs": 100
+  },
+  "prior_checkpoint_sha256": "e0c729f3cb2bfd1bb740f53188aaaeffb3e8ffecff556fcb56dc87c67a85aa6f",
+  "promotion_eligible": false,
+  "relevant_source_hashes": {
+    "src\\latentstrat\\config.py": "3808e37a68a716e5affe16ad90c0d3ad8e5099c83370d460417789485b5b0fe2",
+    "src\\latentstrat\\season\\championship_study.py": "c5236f3de76baab15e2ecd8b0716fe51bbaf5d1f8e30db88f74fcf66b0621428",
+    "src\\latentstrat\\season\\model.py": "5fda623391749c22ececabeb655f8d1d6ff1aeac1291caece9b940fd29fb5754",
+    "src\\latentstrat\\season\\static_core.py": "d5a1d2f94ea6be3fc7c568425aebe240ca3ce6478a0e9dccab0d7a416c43630f",
+    "src\\latentstrat\\season\\train.py": "7926547f6dbefb644b01967e9cb8a0a19cffa40095b623caa8f81e3ea4ca628b"
+  },
+  "season": 2026,
+  "seed": 2026,
+  "split_manifest_sha256": "a01afb54dc358bb63a0f2b3ebf5f6da749cd0ffb05722862ef22a3ef88596771",
+  "state_model": "static-z-base",
+  "study_id": "20260712-233618-c957c753c7",
+  "tensorboard_logdir": "runs\\2026-static-championship-core\\20260712-233618-c957c753c7"
+}

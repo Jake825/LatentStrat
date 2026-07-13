@@ -1,0 +1,4 @@
+baseline,coefficient,intercept,alpha,fit_intercept,recency_decay,design,target,dq_masked
+mean-total,0.0,0.10717471003530152,,True,,alliance three-team binary incidence,official alliance total,True
+direct-total-ridge,0.015115799060147943,0.05803654794568203,1.0,True,,alliance three-team binary incidence,official alliance total,True
+direct-total-pridge,0.015115953084415226,0.052083397858019,1.0,True,0.7,alliance three-team binary incidence,official alliance total,True

@@ -276,6 +276,24 @@ def test_checkpoint_summaries_cover_v5_prior_and_match_breakdown(tmp_path: Path)
     assert summary.parameter_count == 12
 
 
+def test_checkpoint_summary_counts_shared_parameter_alias_once(tmp_path: Path) -> None:
+    path = tmp_path / "shared_checkpoint.pt"
+    shared = torch.ones((9, 4))
+    payload = {
+        "checkpoint_schema_version": 8,
+        "model_state_dict": {
+            "Z_base.weight": shared,
+            "team_embedding.weight": shared,
+            "head.weight": torch.ones((1, 4)),
+        },
+        "options": {"season": 2026},
+    }
+
+    summary = checkpoint_summary(path, payload)
+
+    assert summary.parameter_count == 40
+
+
 def test_scouting_is_read_at_native_grain_and_traced_to_features(tmp_path: Path) -> None:
     path = tmp_path / "data" / "scouting" / "scouting.db"
     path.parent.mkdir(parents=True)

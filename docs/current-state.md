@@ -19,11 +19,14 @@ organized for continued pretraining work.
   is a research reference and does not replace the schema-`6` default.
 - Static reliability follow-up: the smoke path completed, but the first full week-4 development
   grid rejected every common duration from epochs 15-40 after selecting clip `5`. No three-seed
-  test folds ran. The project is paused at the
+  test folds ran. Its failure analysis is preserved in the
   [2026 static training postmortem](2026-static-training-postmortem.md).
-- Fixed-100 Championship diagnostic: implementation and browser-validated two-epoch smoke are
-  complete. The formal 12-run campaign is the next controlled action; no result is claimed before
-  its 100-epoch matrix and report finish.
+- Fixed-100 Championship diagnostic: all six development and six final-refit trajectories completed
+  at 100 epochs. Direct official-total supervision modestly improved the additive static model,
+  while both interaction architectures were harmful relative to additive strength at this fixed
+  horizon. The remaining `-56.6`-point additive bias and early development optima make this
+  non-promotable evidence. See the
+  [authoritative report](2026-static-championship-core-report.md).
 - CPU-first PyTorch runtime: shared seeded optimizer steps, accumulation, clipping, cosine or one-cycle scheduling, TensorBoard telemetry, and epoch-exact resume checkpoints across training workflows.
 - Match-breakdown V1: offline all-years 16D alliance-result artifact.
 - Match-breakdown V2: explicit structured-objective ablation. It is implemented but not promoted.
@@ -76,10 +79,17 @@ These values are development evidence rather than an unbiased promotion estimate
 - The completed static reference systematically underpredicted alliance scores in weeks 6, 8, and
   10. The measured causes and remaining hypotheses are separated in the postmortem; this evidence
   does not justify a larger model or a temporal-state architecture by itself.
+- The fixed-100 Championship diagnostic still underpredicted official alliance totals by `-56.6`
+  points in its best neural configuration. Official-total additive improved score RMSE by `2.76%`
+  over phase-core additive, but rolling pRidge remained slightly better on score, differential, and
+  calibrated probability metrics. Interaction-model development metrics peaked around epochs
+  3-7 and deteriorated substantially by epoch 100 while training loss kept falling.
 - The runtime overhaul changes optimizer trajectories; it is implemented and regression-tested, but empirical promotion still requires the documented multi-seed calibration and non-inferiority comparison.
 - Honest temporal evaluation is implemented for the static 2026 reference path. The reliability
-  follow-up stopped at its development gate, so multi-seed architecture evidence is still absent.
-  Later temporal-state architectures remain roadmap work.
+  follow-up stopped at its development gate, and the Championship diagnostic used one seed and a
+  reused holdout, so multi-seed promotion evidence is still absent. The next controlled experiment
+  should compare event or week context against the official-total additive static control without
+  changing the split, loss, or horizon.
 - Match-breakdown artifacts are offline representation artifacts, not leakage-safe walk-forward
   promotion evidence.
 - Match-breakdown runtime score attachment remains disabled.

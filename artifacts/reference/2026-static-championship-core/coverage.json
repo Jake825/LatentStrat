@@ -1,0 +1,22 @@
+{
+  "championship_rows": 1119,
+  "complete": true,
+  "development_holdout_rows": 1642,
+  "development_train_rows": 15373,
+  "einstein_rows": 16,
+  "elapsed_seconds": 9579.13143909999,
+  "evidence_role": "reused-diagnostic-holdout",
+  "failed_leaves": [],
+  "filtering": {
+    "excluded_missing_week": 0,
+    "excluded_non_2026": 0,
+    "excluded_non_official": 31,
+    "excluded_unplayed": 0,
+    "excluded_week_zero_or_nonstandard": 0,
+    "included_rows": 18164,
+    "input_rows": 18195
+  },
+  "final_train_rows": 17029,
+  "frozen_final_contract_sha256": "e69f0cc457e2818cddd219f6e259b6a9b7edee426f0e6513fc8042ee35cf6df0",
+  "promotion_eligible": false
+}
